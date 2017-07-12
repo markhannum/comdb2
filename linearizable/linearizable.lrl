@@ -69,6 +69,9 @@ init_with_compr_blobs none
 # Dump blkseq additions
 on dump_blkseq
 
+# Force work_appsock_failures
+on debug_appsock_failure
+
 # Make sure that the blkseq code works correctly
 #on test_blkseq_replay
 

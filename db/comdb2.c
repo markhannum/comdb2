@@ -818,6 +818,7 @@ extern int gbl_uses_password;
 
 extern int gbl_direct_count;
 extern int gbl_parallel_count;
+extern int gbl_debug_appsock_failure;
 
 int gbl_bbenv;
 
@@ -8534,6 +8535,9 @@ static void register_all_int_switches()
     register_int_switch("parallel_count",
                         "When 'direct_count' is on, enable thread-per-stripe",
                         &gbl_parallel_count);
+    register_int_switch("debug_appsock_failure",
+                        "Force appsock failures in unusual places",
+                        &gbl_debug_appsock_failure);
 }
 
 static void getmyid(void)

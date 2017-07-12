@@ -5668,6 +5668,8 @@ static void sqlengine_work_lua_thread(struct thdpool *pool, void *work,
     thrman_setid(thrman_self(), "[done]");
 }
 
+int gbl_debug_appsock_failure;
+
 static void sqlengine_work_appsock(struct thdpool *pool, void *work,
                                    void *thddata)
 {
@@ -5710,8 +5712,9 @@ static void sqlengine_work_appsock(struct thdpool *pool, void *work,
         unlock_schema_lk();
     }
 
-
-    if (unlikely(!thd->sqldb)) {
+    // This has to be the bug
+    if (unlikely(!thd->sqldb) || 
+            (gbl_debug_appsock_failure && !(rand() % 1000))) {
         /* unplausable, but anyway */
         clnt->query_rc = -1;
         pthread_mutex_lock(&clnt->wait_mutex);
@@ -5754,9 +5757,17 @@ static void sqlengine_work_appsock(struct thdpool *pool, void *work,
     /* Set whatever mode this client needs */
     rc = sql_set_transaction_mode(thd->sqldb, clnt, clnt->dbtran.mode);
     if (rc) {
+//    Enable this (and fix) later 
+//    if (rc || (gbl_debug_appsock_failure && !(rand() % 1000))) {
         send_prepare_error(clnt, "Failed to set transaction mode.", 0);
         reqlog_logf(thd->logger, REQL_TRACE,
                     "Failed to set transaction mode.\n");
+        /*
+        if (put_curtran(thedb->bdb_env, clnt)) {
+            logmsg(LOGMSG_ERROR, "%s: unable to destroy a CURSOR transaction!\n",
+                    __func__);
+        }
+        */
         clnt->query_rc = 0;
         pthread_mutex_lock(&clnt->wait_mutex);
         clnt->done = 1;
