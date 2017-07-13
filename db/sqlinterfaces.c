@@ -5675,7 +5675,7 @@ static void sqlengine_work_lua_thread(struct thdpool *pool, void *work,
     thrman_setid(thrman_self(), "[done]");
 }
 
-int gbl_debug_appsock_failures;
+int gbl_debug_sqlthd_failures;
 
 static void sqlengine_work_appsock(struct thdpool *pool, void *work,
                                    void *thddata)
@@ -5721,7 +5721,7 @@ static void sqlengine_work_appsock(struct thdpool *pool, void *work,
 
     int debug_appsock = 0;
     if (unlikely(!thd->sqldb) || 
-            (gbl_debug_appsock_failures && (debug_appsock = !(rand() % 1000)))) {
+            (gbl_debug_sqlthd_failures && (debug_appsock = !(rand() % 1000)))) {
         /* unplausable, but anyway */
         logmsg(LOGMSG_ERROR, "%s line %d: exiting on null thd->sqldb\n", __func__, 
                 __LINE__);
@@ -5769,7 +5769,7 @@ static void sqlengine_work_appsock(struct thdpool *pool, void *work,
 
     /* Set whatever mode this client needs */
     rc = sql_set_transaction_mode(thd->sqldb, clnt, clnt->dbtran.mode);
-    if (rc || (gbl_debug_appsock_failures && (debug_appsock = !(rand() % 1000)))) {
+    if (rc || (gbl_debug_sqlthd_failures && (debug_appsock = !(rand() % 1000)))) {
         logmsg(LOGMSG_ERROR, "%s line %d: unable to set_transaction_mode rc=%d!\n",
                 __func__, __LINE__, rc);
         if (debug_appsock) {
@@ -6165,7 +6165,6 @@ static void sqlengine_thd_end(struct thdpool *pool, void *thddata)
             if(gbl_abort_invalid_query_info_key) {
                 abort();
             }
-
             sqlthd->sqlclntstate = NULL;
         }
     }
