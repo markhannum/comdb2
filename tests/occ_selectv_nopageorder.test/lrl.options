@@ -1,0 +1,6 @@
+table schedule schedule.csc2
+table jobinstance jobinstance.csc2
+table dbgopts dbgopts.csc2
+enable_snapshot_isolation
+enable_selectv_range_check
+setattr PAGE_ORDER_TABLESCAN 0
