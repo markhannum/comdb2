@@ -2,37 +2,45 @@
 # Test basic functionality for incremental backups
 
 dbname=$1
-DBDIR=$2
+debug=1
+#DBDIR=$2
+
+[[ "$debug" == "1" ]] && set -x
 
 if [[ -z "$dbname" ]] ; then
+  [[ "$debug" == "1" ]] && set -x
   echo dbname missing
   exit 1
 fi
 
 function failexit
 {
+  [[ "$debug" == "1" ]] && set -x
     echo "Failed $1"
     exit -1
 }
 
 function make_base {
+  [[ "$debug" == "1" ]] && set -x
   basename=${TMPDIR}/backups/base.tar
   backuplist+=(base.tar)
-  cmd="comdb2ar c -I create -b ${TMPDIR}/increment ${DBDIR}/${dbname}.lrl > $basename" || failexit "base backup failed"
-  echo $cmd
-  $cmd
+  comdb2ar c -I create -b ${TMPDIR}/increment ${DBDIR}/${dbname}.lrl > $basename
+  #echo $cmd
+  #$cmd
 }
 
 function make_backup {
+  [[ "$debug" == "1" ]] && set -x
   fullbackupname=$1
   backupname=${fullbackupname%.*}.tar
   backuplist+=($backupname)
-  cmd="comdb2ar c -I inc -b ${TMPDIR}/increment ${DBDIR}/${dbname}.lrl > ${TMPDIR}/backups/${backupname}" || failexit "incr backup failed"
-  echo $cmd
-  $cmd
+  comdb2ar c -I inc -b ${TMPDIR}/increment ${DBDIR}/${dbname}.lrl > ${TMPDIR}/backups/${backupname}
+  #echo $cmd
+  #$cmd
 }
 
 function test_restoredb {
+  [[ "$debug" == "1" ]] && set -x
   testname=$1
   restorecmd="cat "
   for i in $(seq 0 $2); do
@@ -42,15 +50,21 @@ function test_restoredb {
   restorecmd="$restorecmd | comdb2ar x -I restore ${TMPDIR}/restore/ ${TMPDIR}/restore"
   $restorecmd
 
-  comdb2 --lrl ${TMPDIR}/restore/$dbname.lrl ${dbname}_restore & || failexit "restore create failed"
+  comdb2 --lrl ${TMPDIR}/restore/$dbname.lrl ${dbname}_restore &
   dbpid=$!
-  # wait for db to launch
-  wait 30
+
+  cnt=0
+  cdb2sql ${CDB2_OPTIONS} $dbname default "select 1"
+  while [[ $? != 0 && $cnt -le 30 ]]; do
+      cdb2sql ${CDB2_OPTIONS} $dbname default "select 1"
+      let cnt=cnt+1
+      sleep 1 
+  done
 
   cb2sql ${CDB2_OPTIONS} -f $1 $dbname default > $output 2>&1
   expected_output=$(cat ${testname}.out)
 
-  if [[ "$output" != "$expected_output"]]; then
+  if [[ "$output" != "$expected_output" ]] ; then
     echo "  ^^^^^^^^^^^^"
     echo "The above testcase (${testname}) has failed!!!"
     echo " "
@@ -67,6 +81,7 @@ function test_restoredb {
 }
 
 function resetdb {
+  [[ "$debug" == "1" ]] && set -x
   backuplist=()
   rm -rf ${TMPDIR}/backups ${TMPDIR}/restore ${TMPDIR}/increment
   mkdir -p ${TMPDIR}/backups ${TMPDIR}/restore ${TMPDIR}/increment
