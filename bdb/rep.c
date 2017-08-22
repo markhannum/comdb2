@@ -4044,9 +4044,14 @@ void receive_start_lsn_request(void *ack_handle, void *usr_ptr, char *from_host,
     return;
 }
 
+// ------------------------- SEQUENCE -----------------------------------------------
+
 extern int seq_next_val(tran_type *tran, char *name, long long *val,
                         bdb_state_type *bdb_state);
 
+/**
+ * Buffer Packer for sequence number requests (master-only distro)
+ */
 static uint8_t *sequence_num_request_put(char *name, uint8_t *p_buf,
                                          const uint8_t *p_buf_end)
 {
@@ -4057,6 +4062,9 @@ static uint8_t *sequence_num_request_put(char *name, uint8_t *p_buf,
     return p_buf;
 }
 
+/**
+ * Buffer Unpack for sequence number requests (master-only distro)
+ */
 static const uint8_t *sequence_num_request_get(char *name, const uint8_t *p_buf,
                                                const uint8_t *p_buf_end)
 {
@@ -4067,6 +4075,9 @@ static const uint8_t *sequence_num_request_get(char *name, const uint8_t *p_buf,
     return p_buf;
 }
 
+/**
+ * Buffer Packer for sequence number responses (master-only distro)
+ */
 static uint8_t *sequence_num_response_put(long long *value, uint8_t *p_buf,
                                           const uint8_t *p_buf_end)
 {
@@ -4077,6 +4088,9 @@ static uint8_t *sequence_num_response_put(long long *value, uint8_t *p_buf,
     return p_buf;
 }
 
+/**
+ * Buffer Unpacker for sequence number responses (master-only distro)
+ */
 static const uint8_t *sequence_num_response_get(long long *value,
                                                 const uint8_t *p_buf,
                                                 const uint8_t *p_buf_end)
@@ -4355,6 +4369,10 @@ int request_sequence_num_int(bdb_state_type *bdb_state, const char *name_in,
     *val = value;
     return 0;
 }
+
+
+// ------------------------- END SEQUENCE -----------------------------------------------
+
 
 void receive_coherency_lease(void *ack_handle, void *usr_ptr, char *from_host,
                              int usertype, void *dta, int dtalen,
