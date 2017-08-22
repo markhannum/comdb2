@@ -620,6 +620,13 @@ int tran2req(int dbtran)
     return OSQL_REQINV;
 }
 
+static int free_seq_curval(void *obj, void *arg)
+{
+    struct seq_curval_struct *curval = (struct seq_curval_struct *)obj;
+    free(curval);
+    return 0;
+}
+
 int osql_clean_sqlclntstate(struct sqlclntstate *clnt)
 {
     osqlstate_t *osql = &clnt->osql;
@@ -642,6 +649,13 @@ int osql_clean_sqlclntstate(struct sqlclntstate *clnt)
         free(clnt->saved_errstr);
         clnt->saved_errstr = NULL;
     }
+    if (osql->seq_curval) {
+        hash_for(osql->seq_curval, free_seq_curval, NULL);
+        hash_clear(osql->seq_curval);
+        hash_free(osql->seq_curval);
+        osql->seq_curval = NULL;
+    }
+
 
     if (clnt->dbtran.shadow_tran) {
         /* for some reason the clnt contains an unfinished

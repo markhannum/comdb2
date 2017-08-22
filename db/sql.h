@@ -197,6 +197,7 @@ typedef struct osqlstate {
                             (i.e. already translated */
     int long_request;
     int dirty; /* optimization to nop selectv only transactions */
+    hash_t *seq_curval;
 } osqlstate_t;
 
 enum ctrl_sqleng {
@@ -292,6 +293,12 @@ struct stored_proc;
 struct lua_State;
 
 enum early_verify_error { EARLY_ERR_VERIFY = 1, EARLY_ERR_SELECTV = 2 };
+
+struct seq_curval_struct
+{
+    char name[MAX_SEQ_NAME];
+    long long curval;
+};
 
 /* Client specific sql state */
 struct sqlclntstate {
