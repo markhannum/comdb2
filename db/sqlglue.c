@@ -4825,6 +4825,8 @@ done:
  ** when it is created..
  */
 
+int free_seq_curval(void *obj, void *arg);
+
 int sqlite3BtreeBeginTrans(Vdbe *vdbe, Btree *pBt, int wrflag)
 {
     int rc = SQLITE_OK;
@@ -4878,6 +4880,11 @@ int sqlite3BtreeBeginTrans(Vdbe *vdbe, Btree *pBt, int wrflag)
             rc = SQLITE_NOMEM;
             goto done;
         }
+    }
+
+    if (clnt->osql->seq_curval) {
+        hash_for(osql->seq_curval, free_seq_curval, NULL);
+        hash_clear(osql->seq_curval);
     }
 
     if (clnt->arr) {
@@ -5007,7 +5014,6 @@ int sqlite3BtreeCommit(Btree *pBt)
             clnt->osql.rqid, comdb2uuidstr(clnt->osql.uuid, us));
     }
 #endif
-
     if (clnt->arr)
         currangearr_coalesce(clnt->arr);
     if (clnt->selectv_arr)
