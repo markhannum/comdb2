@@ -17,6 +17,8 @@
 #include "sequences.h"
 #include <int_overflow.h>
 #include <bdb_int.h>
+#include <bdb/locks.h>
+#include <sql.h>
 
 extern struct dbenv *thedb;
 
@@ -31,7 +33,7 @@ int gbl_sequence_replicant_distribution = 0;
  *  @param name char * Name of the sequence
  *  @param val long long * Reference to output location
  */
-int seq_next_val(tran_type *tran, char *name, long long *val,
+static int seq_next_val_int(tran_type *tran, char *name, long long *val,
                  bdb_state_type *bdb_state)
 {
     sequence_t *seq = getsequencebyname(name);
@@ -133,6 +135,23 @@ next_range:
     }
 
     goto done;
+}
+
+int seq_next_val(tran_type *tran, char *name, long long *val,
+                 bdb_state_type *bdb_state)
+{
+    struct sql_thread *thd = pthread_getspecific(query_info_key);
+    struct sqlclntstate *clnt = thd->sqlclntstate;
+    int rc, lid = bdb_get_lid_from_cursortran(clnt->dbtran.cursor_tran);
+    char *dblk;
+
+    /* Get curtran & use lockid from there.  Can this be a deadlock victim? */
+    if (rc = bdb_lock_seq_read_fromlid(bdb_state, name, (void *)&dblk, lid)) {
+        return SQLITE_DEADLOCK;
+    }
+    rc = seq_next_val_int(tran, name, val, bdb_state);
+    bdb_release_lock(bdb_state, (void *)dblk);
+    return rc;
 }
 
 int sequences_master_change()
