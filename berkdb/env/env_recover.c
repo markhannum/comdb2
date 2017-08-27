@@ -350,8 +350,8 @@ __db_find_recovery_start_int(dbenv, outlsn, max_lsn)
 	DB_LSN *outlsn;
 	DB_LSN *max_lsn;
 {
-	int ret = 0;
-	DB_LSN lsn, prev_lsn = { 0 }, checkpoint_lsn, ckp_lsn;
+	int ret = 0, ret1, ret2;
+	DB_LSN lsn, lsn1 = {0}, lsn2 = {0}, prev_lsn = { 0 }, checkpoint_lsn, ckp_lsn;
 	DB_LOGC *logc = NULL;
 	DBT rec = { 0 };
 	__txn_ckp_args *ckp_args = NULL;
@@ -365,11 +365,30 @@ __db_find_recovery_start_int(dbenv, outlsn, max_lsn)
 
 	/* Find a checkpoint - from the checkpoint file, if we can, or from
 	 * the log if we can't (eg: after a copy) */
+
+   ret1 = __checkpoint_get(dbenv, &lsn1);
+   ret2 = __txn_getckp(dbenv, &lsn2);
+   fprintf(stderr, "%s: __checkpoint_get returns %d lsn %d:%d\n",
+         __func__, ret1, lsn1.file, lsn1.offset);
+   fprintf(stderr, "%s: __txn_getckp returns %d lsn %d:%d\n",
+         __func__, ret2, lsn2.file, lsn2.offset);
+
+   if (ret1 == 0) {
+      lsn = lsn1;
+   } else if(ret2 == 0) {
+      lsn = lsn2;
+   } else {
+      ret = DB_NOTFOUND;
+      goto err;
+   }
+
+   /*
 	if ((ret = __checkpoint_get(dbenv, &lsn)) != 0 &&
 	    (ret = __txn_getckp(dbenv, &lsn)) != 0) {
 		ret = DB_NOTFOUND;
 		goto err;
 	}
+   */
 	if ((ret = __log_cursor(dbenv, &logc)) != 0)
 		goto err;
 
