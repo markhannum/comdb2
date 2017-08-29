@@ -1131,13 +1131,13 @@ __memp_sync_int(dbenv, dbmfp, trickle_max, op, wrotep, restartable,
 	 *     pages whose first dirty LSN is to the right of
 	 *     the real oldest LSN.
 	 */
+    /* Hard disable for now */
+    ckp_lsnp = NULL;
 
 	/* Perfect checkpoints step 1: first guess. */
-    /*
 	if (ckp_lsnp != NULL)
 		oldest_first_dirty_tx_begin_lsn = *ckp_lsnp;
 	else
-    */
 		MAX_LSN(oldest_first_dirty_tx_begin_lsn);
 
 	accum_sync = accum_skip = 0;

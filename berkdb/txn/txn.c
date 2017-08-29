@@ -2210,8 +2210,9 @@ do_ckp:	/*
 
 	/* If flag is DB_FORCE, don't run perfect checkpoints. */
 	if (MPOOL_ON(dbenv) &&
-			(ret = __memp_sync_restartable(dbenv,
-			       (LF_ISSET(DB_FORCE) ? NULL : &ckp_lsn), 0, 0)) != 0) {
+			(ret = __memp_sync_restartable(dbenv, NULL, 0, 0)) != 0) {
+//			(ret = __memp_sync_restartable(dbenv,
+//			       (LF_ISSET(DB_FORCE) ? NULL : &ckp_lsn), 0, 0)) != 0) {
 		__db_err(dbenv,
 		    "txn_checkpoint: failed to flush the buffer cache %s",
 		    db_strerror(ret));
