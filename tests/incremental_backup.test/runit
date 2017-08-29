@@ -1,6 +1,7 @@
 #!/bin/bash
 # Test basic functionality for incremental backups
 # export debug=1
+export maxcount=60
 [[ $debug == 1 ]] && set -x
 
 export dbname=$1
@@ -83,14 +84,14 @@ function test_restoredb {
   count=0
   cdb2sql ${dbname}_restore local "select 1" > ./sqloutput 2>&1
   sqloutput=$(cat ./sqloutput)
-  while [ "$sqloutput" != "(1=1)" -a $count -le 30 ]; do
+  while [ "$sqloutput" != "(1=1)" -a $count -le $maxcount ]; do
       sleep 1
       let count=count+1
       cdb2sql ${dbname}_restore local "select 1" > ./sqloutput 2>&1
       sqloutput=$(cat ./sqloutput)
   done
 
-  if [ $count -ge 30 ] ; then
+  if [ $count -ge $maxcount ] ; then
     kill -9 $(cat ${TMPDIR}/${dbname}_restore.pid)
     failexit "DB Startup exceeded"
   fi

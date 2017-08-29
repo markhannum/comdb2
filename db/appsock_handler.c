@@ -382,6 +382,8 @@ static void *fstdump_hndlr(void *arg_)
     return NULL;
 }
 
+char *gbl_comment_string = NULL;
+
 static void *thd_appsock_int(SBUF2 *sb, int *keepsocket,
                              struct thr_handle *thr_self)
 {
@@ -632,6 +634,7 @@ static void *thd_appsock_int(SBUF2 *sb, int *keepsocket,
             sbuf2flush(sb);
 
             if (cmd == cmd_logdelete3) {
+                gbl_comment_string = NULL;
                 rc = bdb_recovery_start_lsn(thedb->bdb_env, recovery_lsn,
                                             sizeof(recovery_lsn));
                 if (rc) {
@@ -639,8 +642,14 @@ static void *thd_appsock_int(SBUF2 *sb, int *keepsocket,
                     snprintf(recovery_command, sizeof(recovery_command),
                              "-fullrecovery");
                 } else {
-                    snprintf(recovery_command, sizeof(recovery_command),
-                             "-recovery_lsn %s", recovery_lsn);
+                    if (gbl_comment_string) {
+                        snprintf(recovery_command, sizeof(recovery_command),
+                                "-recovery_lsn %s -comment %s", recovery_lsn,
+                                gbl_comment_string);
+                    } else {
+                        snprintf(recovery_command, sizeof(recovery_command),
+                                "-recovery_lsn %s", recovery_lsn);
+                    }
                 }
             }
 

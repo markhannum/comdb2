@@ -1281,6 +1281,8 @@ extern int ___os_openhandle(DB_ENV *dbenv, const char *name, int flags,
     int mode, DB_FH ** fhpp);
 extern int __os_closehandle(DB_ENV *dbenv, DB_FH * fhp);
 
+#include "cheapstack.h"
+
 int
 __checkpoint_open(DB_ENV *dbenv, const char *db_home)
 {
@@ -1324,6 +1326,9 @@ __checkpoint_open(DB_ENV *dbenv, const char *db_home)
 		R_UNLOCK(dbenv, &mgr->reginfo);
 
 		LOGCOPY_TOLSN(&ckpt.lsn, &lsn);
+
+        fprintf(stderr, "%s: saving %d:%d\n", __func__, lsn.file, lsn.offset);
+        cheap_stack_trace();
 
 		/* Write checkpoint. All other writes to the checkpoint file use __checkpoint_save. */
 		sz = sizeof(struct __db_checkpoint) -

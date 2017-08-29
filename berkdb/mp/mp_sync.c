@@ -155,11 +155,14 @@ __checkpoint_verify(DB_ENV *dbenv)
 }
 
 int
-__checkpoint_save(DB_ENV *dbenv, DB_LSN *lsn, int in_recovery)
+__checkpoint_save(DB_ENV *dbenv, DB_LSN *lsn, int in_recovery, const char *func, int line)
 {
 	struct __db_checkpoint ckpt = { 0 };
 	int rc;
 	size_t niop = 0;
+
+    fprintf(stderr, "%s: saving %d:%d from %s line %d\n", __func__, lsn->file, lsn->offset, 
+            func, line);
 
 	LOGCOPY_TOLSN(&ckpt.lsn, lsn);
 
@@ -299,7 +302,7 @@ mempsync_thd(void *p)
 
             BDB_READLOCK("mempsync_thd_ckp");
             if ((rc = __log_c_get(logc, &sync_lsn, &data_dbt, DB_SET)) == 0) {
-                __txn_updateckp(dbenv, &sync_lsn);
+                __txn_updateckp(dbenv, &sync_lsn, __func__, __LINE__);
                 __os_free(dbenv, data_dbt.data);
             }
             BDB_RELLOCK();
@@ -1130,9 +1133,11 @@ __memp_sync_int(dbenv, dbmfp, trickle_max, op, wrotep, restartable,
 	 */
 
 	/* Perfect checkpoints step 1: first guess. */
+    /*
 	if (ckp_lsnp != NULL)
 		oldest_first_dirty_tx_begin_lsn = *ckp_lsnp;
 	else
+    */
 		MAX_LSN(oldest_first_dirty_tx_begin_lsn);
 
 	accum_sync = accum_skip = 0;

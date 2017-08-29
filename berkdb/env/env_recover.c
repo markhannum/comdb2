@@ -344,6 +344,7 @@ err:
  * PUBLIC: int __db_find_recovery_start __P((DB_ENV*, DB_LSN*));
  *
  **/
+extern char *gbl_comment_string;
 static int
 __db_find_recovery_start_int(dbenv, outlsn, max_lsn)
 	DB_ENV *dbenv;
@@ -368,14 +369,16 @@ __db_find_recovery_start_int(dbenv, outlsn, max_lsn)
 
    ret1 = __checkpoint_get(dbenv, &lsn1);
    ret2 = __txn_getckp(dbenv, &lsn2);
-   fprintf(stderr, "%s: __checkpoint_get returns %d lsn %d:%d\n",
-         __func__, ret1, lsn1.file, lsn1.offset);
-   fprintf(stderr, "%s: __txn_getckp returns %d lsn %d:%d\n",
-         __func__, ret2, lsn2.file, lsn2.offset);
+   fprintf(stderr, "%s: td %u __checkpoint_get returns %d lsn %d:%d\n",
+         __func__, pthread_self(), ret1, lsn1.file, lsn1.offset);
+   fprintf(stderr, "%s: td %u __txn_getckp returns %d lsn %d:%d\n",
+         __func__, pthread_self(), ret2, lsn2.file, lsn2.offset);
 
    if (ret1 == 0) {
+      gbl_comment_string = "value_is_from_checkpoint_get";
       lsn = lsn1;
    } else if(ret2 == 0) {
+      gbl_comment_string = "value_is_from_txn_getckp";
       lsn = lsn2;
    } else {
       ret = DB_NOTFOUND;
@@ -495,9 +498,14 @@ __db_find_recovery_start_int(dbenv, outlsn, max_lsn)
 		}
 	}
 
-	if (ret == 0)
+	if (ret == 0) {
 		*outlsn = lsn;
+   }
 err:
+   fprintf(stderr, "%s: td %u returns ret %d lsn %d:%d\n",
+         __func__, pthread_self(), ret, lsn.file, lsn.offset);
+
+
 #if defined FIND_RECOVERY_START_TRACE
 	if (ret != 0) {
 		fprintf(stderr,
@@ -1214,7 +1222,7 @@ done:
 		/* Save the checkpoint. */
 		if ((ret =
 			__checkpoint_save(dbenv, &last_valid_checkpoint,
-			    1)) != 0) {
+			    1, __func__, __LINE__)) != 0) {
 			__db_err(dbenv, "can't save checkpoint %u:%u",
 			    last_valid_checkpoint.file,
 			    last_valid_checkpoint.offset);

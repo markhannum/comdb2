@@ -2831,7 +2831,7 @@ struct __ltrans_descriptor {
 int __checkpoint_open(DB_ENV *dbenv, const char *db_home);
 int __checkpoint_get(DB_ENV *dbenv, DB_LSN *lsnout);
 int __checkpoint_get_recovery_lsn(DB_ENV *dbenv, DB_LSN *lsnout);
-int __checkpoint_save(DB_ENV *dbenv, DB_LSN *lsn, int in_recovery);
+int __checkpoint_save(DB_ENV *dbenv, DB_LSN *lsn, int in_recovery, const char *func, int line);
 int __checkpoint_ok_to_delete_log(DB_ENV *dbenv, int logfile);
 int berkdb_verify_lsn_written_to_disk(DB_ENV *dbenv, DB_LSN *lsn,
 	int check_checkpoint);

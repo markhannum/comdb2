@@ -2319,7 +2319,7 @@ do_ckp:	/*
 
 		ret = __log_flush_pp(dbenv, NULL);
 		if (ret == 0)
-			__txn_updateckp(dbenv, &ckp_lsn);	/* this is the output lsn from txn_ckp_log */
+			__txn_updateckp(dbenv, &ckp_lsn, __func__, __LINE__);	/* this is the output lsn from txn_ckp_log */
 	}
 	return (ret);
 }
@@ -2510,9 +2510,11 @@ __txn_reset(dbenv)
  * PUBLIC: void __txn_updateckp __P((DB_ENV *, DB_LSN *));
  */
 void
-__txn_updateckp(dbenv, lsnp)
+__txn_updateckp(dbenv, lsnp, func, line)
 	DB_ENV *dbenv;
 	DB_LSN *lsnp;
+    const char *func;
+    int line;
 {
 	DB_TXNMGR *mgr;
 	DB_TXNREGION *region;
@@ -2520,11 +2522,14 @@ __txn_updateckp(dbenv, lsnp)
 	mgr = dbenv->tx_handle;
 	region = mgr->reginfo.primary;
 
+    fprintf(stderr, "%s called from %s line %d\n", __func__,
+            func, line);
+
 	/* We need to write the checkpoint first.  Otherwise 
 	 * log deletion code can get in and delete the log the
 	 * checkpoint is in, and we'll be non-recoverable if we
 	 * crash at that point.  This isn't hypothetical. */
-	__checkpoint_save(dbenv, lsnp, 0);
+	__checkpoint_save(dbenv, lsnp, 0, __func__, __LINE__);
 
 	/*
 	 * We want to make sure last_ckp only moves forward;  since

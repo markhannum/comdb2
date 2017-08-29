@@ -27,7 +27,7 @@ int __txn_activekids __P((DB_ENV *, u_int32_t, DB_TXN *));
 int __txn_force_abort __P((DB_ENV *, u_int8_t *));
 int __txn_preclose __P((DB_ENV *));
 int __txn_reset __P((DB_ENV *));
-void __txn_updateckp __P((DB_ENV *, DB_LSN *));
+void __txn_updateckp __P((DB_ENV *, DB_LSN *, const char *func, int line));
 int __txn_regop_gen_log __P((DB_ENV *, DB_TXN *, DB_LSN *, u_int64_t *, u_int32_t,  u_int32_t, u_int32_t, u_int64_t, const DBT *, void *));
 int __txn_regop_log __P((DB_ENV *, DB_TXN *, DB_LSN *, u_int64_t *, u_int32_t, u_int32_t, int32_t, const DBT *));
 int __txn_regop_getpgnos __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));

@@ -66,6 +66,7 @@ static struct option long_options[] = {
     {"fullrecovery", no_argument, &gbl_fullrecovery, 1},
     {"no-global-lrl", no_argument, &gbl_nogbllrl, 1},
     {"dir", required_argument, NULL, 0},
+    {"comment", required_argument, NULL, 0},
     {NULL, 0, NULL, 0}};
 
 static const char *help_text = {
@@ -105,6 +106,8 @@ static void replace_args(int argc, char *argv[])
             argv[ii] = "--recoverylsn";
         } else if (strcasecmp(argv[ii], "-recoverylsn") == 0) {
             argv[ii] = "--recoverylsn";
+        } else if (strcasecmp(argv[ii], "-comment") == 0) {
+            argv[ii] = "--comment";
         } else if (strcasecmp(argv[ii], "-pidfile") == 0) {
             argv[ii] = "--pidfile";
         } else if (strcasecmp(argv[ii], "-help") == 0) {
@@ -186,6 +189,7 @@ int handle_cmdline_options(int argc, char **argv, char **lrlname)
         case 4: /* recovery_lsn */ gbl_recovery_options = optarg; break;
         case 5: /* pidfile */ write_pidfile(optarg); break;
         case 10: /* dir */ gbl_dbdir = optarg; break;
+        case 11: /* do nothing */ break;
         }
     }
     return 0;
