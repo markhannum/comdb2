@@ -570,6 +570,10 @@ void serialise_database(
     std::string origlrlname("");
     std::string strippedpath("");
 
+    // Construct a manifest which will give the page sizes of all the files
+    std::ostringstream manifest;
+
+
     // All support files - csc2s, extra lrls, resources for stored procedures
     // etc.
     std::list<std::string> support_files;
@@ -796,9 +800,25 @@ void serialise_database(
     // Total size of backed up pages
     ssize_t total_data_size = 0;
 
+    if(!incr_gen){
+        manifest << "# Manifest for serialisation of " << dbname << std::endl;
+    } else {
+        manifest << "# Manifest for serialisation of increment produced on "
+            << getDTString() << std::endl;
+    }
+
     if(!support_files_only) {
 
         logvec.clear();
+
+        // Find a recovery point after the copy, and record it in the manifest
+        std::clog << "logdelete version " << log_holder->version() << std::endl;
+        if (log_holder->version() >= 3) {
+            std::string recovery_options = log_holder->recovery_options();
+            if (!recovery_options.empty()) {
+                manifest << "Option " << recovery_options <<std::endl;
+            }
+        }
 
         // Find the lowest log file number in the txn dir.
         for(std::list<std::string>::const_iterator it = dbtxndir_files.begin();
@@ -948,12 +968,8 @@ void serialise_database(
     }
 
 
-    // Construct a manifest which will give the page sizes of all the files
-    std::ostringstream manifest;
-
     // Non-incremental mode or increment creation mode
     if(!incr_gen){
-        manifest << "# Manifest for serialisation of " << dbname << std::endl;
         if(support_files_only) {
             manifest << "SupportFilesOnly" << std::endl;
             if (origlrlname != "")
@@ -969,26 +985,11 @@ void serialise_database(
                 write_manifest_entry(manifest, *it);
         }
 
-        // Find a recovery point after the copy, and record it in the manifest
-        if (!support_files_only) {
-            std::clog << "logdelete version " << log_holder->version() << std::endl;
-            if (log_holder->version() >= 3) {
-                std::string recovery_options = log_holder->recovery_options();
-                if (!recovery_options.empty()) {
-                    manifest << "Option " << recovery_options <<std::endl;
-                }
-            }
-        }
-
         // Serialise the manifest file
         serialise_string("MANIFEST", manifest.str());
 
     // Incremental Mode
     } else {
-        manifest << "# Manifest for serialisation of increment produced on "
-            << getDTString() << std::endl;
-
-
         for(std::list<FileInfo>::const_iterator
                 it = data_files.begin();
                 it != data_files.end();
@@ -1040,15 +1041,6 @@ void serialise_database(
                 throw Error(ss);
             }
             write_del_manifest_entry(manifest, *it);
-        }
-
-        // Find a recovery point after the copy, and record it in the manifest
-        std::clog << "logdelete version " << log_holder->version() << std::endl;
-        if (log_holder->version() >= 3) {
-            std::string recovery_options = log_holder->recovery_options();
-            if (!recovery_options.empty()) {
-                manifest << "Option " << recovery_options <<std::endl;
-            }
         }
 
         // Read and note the previous increment's SHA fingerprint
