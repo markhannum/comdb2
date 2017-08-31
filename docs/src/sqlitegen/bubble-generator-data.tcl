@@ -450,11 +450,13 @@ set all_graphs {
 
   key-section {
       loop
-      {line
-          {opt dup}
-          {opt datacopy}
+      {stack
           {line
-              /string-literal =
+              {opt dup}
+              {opt datacopy}
+              {line /string-literal = }
+          }
+          {stack
               {loop {line
                         {opt <DESCEND>}
                         {or
@@ -491,7 +493,14 @@ set all_graphs {
   }
 
   constraint-section {
-      loop {line /keyname -> /table-name : /keyname}
+      loop
+      {stack
+          {line /keyname -> < /ref-table-name : /ref-keyname > }
+          {line
+              {opt on update cascade}
+              {opt on delete cascade}
+          }
+      }
   }
 
   table-event {
