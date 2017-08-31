@@ -1156,16 +1156,13 @@ cmd ::= with(W) insert_cmd(R) INTO fullname(X) idlist_opt(F) DEFAULT VALUES.
 
 %type insert_cmd {int}
 insert_cmd(A) ::= INSERT orconf(R).   {A = R;}
-<<<<<<< HEAD
 /* COMDB2 MODIFICATION
  * insert or replace logic not supported
  * insert_cmd(A) ::= REPLACE.            {A = OE_Replace;}
  */
-=======
 %ifdef COMDB2_UNSUPPORTED
 insert_cmd(A) ::= REPLACE.            {A = OE_Replace;} 
 %endif
->>>>>>> master
 
 %type idlist_opt {IdList*}
 %destructor idlist_opt {sqlite3IdListDelete(pParse->db, $$);}
