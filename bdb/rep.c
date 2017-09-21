@@ -2710,8 +2710,7 @@ static int bdb_wait_for_seqnum_from_node_int(bdb_state_type *bdb_state,
     if ((coherent_state = bdb_state->coherent_state[nodeix(host)]) == STATE_INCOHERENT) {
         pthread_mutex_unlock(&(bdb_state->coherent_state_lock));
         if (bdb_state->attr->wait_for_seqnum_trace) {
-            logmsg(LOGMSG_USER, " %s is incoherent, not waiting\n", PARM_LSN(seqnum->lsn),
-                    host);
+            logmsg(LOGMSG_USER, " %s is incoherent, not waiting\n", host);
         }
         return 1;
     }
@@ -2739,7 +2738,7 @@ static int bdb_wait_for_seqnum_from_node_int(bdb_state_type *bdb_state,
 
         if (bdb_state->attr->wait_for_seqnum_trace) {
             logmsg(LOGMSG_USER, " %s became incoherent, not waiting\n",
-                    PARM_LSN(seqnum->lsn), host);
+                    host);
         }
         return -2;
     }
@@ -2758,8 +2757,7 @@ again:
         Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
 
         if (bdb_state->attr->wait_for_seqnum_trace) {
-            logmsg(LOGMSG_USER, " %s is catching up, not waiting\n",
-                    PARM_LSN(seqnum->lsn), host);
+            logmsg(LOGMSG_USER, " %s is catching up, not waiting\n", host);
         }
         return 1;
     }
@@ -2823,9 +2821,9 @@ again:
             Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
             trigger_unregister_node(host);
             if (bdb_state->attr->wait_for_seqnum_trace) {
-                logmsg(LOGMSG_USER, " err waiting for seqnum: host %s no "
+                logmsg(LOGMSG_USER, " err waiting for seqnum: %d:%d host %s no "
                         "longer connected\n",
-                        PARM_LSN(seqnum->lsn), host);
+                        seqnum->lsn.file, seqnum->lsn.offset, host);
             }
             return -1;
         }

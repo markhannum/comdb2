@@ -81,5 +81,8 @@ on dump_blkseq
 # Make sure that the blkseq code works correctly
 #on test_blkseq_replay
 
+# See what values we're getting for this
+setattr WAIT_FOR_SEQNUM_TRACE 1
+
 # Log location
 #location logs /db/logs
