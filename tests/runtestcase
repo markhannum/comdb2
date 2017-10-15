@@ -1,6 +1,7 @@
 #!/bin/bash
 TEST_TIMEOUT=${TEST_TIMEOUT:-5m}
 SETUP_TIMEOUT=${SETUP_TIMEOUT:-2m}
+TIMEOUT=${TIMEOUT:-timeout}
 
 export CLEANUPDBDIR=${CLEANUPDBDIR:-1}
 export PATH="${SRCHOME}/:${PATH}"
@@ -40,7 +41,7 @@ function call_setup {
          warn_long_setup
          rc=$?
     else
-        timeout ${SETUP_TIMEOUT} ${TESTSROOTDIR}/setup &> >(gawk '{ t='${DBNAME}'; print strftime("%H:%M:%S>"), $0; fflush(); }' | tee ${TESTDIR}/logs/${DBNAME}.setup | cut -c11- | grep "^!" )
+        $TIMEOUT ${SETUP_TIMEOUT} ${TESTSROOTDIR}/setup &> >(gawk '{ t='${DBNAME}'; print strftime("%H:%M:%S>"), $0; fflush(); }' | tee ${TESTDIR}/logs/${DBNAME}.setup | cut -c11- | grep "^!" )
         rc=$?
     fi
     glist=`pgrep gawk -a | grep ${DBNAME} | cut -f1 -d' ' | xargs echo`
@@ -60,7 +61,7 @@ function call_setup {
 call_setup
 echo "!$TESTCASE: running"
 
-timeout ${TEST_TIMEOUT} ./runit ${DBNAME} 2>&1 | gawk '{ print strftime("%H:%M:%S>"), $0; fflush(); }' &> ${TESTDIR}/logs/${DBNAME}.testcase
+$TIMEOUT ${TEST_TIMEOUT} ./runit ${DBNAME} 2>&1 | gawk '{ print strftime("%H:%M:%S>"), $0; fflush(); }' &> ${TESTDIR}/logs/${DBNAME}.testcase
 
 rc=${PIPESTATUS[0]}
 if [[ $rc -eq 0 ]]; then
