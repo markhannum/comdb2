@@ -277,10 +277,18 @@
             (j/with-db-transaction [c c {:isolation :serializable}]
               (hasql! c)
               (letr [order (< (rand) 0.5)
-                     as (query c [(str "select * from " (if order ta tb)
-                                       " where key = ? and value % 3 = 0") k])
-                     bs (query c [(str "select * from " (if order tb ta)
-                                       " where key = ? and value % 3 = 0") k])
+;                     as (query c [(str "select * from " (if order ta tb)
+;                                       " where key = ? and value % 3 = 0") k])
+
+                     as (query c (str "select * from " (if order ta tb)
+                                       " where key = " k " and value % 3 = 0"))
+
+;                     bs (query c [(str "select * from " (if order tb ta)
+;                                       " where key = ? and value % 3 = 0") k])
+
+                     bs (query c (str "select * from " (if order tb ta)
+                                       " where key = " k " and value % 3 = 0"))
+
                      _ (when (or (seq as) (seq bs))
                          ; The other txn already committed
                          (return (assoc op :type :fail, :error :too-late)))
