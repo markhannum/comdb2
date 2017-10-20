@@ -38,18 +38,24 @@ public class Comdb2PreparedStatement extends Comdb2Statement implements Prepared
     String sql;
     protected String[] paramNames;
     protected int[] types;
+    private static int param = 0;
+    private static final Object lock = new Object();
 
     /* my own bound paramters */
     protected HashMap<String, Cdb2BindValue> intBindVars = new HashMap<String, Cdb2BindValue>();
     protected List<HashMap<String, Cdb2BindValue>> batch;
 
-    private String replaceQuestionMarks(String sql, ArrayList<String> params) {
+    private String replaceQuestionMarks(Comdb2Connection conn, String sql, ArrayList<String> params) {
         StringBuilder sb = new StringBuilder();
         char[] arr = sql.toCharArray();
-        int param, i, j, len, nDouble, nSingle;
+        int i, j, len, nDouble, nSingle, nparam;
         String genParam;
 
-        for (param = 0, i = 0, nSingle = 0, nDouble = 0, len = arr.length; i < len; ++i) {
+        //if (conn.activeTrans() == false) {
+        //    param = 0;
+        //}
+
+        for (i = 0, nSingle = 0, nDouble = 0, len = arr.length; i < len; ++i) {
 
             if (arr[i] == '\'' || arr[i] == '\"') { // got a quote
                 if (i == 0 || arr[i - 1] != '\\') // and it isn't a literal
@@ -59,10 +65,13 @@ public class Comdb2PreparedStatement extends Comdb2Statement implements Prepared
                 if ((nDouble & 1) == 1 || (nSingle & 1) == 1)
                     sb.append(arr[i]);
                 else {
-                    genParam = "__jdbc_generated_param_" + param + "__";
+                    synchronized(lock) {
+                        nparam  = param;
+                        ++param;
+                    }
+                    genParam = "__jdbc_generated_param_" + nparam + "__";
                     sb.append("@").append(genParam);
                     params.add(genParam);
-                    ++param;
                 }
             } else if (arr[i] == '@') {
                 sb.append(arr[i]);
@@ -84,7 +93,7 @@ public class Comdb2PreparedStatement extends Comdb2Statement implements Prepared
     public Comdb2PreparedStatement(DbHandle hndl, Comdb2Connection conn, String sqlstr) {
         super(hndl, conn);
         ArrayList<String> names = new ArrayList<String>();
-        this.sql = replaceQuestionMarks(sqlstr, names);
+        this.sql = replaceQuestionMarks(conn, sqlstr, names);
         paramNames = names.toArray(new String[] {});
     }
 

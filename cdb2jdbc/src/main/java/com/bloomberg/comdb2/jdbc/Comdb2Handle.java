@@ -1,5 +1,6 @@
 /* Copyright 2015 Bloomberg Finance L.P.
 
+
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
    You may obtain a copy of the License at
@@ -48,6 +49,7 @@ public class Comdb2Handle extends AbstractConnection {
 
     String myDbName;
     int myDbNum;
+    private static int beginCount = 0;
     String myDbCluster;
     ArrayList<String> myDbHosts = new ArrayList<String>();
     ArrayList<Integer> myDbPorts = new ArrayList<Integer>();
@@ -71,7 +73,7 @@ public class Comdb2Handle extends AbstractConnection {
 
     private boolean in_retry = false;
     private boolean temp_trans = false;
-    private boolean debug = false;
+    private boolean debug = true;
     private Cdb2SqlResponse firstResp;
     private Cdb2SqlResponse lastResp;
 
@@ -257,6 +259,10 @@ public class Comdb2Handle extends AbstractConnection {
         hasUserTcpSz = true;
     }
 
+    public boolean activeTrans() {
+        return inTxn;
+    }
+
     public ArrayList<String> getDbHosts() throws NoDbHostFoundException{
         if (this.myDbHosts.size() == 0) {
             this.lookup();
@@ -292,8 +298,8 @@ public class Comdb2Handle extends AbstractConnection {
     // Add td info to the beginning of the string
     private void tdlog(Level level, String str, Object... params) {
         /* Fast return if the level is not loggable. */
-        if (!logger.isLoggable(level))
-            return;
+        //if (!logger.isLoggable(level))
+        //    return;
 
         String mach = "(not-connected)";
         if (dbHostConnected >= 0) {
@@ -555,9 +561,18 @@ public class Comdb2Handle extends AbstractConnection {
             sqlQuery.retry = isRetry;
         }
 
-        tdlog(Level.FINEST,
-              "sendQuery sql='%s' isBegin=%b skipNRows=%d nretry=%d doAppend=%b",
-              sql, isBegin, skipNRows, nretry, doAppend);
+        if (Thread.currentThread().getId() == 20 && sql == "begin") {
+            beginCount++;
+            System.out.println("td=20 begin-count " + beginCount);
+        }
+        System.out.println("td=" + Thread.currentThread().getId() + " sendQuery sql=" + sql);
+        if (Thread.currentThread().getId() == 20) {
+            Thread.dumpStack();
+        }
+
+        //tdlog(Level.FINEST,
+        //      "sendQuery sql='%s' isBegin=%b skipNRows=%d nretry=%d doAppend=%b",
+        //      sql, isBegin, skipNRows, nretry, doAppend);
 
         /* SKIP_ROWS optimization is disabled temporarily
            in cdb2jdbc to make executeUpdate() work. */
@@ -769,7 +784,8 @@ public class Comdb2Handle extends AbstractConnection {
         sql = sql.trim();
         String lowerSql = sql.toLowerCase();
 
-        tdlog(Level.FINE, "[running sql] %s", sql);
+        System.out.println("td=" + Thread.currentThread().getId() + " [running sql] " + sql);
+        //tdlog(Level.FINE, "[running sql] %s", sql);
 
         if (lowerSql.startsWith("set")) {
             Iterator<String> iter = sets.iterator();

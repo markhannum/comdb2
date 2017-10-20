@@ -93,6 +93,13 @@ public class Comdb2Connection implements Connection {
         return this.hndl;
     }
 
+    public boolean activeTrans() {
+        if (hndl != null) {
+            return hndl.activeTrans();
+        }
+        return false;
+    }
+
     public Comdb2Connection(String db, String cluster, int timeout) {
         /**
          * The handle is opened in the constructor.

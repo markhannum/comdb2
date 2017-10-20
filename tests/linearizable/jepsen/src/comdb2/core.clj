@@ -252,6 +252,75 @@
                    :generator
                    :final-generator))))
 
+
+(defrecord BankClientNoBoundParam [n starting-balance conn]
+  client/Client
+
+  (setup! [this test node]
+    ; (println "n " (:n this) "test " test "node " node)
+    (let [conn (connect node)]
+      ; Create initial accts
+      (dotimes [i n]
+        (util/with-retry [tries 10]
+          (with-conn [c conn]
+            (try
+              (Thread/sleep (rand-int 10))
+              (info "Inserting" node i)
+              (insert! c :accounts {:id i, :balance starting-balance})
+              (catch java.sql.SQLException e
+                (if (.contains (.getMessage e)
+                               "add key constraint duplicate key")
+                  nil
+                  (throw e)))))
+          ; I don't know why these nodes close connections on some inserts and
+          ; not others, it's the weirdest thing
+          (catch java.sql.SQLNonTransientConnectionException e
+            (Thread/sleep (rand-int 1000))
+            (if (pos? tries)
+              (retry (dec tries))
+              (throw e)))))
+      (assoc this :conn conn)))
+
+  (invoke! [this test op]
+    (with-conn [c conn]
+     (j/with-db-transaction [c c {:isolation :serializable}]
+      (query c ["set hasql on"])
+      (query c ["set max_retries 100000"])
+
+      (try
+        (case (:f op)
+          :read (->> (query c ["select * from accounts"])
+                     (mapv :balance)
+                     (assoc op :type :ok, :value))
+
+          :transfer
+          (let [{:keys [from to amount]} (:value op)
+                b1 (-> c
+                       (query (str "select * from accounts where id = " from)
+                         {:row-fn :balance})
+                       first
+                       (- amount))
+                b2 (-> c
+                       (query (str "select * from accounts where id = " to)
+                         {:row-fn :balance})
+                       first
+                       (+ amount))]
+            (cond (neg? b1)
+                  (assoc op :type :fail, :value [:negative from b1])
+
+                  (neg? b2)
+                  (assoc op :type :fail, :value [:negative to b2])
+
+                  true
+                    (do (execute! c (str "update accounts set balance = balance - " amount "  where id = " from))
+                        (execute! c (str "update accounts set balance = balance + " amount "  where id = " to))
+                        (assoc op :type :ok)))))))))
+
+  (teardown! [_ test]
+    (rc/close! conn)))
+
+
+
 ;; Tests
 
 (defrecord BankClient [n starting-balance conn]
@@ -325,6 +394,12 @@
   starting-balance."
   [n starting-balance]
   (BankClient. n starting-balance nil))
+
+(defn bank-client-no-bound-paramaters
+  "Simulates bank account transfers between n accounts, each starting with
+  starting-balance."
+  [n starting-balance]
+  (BankClientNoBoundParam. n starting-balance nil))
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
