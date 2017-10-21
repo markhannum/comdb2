@@ -61,8 +61,15 @@ public class Driver implements java.sql.Driver {
 
     @Override
     public Connection connect(String url, Properties info) throws SQLException {
-        if (!acceptsURL(url))
+
+        System.out.println("td=" + Thread.currentThread().getId() + " connect " +
+                "url is " + url);
+
+        if (!acceptsURL(url)) {
+            System.out.println("td=" + Thread.currentThread().getId() + " connect fail " +
+                    "because acceptsURL returns false");
             return null;
+        }
 
         /**
          * The format of connection string is `jdbc:comdb2:<dbname>:<cluster>'.
@@ -111,12 +118,18 @@ public class Driver implements java.sql.Driver {
 
             dbStr = tokens[2];
             clusterStr = tokens[3];
+
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " connect clusterstr is " + clusterStr);
         } else {
             /* hosttokens cluster[:port]+ */
             String[] hoststokens = tokens[2].split(",\\s*|\\s+");
             if (hoststokens.length > 1) {
                 /* more than 1 hosts. */
                 clusterStr = "User-supplied-hosts";
+                System.out.println("td=" + Thread.currentThread().getId() + 
+                        " connect clusterstr is " + clusterStr);
+
                 for (String elem : hoststokens) {
                     String[] hosttokens = elem.split(":\\s*|\\s+");
                     if (hosttokens.length == 1) {
@@ -136,6 +149,10 @@ public class Driver implements java.sql.Driver {
                 /* only 1 host. */
                 String[] hosttokens = tokens[2].split(":\\s*|\\s+");
                 clusterStr = hosttokens[0];
+
+                System.out.println("td=" + Thread.currentThread().getId() + 
+                        " connect clusterstr is " + clusterStr);
+
                 /* read url string */
                 if (hosttokens.length > 1)
                     port = hosttokens[1];
@@ -207,6 +224,10 @@ public class Driver implements java.sql.Driver {
         }
 
         ret = new Comdb2Connection(dbStr, clusterStr);
+        System.out.println("td=" + Thread.currentThread().getId() + 
+                " connect new Comdb2Connection returns " + ret +
+                " hosts is " + hosts + " ports is " + ports);
+
         /* add user supplied hosts, if any */
         ret.addHosts(hosts);
         ret.addPorts(ports);
@@ -234,8 +255,13 @@ public class Driver implements java.sql.Driver {
             policy = info.getProperty(PROPERTY_POLICY);
         if (usec == null)
             usec = info.getProperty(PROPERTY_USEC);
-        if (prefmach == null)
+        if (prefmach == null) {
             prefmach = info.getProperty(PROPERTY_PREFERMACH);
+
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " connect prefmach is " + prefmach);
+
+        }
         if (comdb2db_max_age == null)
             comdb2db_max_age = info.getProperty(PROPERTY_COMDB2DB_MAX_AGE);
         if (debugmode == null)

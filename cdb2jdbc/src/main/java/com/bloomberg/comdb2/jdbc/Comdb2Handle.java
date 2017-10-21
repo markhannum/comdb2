@@ -56,6 +56,7 @@ public class Comdb2Handle extends AbstractConnection {
     int dbHostIdx = -1;
     int dbHostConnected = -1;
     int masterIndexInMyDbHosts = -1;
+    int reopencount = 0;
 
     String prefmach;
     String defaultType;
@@ -71,7 +72,7 @@ public class Comdb2Handle extends AbstractConnection {
 
     private boolean in_retry = false;
     private boolean temp_trans = false;
-    private boolean debug = false;
+    private boolean debug = true;
     private Cdb2SqlResponse firstResp;
     private Cdb2SqlResponse lastResp;
 
@@ -317,6 +318,9 @@ public class Comdb2Handle extends AbstractConnection {
                     " snapshotFile=" + snapshotFile + " snapshotOffset=" + snapshotOffset + 
                     " cnonce=" + stringCnonce + ": " + str);
 
+            if (str == "Connection open error") {
+                Thread.dumpStack();
+            }
 
         } else {
             String message = String.format(str, params);
@@ -1590,6 +1594,8 @@ readloop:
             return true;
         } else {
             rc = reopen(true);
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " reopen returns " + rc);
             tdlog(Level.FINEST, "Connection reopened returned %b", rc);
             return rc;
         }
@@ -1645,9 +1651,25 @@ readloop:
 
     private boolean reopen(boolean refresh_dbinfo_if_failed) {
         /* get the index of the preferred machine */
+        reopencount++;
+        System.out.println("td=" + Thread.currentThread().getId() + 
+                " reopen count is " + reopencount + 
+                " refresh_dbinfo is " + refresh_dbinfo_if_failed +
+                " isDirectCpu is " + isDirectCpu + 
+                " myDbHosts.size is " + myDbHosts.size() +
+                " dbHostIdx is " + dbHostIdx +
+                " prefIdx is " + prefIdx +
+                " prefMach is " + prefmach +
+                " mydbHosts.size() is " + myDbHosts.size());
+        if (myDbHosts.size() > 0) {
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " reopen, mydbHosts.get(0) is " + myDbHosts.get(0) +
+                    " mydbPorts.get(0) is " + myDbPorts.get(0));
+        }
         if (prefIdx == -1 && prefmach != null) {
             prefIdx = myDbHosts.indexOf(prefmach);
-
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " reopen prefIdx is " + prefIdx);
             if (prefIdx != -1 && myPolicy != POLICY_RANDOM) {
                 logger.log(Level.WARNING,
                         "Overwriting load balance policy to RANDOM " +
@@ -1659,21 +1681,33 @@ readloop:
         /* if the preferred machine is valid, and
            we're not on it, connect to it. */
         if (prefIdx != -1 && dbHostIdx != prefIdx) {
-            io = new SockIO(myDbHosts.get(prefIdx),
-                    myDbPorts.get(prefIdx), tcpbufsz, pmuxrte ? myDbName : null);
+
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " reopen: new sockio");
+
             if (io.open()) {
+                System.out.println("td=" + Thread.currentThread().getId() + 
+                        " reopen: trying newsql from new sockio");
                 try {
                     io.write("newsql\n");
                     io.flush();
-                    if (!trySSL())
+                    if (!trySSL()) {
+                        System.out.println("td=" + Thread.currentThread().getId() + 
+                                " returning false from trySSL line 1679");
                         return false;
+                    }
                     dbHostConnected = prefIdx;
                     dbHostIdx = prefIdx;
                     nSetsSent = 0;
                     opened = true;
+
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " returning true from trySSL line 1688");
                     return true;
                 } catch (IOException e) {
                     last_non_logical_err = e;
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " trying newsql from new sockio");
                     logger.log(Level.SEVERE, "Unable to write newsql to master " 
                             + myDbHosts.get(dbHostIdx) + ":" + myDbPorts.get(dbHostIdx), e);
                     try { io.close(); } catch (IOException e1) {}
@@ -1702,14 +1736,24 @@ readloop:
                     try {
                         io.write("newsql\n");
                         io.flush();
-                        if (!trySSL())
+                        if (!trySSL()) {
+                            System.out.println("td=" + Thread.currentThread().getId() + 
+                                    " returning false from trySSL line 1721");
                             return false;
+                        }
                         dbHostConnected = try_node;
                         nSetsSent = 0;
                         opened = true;
+
+                        System.out.println("td=" + Thread.currentThread().getId() + 
+                                " reopen, returning from line 1733");
+
                         return true;
                     } catch (IOException e) {
                         last_non_logical_err = e;
+                        System.out.println("td=" + Thread.currentThread().getId() + 
+                                " reopen, line 1725 failed connection to " + myDbHosts.get(try_node) + 
+                                " port " + myDbPorts.get(try_node) );
                         logger.log(Level.WARNING, "Unable to write newsql to "
                                 + myDbHosts.get(try_node) + ":" + myDbPorts.get(try_node), e);
                         try { io.close(); } catch (IOException e1) { }
@@ -1734,19 +1778,32 @@ readloop:
                     || dbHostIdx == dbHostConnected)
                 continue;
 
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " reopen line 1750, node " + myDbHosts.get(dbHostIdx) + " port " 
+                    + myDbPorts.get(dbHostIdx));
             io = new SockIO(myDbHosts.get(dbHostIdx), myDbPorts.get(dbHostIdx), tcpbufsz, pmuxrte ? myDbName : null);
             if (io.open()) {
                 try {
                     io.write("newsql\n");
                     io.flush();
-                    if (!trySSL())
+                    if (!trySSL()) {
+                        System.out.println("td=" + Thread.currentThread().getId() + 
+                                " reopen, returning from line 1776");
                         return false;
+                    }
                     dbHostConnected = dbHostIdx;
                     nSetsSent = 0;
                     opened = true;
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " reopen, returning from line 1783");
+
                     return true;
                 } catch (IOException e) {
                     last_non_logical_err = e;
+
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " reopen line 1766, failed to open");
+
                     logger.log(Level.WARNING, "Unable to write newsql to " 
                             + myDbHosts.get(dbHostIdx) + ":" + myDbPorts.get(dbHostIdx), e);
                     try { io.close(); } catch (IOException e1) { }
@@ -1768,14 +1825,24 @@ readloop:
                 try {
                     io.write("newsql\n");
                     io.flush();
-                    if (!trySSL())
+                    if (!trySSL()) {
+                        System.out.println("td=" + Thread.currentThread().getId() + 
+                                " reopen, returning from line 1815");
                         return false;
+                    }
                     dbHostConnected = dbHostIdx;
                     nSetsSent = 0;
                     opened = true;
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " reopen, returning from line 1821");
                     return true;
                 } catch (IOException e) {
                     last_non_logical_err = e;
+
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " reopen line 1800, failed to open " + myDbHosts.get(dbHostIdx) +
+                            " port " + myDbPorts.get(dbHostIdx));
+
                     logger.log(Level.WARNING, "Unable to write newsql to " 
                             + myDbHosts.get(dbHostIdx) + ":" + myDbPorts.get(dbHostIdx), e);
                     try { io.close(); } catch (IOException e1) { }
@@ -1795,15 +1862,26 @@ readloop:
                 try {
                     io.write("newsql\n");
                     io.flush();
-                    if (!trySSL())
+                    if (!trySSL()) {
+                        System.out.println("td=" + Thread.currentThread().getId() + 
+                                " reopen, returning from line 1851");
                         return false;
+                    }
                     dbHostConnected = masterIndexInMyDbHosts;
                     dbHostIdx = masterIndexInMyDbHosts;
                     nSetsSent = 0;
                     opened = true;
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " reopen, returning from line 1860");
                     return true;
                 } catch (IOException e) {
                     last_non_logical_err = e;
+
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " reopen line 1833, cannot open master " + 
+                            myDbHosts.get(masterIndexInMyDbHosts) +
+                            " port " + myDbPorts.get(masterIndexInMyDbHosts));
+
                     logger.log(Level.SEVERE, "Unable to write newsql to master " 
                             + myDbHosts.get(masterIndexInMyDbHosts) + ":" + myDbPorts.get(masterIndexInMyDbHosts), e);
                     try { io.close(); } catch (IOException e1) { }
@@ -1824,6 +1902,8 @@ readloop:
         }
 
         dbHostConnected = -1;
+        System.out.println("td=" + Thread.currentThread().getId() + 
+                " reopen, returning from line 1891");
         return false;
     }
 
