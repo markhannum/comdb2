@@ -546,6 +546,9 @@ public class BBSysUtils {
                             hndl.myDbCluster + "'.");
             }
         } else if (hndl.myDbHosts.size() == 0) {
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " getDbHosts setting isDirectCpu, myDbCluster is " 
+                    + hndl.myDbCluster + " myDbPorts is " + hndl.overriddenPort);
             hndl.isDirectCpu = true;
             hndl.myDbHosts.add(hndl.myDbCluster);
             hndl.myDbPorts.add(hndl.overriddenPort);
@@ -554,8 +557,12 @@ public class BBSysUtils {
         if (hndl.isDirectCpu) {
             for (int i = 0; i != hndl.myDbPorts.size(); ++i) {
                 if (hndl.myDbPorts.get(i) == -1) {
-                    hndl.myDbPorts.set(i, getPortMux(hndl.myDbHosts.get(i),
-                                hndl.portMuxPort, "comdb2", "replication", hndl.myDbName));
+                    if (hndl.pmuxrte) {
+                        hndl.myDbPorts.set(i, hndl.portMuxPort);
+                    } else {
+                        hndl.myDbPorts.set(i, getPortMux(hndl.myDbHosts.get(i),
+                                    hndl.portMuxPort, "comdb2", "replication", hndl.myDbName));
+                    }
                 }
             }
             return;

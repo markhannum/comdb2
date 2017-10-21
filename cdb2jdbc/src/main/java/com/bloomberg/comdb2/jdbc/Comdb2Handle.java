@@ -1770,26 +1770,42 @@ readloop:
          */
 
         // last time we were at dbHostIdx, this time start from (dbHostIdx + 1)
-        int start_req = dbHostIdx++;
+        int start_req = ++dbHostIdx;
+        //dbHostIdx %= myDbHosts.size();
+
+        System.out.println("td=" + Thread.currentThread().getId() + 
+                " reopen line 1777");
 
         for (; dbHostIdx < myDbHosts.size(); ++dbHostIdx) {
+
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " reopen line 1788, node " + myDbHosts.get(dbHostIdx) + " port " 
+                    + myDbPorts.get(dbHostIdx) +
+                    " dbHostIdx " + dbHostIdx + " masterIndexInMyDbHosts " +
+                    masterIndexInMyDbHosts + " dbHostConnected " + 
+                    dbHostConnected);
+
             if (dbHostIdx == masterIndexInMyDbHosts
                     || myDbPorts.get(dbHostIdx) < 0
                     || dbHostIdx == dbHostConnected)
                 continue;
 
-            System.out.println("td=" + Thread.currentThread().getId() + 
-                    " reopen line 1750, node " + myDbHosts.get(dbHostIdx) + " port " 
-                    + myDbPorts.get(dbHostIdx));
             io = new SockIO(myDbHosts.get(dbHostIdx), myDbPorts.get(dbHostIdx), tcpbufsz, pmuxrte ? myDbName : null);
             if (io.open()) {
                 try {
                     io.write("newsql\n");
                     io.flush();
+
+                    System.out.println("td=" + Thread.currentThread().getId() + 
+                            " reopen, opened socket line 1795");
+
                     if (!trySSL()) {
                         System.out.println("td=" + Thread.currentThread().getId() + 
                                 " reopen, returning from line 1776");
                         return false;
+                    } else {
+                        System.out.println("td=" + Thread.currentThread().getId() + 
+                                " reopen, trySSL success");
                     }
                     dbHostConnected = dbHostIdx;
                     nSetsSent = 0;
@@ -1814,7 +1830,15 @@ readloop:
         }
 
         // start over from offset 0
-        for (dbHostIdx = 0; dbHostIdx < start_req; ++dbHostIdx) {
+        for (dbHostIdx = 0; dbHostIdx < myDbHosts.size(); ++dbHostIdx) {
+
+            System.out.println("td=" + Thread.currentThread().getId() + 
+                    " reopen line 1840 startOverFrom 0 " +
+                    " dbHostIdx is " + dbHostIdx + 
+                    " masterIndexInMyDbHosts is " + masterIndexInMyDbHosts + 
+                    " myDbPorts.get(" + dbHostIdx + ") is " + myDbPorts.get(dbHostIdx)  +
+                    " dbHostConnected is " + dbHostConnected);
+
             if (dbHostIdx == masterIndexInMyDbHosts
                     || myDbPorts.get(dbHostIdx) < 0
                     || dbHostIdx == dbHostConnected)
@@ -1903,7 +1927,7 @@ readloop:
 
         dbHostConnected = -1;
         System.out.println("td=" + Thread.currentThread().getId() + 
-                " reopen, returning from line 1891");
+                " reopen, returning from line 1926");
         return false;
     }
 
