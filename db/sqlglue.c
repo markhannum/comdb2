@@ -9815,10 +9815,14 @@ int bind_parameters(sqlite3_stmt *stmt, struct schema *params,
         isnull = 0;
         if (params) {
             f = &params->member[fld];
+            fprintf(stderr, "td=%p %s line %d using fld %d\n", pthread_self(), 
+                    __func__, __LINE__, fld);
         } else {
             f = convert_client_field(sqlquery->bindvars[fld], &c_fld);
             if (sqlquery->bindvars[fld]->has_index) {
                 pos = sqlquery->bindvars[fld]->index;
+                fprintf(stderr, "td=%p %s line %d setting pos from index, fld=%d pos=%d\n", 
+                        pthread_self(), __func__, __LINE__, fld, pos);
             }
             buf = sqlquery->bindvars[fld]->value.data;
             if (buf == NULL) {
@@ -9859,6 +9863,7 @@ int bind_parameters(sqlite3_stmt *stmt, struct schema *params,
 
         if (pos == 0) {
             /* Bind parameters with the matching @xx identifiers in sql query.*/
+
             namelen = snprintf(parmname, sizeof(parmname), "@%s", f->name);
             if (namelen > 31) {
                 *err = sqlite3_mprintf("Invalid field name %s\n", f->name);
@@ -9867,11 +9872,14 @@ int bind_parameters(sqlite3_stmt *stmt, struct schema *params,
 
             if (f->idx != -1) {
                 pos = f->idx;
+                fprintf(stderr, "td=%p %s line %d pos from f->idx, fld=%d pos=%d\n", 
+                        pthread_self(), __func__, __LINE__, fld, pos);
             } else {
                 pos = sqlite3_bind_parameter_index(stmt, parmname);
                 /* will be used in caching.*/
                 f->idx = pos;
             }
+            //pos = sqlite3_bind_parameter_index(stmt, parmname);
             if (pos == 0) {
                 *err = sqlite3_mprintf(
                     "No \"%s\" parameter specified in query.", f->name);
@@ -9880,16 +9888,20 @@ int bind_parameters(sqlite3_stmt *stmt, struct schema *params,
         }
         if (clnt->nullbits) isnull = btst(clnt->nullbits, fld) ? 1 : 0;
         if (gbl_dump_sql_dispatched)
-            logmsg(LOGMSG_USER, "binding field %d name %s position %d type %d %s pos %d "
-                   "null %d\n",
-                   fld, f->name, pos, f->type, strtype(f->type), pos, isnull);
+            logmsg(LOGMSG_USER, "td %u binding field %d name %s position %d type %d %s pos %d "
+                   "null %d for sql '%s'\n",
+                   (uint32_t) pthread_self(), fld, f->name, pos, f->type, strtype(f->type), pos, 
+                   isnull, clnt->sql);
         if (isnull)
             rc = sqlite3_bind_null(stmt, pos);
         else {
             switch (f->type) {
             case CLIENT_INT:
-                if ((rc = get_int_field(f, buf, (uint64_t *)&ival)) == 0)
+                if ((rc = get_int_field(f, buf, (uint64_t *)&ival)) == 0) {
+                fprintf(stderr, "td=%p %s line %d pos from sqlite3_bind_parameter_index, parmname='%s' sql='%s' fld=%d pos=%d value %lld\n", 
+                        pthread_self(), __func__, __LINE__, parmname, clnt->sql, fld, pos, ival);
                     rc = sqlite3_bind_int64(stmt, pos, ival);
+                }
                 break;
             case CLIENT_UINT:
                 if ((rc = get_uint_field(f, buf, (uint64_t *)&uival)) == 0)
@@ -10085,9 +10097,9 @@ int bind_parameters(sqlite3_stmt *stmt, struct schema *params,
         }
         if (gbl_dump_sql_dispatched)
             logmsg(LOGMSG_USER, 
-                   "fld %d %s position %d type %d %s len %d null %d bind rc %d\n",
-                   fld, f->name, f->type, pos, strtype(f->type), f->datalen,
-                   isnull, rc);
+                   "td %u fld %d %s position %d type %d %s len %d null %d bind rc %d for sql '%s'\n",
+                   (uint32_t) pthread_self(), fld, f->name, f->type, pos, strtype(f->type), 
+                   f->datalen, isnull, rc, clnt->sql);
         if (rc) {
             *err = sqlite3_mprintf("Bad argument for field:%s type:%d\n",
                                    f->name, f->type);

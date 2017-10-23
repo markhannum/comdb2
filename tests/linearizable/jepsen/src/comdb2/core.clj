@@ -167,6 +167,7 @@
   "Set up hasql for a transaction."
   [c]
   (query c ["set hasql on"])
+  (query c ["set cursordebug all"])
   (query c ["set max_retries 100000"]))
 
 ;; Error handling
@@ -356,12 +357,12 @@
          :transfer
          (let [{:keys [from to amount]} (:value op)
                b1 (-> c
-                      (query ["select * from accounts where id = ?" from]
+                      (query [(str "select * from accounts where id = ? -- select-1-param-0=" from) from]
                              {:row-fn :balance})
                       first
                       (- amount))
                b2 (-> c
-                      (query ["select * from accounts where id = ?" to]
+                      (query [(str "select * from accounts where id = ? -- select-2-param-0=" to) to]
                              {:row-fn :balance})
                       first
                       (+ amount))]
@@ -372,8 +373,9 @@
                  (assoc op :type :fail, :value [:negative to b2])
 
                  true
-                 (do (execute! c ["update accounts set balance = balance - ? where id = ?" amount from])
-                     (execute! c ["update accounts set balance = balance + ? where id = ?" amount to])
+                 (do (execute! c [(str "update accounts set balance = balance - ? where id = ? -- update-1-param-0=" amount " update-1-param-1=" from) amount from])
+                     (execute! c [(str "update accounts set balance = balance + ? where id = ? -- update-2-param-0=" amount " update-2-param-1=" to) amount to])
+
                      (assoc op :type :ok))))))))
 
   (teardown! [_ test]

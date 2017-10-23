@@ -13590,7 +13590,8 @@ int get_int_field(struct field *f, const uint8_t *buf, int64_t *out)
     case sizeof(long long):
         *out = (long long)flibc_htonll(*(long long *)(buf + f->offset));
         if (gbl_dump_sql_dispatched)
-            logmsg(LOGMSG_USER, "long long: %lld\n", *out);
+            logmsg(LOGMSG_USER, "td=%u long long: %lld\n", 
+                    (unsigned int)pthread_self(), *out);
         break;
     default:
         rc = -1;

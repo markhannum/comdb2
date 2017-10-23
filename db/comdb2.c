@@ -442,7 +442,7 @@ int gbl_disable_rowlocks_sleepns = 0;
 int gbl_random_rowlocks = 0;
 int gbl_already_aborted_trace = 0;
 int gbl_deadlock_policy_override = -1;
-int gbl_dump_sql_dispatched = 0; /* dump all sql strings dispatched */
+int gbl_dump_sql_dispatched = 1; /* dump all sql strings dispatched */
 int gbl_time_osql = 0;           /* dump timestamps for osql steps */
 int gbl_time_fdb = 0;            /* dump timestamps for remote sql */
 
