@@ -1,0 +1,49 @@
+[X]  cdb2_bind_index
+[X]  cdb2_bind_param
+[X]  cdb2_clearbindings
+[T]  cdb2_clear_contexts
+[X]  cdb2_clone
+[X]  cdb2_close
+[-]  cdb2_cluster_info
+[-]  cdb2_cnonce
+[X]  cdb2_column_name
+[X]  cdb2_column_size
+[X]  cdb2_column_type
+[X]  cdb2_column_value
+[X]  cdb2_dbname
+[T]  cdb2_disable_sockpool
+[-]  cdb2_dump_ports
+[T]  cdb2_enable_sockpool
+[X]  cdb2_errstr
+[X]  cdb2_get_effects
+[-]  cdb2_getinfo
+[T]  cdb2_hndl_set_max_retries
+[T]  cdb2_hndl_set_min_retries
+[T]  cdb2_init_ssl
+[X]  cdb2_is_ssl_encrypted
+[X]  cdb2_next_record
+[X]  cdb2_numcolumns
+[X]  cdb2_open
+[T]  cdb2_pop_context
+[T]  cdb2_push_context
+[X]  cdb2_run_statement
+[X]  cdb2_run_statement_typed
+[T]  cdb2_set_comdb2db_config
+[T]  cdb2_set_comdb2db_info
+[T]  cdb2_set_debug_trace
+[T]  cdb2_set_max_retries
+[T]  cdb2_set_min_retries
+[-]  cdb2_snapshot_file
+[S]  cdb2_socket_pool_donate_ext
+[S]  cdb2_socket_pool_get
+[T]  cdb2_use_hint
+[S]  CLIENT_ssl_init
+[S]  CLIENT_ssl_new_ctx
+[S]  is_valid_int
+[S]  val_combine
+
+X - ok
+- - get rid of
+S - should be static
+T - set commands
+
