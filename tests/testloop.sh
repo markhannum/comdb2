@@ -38,6 +38,7 @@ while :; do
     print_status
     echo "$(date) ITERATION $i" 
     rm -Rf $(find . -type d -mmin +$test_linger | egrep test_)
+    rm -Rf $(find linearizable/jepsen/store -type f -mmin +$test_linger)
     for x in $tests 
     do echo "$(date) - starting $x" 
 
