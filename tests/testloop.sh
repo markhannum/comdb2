@@ -90,7 +90,7 @@ while :; do
                 err=0
             fi
 
-            egrep "actual: com.jcraft.jsch.JSchException: java.net.ConnectException: Connection refused" $l
+            egrep "com.jcraft.jsch.JSchException: java.net.ConnectException: Connection refused" $l
             if [[ $? == 0 ]]; then
                 echo "actual: Connection refused error: continuing"
                 let sshfail=sshfail+1
