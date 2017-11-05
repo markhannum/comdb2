@@ -37,8 +37,11 @@ while :; do
     let i=i+1 
     print_status
     echo "$(date) ITERATION $i" 
-    rm -Rf $(find . -type d -mmin +$test_linger | egrep test_)
-    rm -Rf $(find linearizable/jepsen/store -type f -mmin +$test_linger)
+    rm -Rf $(find /home/ubuntu/comdb2/tests -type d -mmin +$test_linger | egrep test_)
+    rm -Rf $(find /home/ubuntu/comdb2/tests/linearizable/jepsen/store -type f -mmin +$test_linger)
+
+    for m in $CLUSTER; do ssh $m "rm -Rf \$(find /home/ubuntu/comdb2/tests -type d -mmin +$test_linger | egrep test_)" ; done
+
     for x in $tests 
     do echo "$(date) - starting $x" 
 
