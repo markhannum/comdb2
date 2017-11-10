@@ -37,7 +37,11 @@ while :; do
     let i=i+1 
     print_status
     echo "$(date) ITERATION $i" 
-    rm -Rf $(find . -type d -mmin +$test_linger | egrep test_)
+    rm -Rf $(find /home/ubuntu/comdb2/tests -type d -mmin +$test_linger | egrep test_)
+    rm -Rf $(find /home/ubuntu/comdb2/tests/linearizable/jepsen/store -type f -mmin +$test_linger)
+
+    for m in $CLUSTER; do ssh $m "rm -Rf \$(find /home/ubuntu/comdb2/tests -type d -mmin +$test_linger | egrep test_)" ; done
+
     for x in $tests 
     do echo "$(date) - starting $x" 
 
@@ -59,15 +63,14 @@ while :; do
             looktest=0
         fi
 
-        # Kyle's tests sometime crash & leave the network partitioned.  This 
-        # looks like a timeout.  Detect and continue
-        if [[ "$x" == "jepsen"* ]] ; then
-            egrep "timeout \(logs in" $out
-                if [[ $? == 0 ]] ; then
-                echo "TEST TIMED OUT"
-                let timeout=timeout+1
-                looktest=0
-            fi
+        # Timeouts happen maybe once every 4 to 5 days .. they seem to
+        # Actually be SUCCESSFUL tests, or tests which didn't run, so 
+        # just continue
+        egrep "timeout \(logs in" $out
+        if [[ $? == 0 ]] ; then
+            echo "TEST TIMED OUT"
+            let timeout=timeout+1
+            looktest=0
         fi
 
         if [[ $looktest == 1 && $r == 0 ]]; then
@@ -89,7 +92,7 @@ while :; do
                 err=0
             fi
 
-            egrep "actual: com.jcraft.jsch.JSchException: java.net.ConnectException: Connection refused" $l
+            egrep "com.jcraft.jsch.JSchException: java.net.ConnectException: Connection refused" $l
             if [[ $? == 0 ]]; then
                 echo "actual: Connection refused error: continuing"
                 let sshfail=sshfail+1
