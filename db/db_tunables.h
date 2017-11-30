@@ -1298,6 +1298,9 @@ REGISTER_TUNABLE("verbose_send_cohlease",
 REGISTER_TUNABLE("reset_on_unelectable_cluster", "Reset master if unelectable.",
                  TUNABLE_BOOLEAN, &gbl_reset_on_unelectable_cluster,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("max_wr_rows_per_txn",
+                 "Set the max written rows per transaction.", TUNABLE_INTEGER,
+                 &gbl_max_wr_rows_per_txn, 0, NULL, NULL, NULL, NULL);
 
 REGISTER_TUNABLE("print_deadlock_cycles",
                  "Print all deadlock cycles. (Default: off)",
