@@ -1632,7 +1632,7 @@ static int newsql_connect(cdb2_hndl_tp *hndl, char *host, int port, int myport,
         fprintf(stderr, "td %u %s:%d entering\n", (uint32_t)pthread_self(),
                 __func__, __LINE__);
     }
-    int fd = -1;
+    int fd = -1, rc;
     SBUF2 *sb = NULL;
     int rc = snprintf(hndl->newsql_typestr, sizeof(hndl->newsql_typestr),
                       "comdb2/%s/%s/newsql/%s", hndl->dbname, hndl->type,
@@ -1678,6 +1678,13 @@ static int newsql_connect(cdb2_hndl_tp *hndl, char *host, int port, int myport,
         return -1;
     }
 #endif
+
+    if ((rc = send_client_info(sb)) != 0) {
+        if (hndl->debug_trace)
+            fprintf(stderr, "send_client_info returns %d\n", rc);
+        sbuf2close(sb);
+        return -1;
+    }
 
     sbuf2settimeout(sb, 5000, 5000);
     hndl->sb = sb;
