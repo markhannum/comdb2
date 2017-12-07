@@ -1389,39 +1389,6 @@ static inline int cdb2_hostid()
     return _MACHINE_ID;
 }
 
-/* This servers unless they know */
-static int send_client_info(SBUF2 *sb)
-{
-    CDB2QUERY query = CDB2__QUERY__INIT;
-    CDB2CLIENTINFO clientinfo = CDB2__CLIENTINFO__INIT;
-
-    clientinfo.pid = _PID;
-    clientinfo.th_id = (int)pthread_self();
-    clientinfo.host_id = cdb2_hostid();
-    clientinfo.argv0 = _ARGV0;
-
-    query.clinfo = &clientinfo;
-
-    int len = cdb2__query__get_packed_size(&query);
-    unsigned char *buf = malloc(len + 1);
-
-    cdb2__query__pack(&query, buf);
-
-    struct newsqlheader hdr;
-    hdr.type = ntohl(CDB2_REQUEST_TYPE__CDB2QUERY);
-    hdr.compression = ntohl(0);
-    hdr.length = ntohl(len);
-
-    sbuf2write((char *)&hdr, sizeof(hdr), sb);
-    sbuf2write((char *)buf, len, sb);
-
-    int rc = sbuf2flush(sb);
-    if (rc < 0)
-        return -1;
-
-    return 0;
-}
-
 static int send_reset(SBUF2 *sb)
 {
     int rc = 0;
@@ -1712,14 +1679,6 @@ static int newsql_connect(cdb2_hndl_tp *hndl, char *host, int port, int myport,
         return -1;
     }
 #endif
-
-    if ((hndl->dbinfo_flags & CDB2_SEND_CLIENTINFO) && 
-            (rc = send_client_info(sb)) != 0) {
-        if (hndl->debug_trace)
-            fprintf(stderr, "send_client_info returns %d\n", rc);
-        sbuf2close(sb);
-        return -1;
-    }
 
     sbuf2settimeout(sb, 5000, 5000);
     hndl->sb = sb;
@@ -2771,8 +2730,7 @@ int cdb2_run_statement(cdb2_hndl_tp *hndl, const char *sql)
 static void parse_dbresponse(CDB2DBINFORESPONSE *dbinfo_response,
                              char valid_hosts[][64], int *valid_ports,
                              int *master_node, int *num_valid_hosts,
-                             int *num_valid_sameroom_hosts,
-                             int *dbinfo_flags
+                             int *num_valid_sameroom_hosts
 #if WITH_SSL
                              , peer_ssl_mode *s_mode
 #endif
@@ -3042,8 +3000,7 @@ static int retry_query_list(cdb2_hndl_tp *hndl, int num_retry, int run_last)
                 cdb2__dbinforesponse__unpack(NULL, len, hndl->first_buf);
             parse_dbresponse(dbinfo_response, hndl->hosts, hndl->ports,
                              &hndl->master, &hndl->num_hosts,
-                             &hndl->num_hosts_sameroom,
-                             &hndl->dbinfo_flags
+                             &hndl->num_hosts_sameroom
 #if WITH_SSL
                              ,
                              &hndl->s_sslmode
@@ -3660,8 +3617,7 @@ read_record:
         CDB2DBINFORESPONSE *dbinfo_resp = NULL;
         dbinfo_resp = cdb2__dbinforesponse__unpack(NULL, len, hndl->first_buf);
         parse_dbresponse(dbinfo_resp, hndl->hosts, hndl->ports, &hndl->master,
-                         &hndl->num_hosts, &hndl->num_hosts_sameroom,
-                         &hndl->dbinfo_flags
+                         &hndl->num_hosts, &hndl->num_hosts_sameroom
 #if WITH_SSL
                          ,
                          &hndl->s_sslmode
@@ -4627,8 +4583,7 @@ static int cdb2_dbinfo_query(cdb2_hndl_tp *hndl, char *type, char *dbname,
     }
 
     parse_dbresponse(dbinfo_response, valid_hosts, valid_ports, master_node,
-                     num_valid_hosts, num_valid_sameroom_hosts,
-                     &hndl->dbinfo_flags
+                     num_valid_hosts, num_valid_sameroom_hosts
 #if WITH_SSL
                      , &hndl->s_sslmode
 #endif
