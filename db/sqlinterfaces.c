@@ -8384,11 +8384,6 @@ done:
         }
     }
 
-    if (clnt.argv0) {
-        free(clnt.argv0);
-        clnt.argv0 = NULL;
-    }
-
     /* XXX free logical tran?  */
     close_appsock(sb);
 
