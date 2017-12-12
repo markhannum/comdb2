@@ -165,6 +165,7 @@ static char *ibm_getargv0(void)
 
     return argv0;
 }
+
 #endif
 
 static char *getargv0(void)
