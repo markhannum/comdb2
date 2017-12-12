@@ -6472,6 +6472,7 @@ void cleanup_clnt(struct sqlclntstate *clnt)
         clnt->stack = NULL;
     }
 
+
     if (clnt->saved_errstr) {
         free(clnt->saved_errstr);
         clnt->saved_errstr = NULL;
