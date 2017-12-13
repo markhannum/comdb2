@@ -51,6 +51,7 @@ static hash_t *trigger_hash;
 
 static int trigger_thread_memory = 1048576;
 
+
 static inline int trigger_register_int(trigger_reg_t *t)
 {
     GET_BDB_STATE(bdb_state);
