@@ -13,3 +13,4 @@ if (( $rc != 0 )) ; then
 fi
 
 echo "SNAPISOL SUCCESS"
+return 0
