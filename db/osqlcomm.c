@@ -3347,6 +3347,8 @@ int osql_comm_is_done(char *rpl, int rpllen, int hasuuid, struct errstat **xerr,
     return rc;
 }
 
+int gbl_send_poke_latency_ms = 0;
+
 /**
  * Send a "POKE" message to "tohost" inquering about session "rqid"
  *
@@ -3355,7 +3357,13 @@ int osql_comm_send_poke(char *tohost, unsigned long long rqid, uuid_t uuid,
                         int type)
 {
     int rc = 0;
+    int latency;
     void *out;
+
+    if ((latency = gbl_send_poke_latency_ms) > 0) {
+        int randpoll = (rand() % latency);
+        poll(NULL, 0, latency);
+    }
 
     if (rqid == OSQL_RQID_USE_UUID) {
         uint8_t buf[OSQLCOMM_POKE_UUID_TYPE_LEN];
@@ -5031,6 +5039,8 @@ int osql_comm_send_socksqlreq(char *tohost, const char *sql, int sqlen,
  * client
  *
  */
+int gbl_checkboard_signal_latency_ms;
+
 int osql_comm_signal_sqlthr_rc(sorese_info_t *sorese, struct errstat *xerr,
                                int rc)
 {
@@ -5038,6 +5048,12 @@ int osql_comm_signal_sqlthr_rc(sorese_info_t *sorese, struct errstat *xerr,
     int irc = 0;
     int msglen = 0;
     int type;
+    int latency;
+
+    if ((latency = gbl_checkboard_signal_latency_ms) > 0) {
+        int randpoll = (rand() % latency);
+        poll(NULL, 0, randpoll);
+    }
 
     /* slightly kludgy - we're constructing one of 4 message types - get a
      * buffer

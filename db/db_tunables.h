@@ -1309,12 +1309,18 @@ REGISTER_TUNABLE("rep_verify_will_recover_trace",
 REGISTER_TUNABLE("max_wr_rows_per_txn",
                  "Set the max written rows per transaction.", TUNABLE_INTEGER,
                  &gbl_max_wr_rows_per_txn, 0, NULL, NULL, NULL, NULL);
-
 REGISTER_TUNABLE("print_deadlock_cycles",
                  "Print all deadlock cycles. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_print_deadlock_cycles, NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("always_send_cnonce",
                  "Always send cnonce to master. (Default: on)", TUNABLE_BOOLEAN,
                  &gbl_always_send_cnonce, NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("send_poke_latency", "Max random latency in send_poke.  "
+                 "(Default: 0)", TUNABLE_INTEGER, &gbl_send_poke_latency_ms,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("checkboard_signal_latency", "Max random latency in "
+                "checkboard_signal.  (Default: 0)", TUNABLE_INTEGER, 
+                &gbl_checkboard_signal_latency_ms, EXPERIMENTAL | INTERNAL, 
+                NULL, NULL, NULL, NULL);
 
 #endif /* _DB_TUNABLES_H */

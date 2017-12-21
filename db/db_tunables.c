@@ -140,6 +140,8 @@ extern int gbl_reset_on_unelectable_cluster;
 extern int gbl_rep_verify_always_grab_writelock;
 extern int gbl_rep_verify_will_recover_trace;
 extern int gbl_max_wr_rows_per_txn;
+extern int gbl_send_poke_latency_ms;
+extern int gbl_checkboard_signal_latency_ms;
 
 extern long long sampling_threshold;
 
