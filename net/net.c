@@ -3145,7 +3145,7 @@ static netinfo_type *create_netinfo_int(char myhostname[], int myportnum,
 
     netinfo_ptr->accept_thread_created = 0;
     netinfo_ptr->portmux_register_time = 0;
-    netinfo_ptr->portmux_register_interval = 600;
+    netinfo_ptr->portmux_register_interval = 60;
     netinfo_ptr->ischild = ischild;
     netinfo_ptr->use_getservbyname = use_getservbyname;
 
@@ -5632,6 +5632,7 @@ static void *accept_thread(void *arg)
 
     if (gbl_pmux_route_enabled) {
         logmsg(LOGMSG_INFO, "Enabling PORTMUX Route \n");
+        logmsg(LOGMSG_ERROR, ">>> Enabling PORTMUX Route \n");
         portmux_fds =
             portmux_listen_setup(netinfo_ptr->app, netinfo_ptr->service,
                                  netinfo_ptr->instance, netinfo_ptr->myfd);
