@@ -1,0 +1,37 @@
+# Linearizable is serializable + durable-lsn logic
+enable_serial_isolation
+
+# Enable durable lsn logic
+setattr DURABLE_LSNS 1
+
+# Increase netpoll
+netpoll 2000
+
+# Allow the master to handle sql requests (uncommon)
+setattr MASTER_REJECT_REQUESTS 0
+
+# Very high osqltransfer
+maxosqltransfer 1000000
+
+# This was breaking things earlier.  Rivers has made changes (I need to retry)
+disable_page_compact
+
+# Check for deleteable logs every second
+setattr LOGDELETE_RUN_INTERVAL 1
+
+# Disable parallel rep (this was causing crashes)
+setattr REP_PROCESSORS 0
+setattr REP_WORKERS 0
+
+# Don't run the watchdog thread
+nowatch
+
+# Disable this trace
+setattr UDP_DROP_WARN_PERCENT 100
+
+# Poke every second
+setattr SOSQL_POKE_FREQ_SEC 1
+
+# Increase signal and poke latency
+checkboard_signal_latency 10000
+send_poke_latency 10000
