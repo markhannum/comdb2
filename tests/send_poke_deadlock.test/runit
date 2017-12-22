@@ -4,10 +4,10 @@ debug=1
 [[ "$debug" == 1 ]] && set -x
 needcluster=1
 insert_records=1000
-insert_count=10
-insert_sleep=.5
-downgrade_count=5
-downgrade_sleep=10
+insert_count=20
+insert_sleep=.25
+downgrade_count=20
+downgrade_sleep=5
 stop_file=./halt_test
 db=$1
 
@@ -24,7 +24,7 @@ fi
 function createtables
 {
     [[ "$debug" == 1 ]] && echo "STARTING ${FUNCNAME[0]}" && set -x
-    cdb2sql ${CDB2_OPTIONS} $db $stage "create table t1 {schema{int a}}$$" >/dev/null 2>&1
+    cdb2sql -tabs ${CDB2_OPTIONS} $db $stage 'create table t1 { schema { int a } }'
 }
 
 function downgrade
@@ -81,7 +81,6 @@ function bounce_master
     fi
 }
 
-
 function exitdatabase
 {
     [[ "$debug" == 1 ]] && echo "START ${FUNCNAME[0]}" && set -x
@@ -96,8 +95,6 @@ function exitdatabase
     fi
 }
 
-
-
 function insert_thread
 {
     [[ "$debug" == 1 ]] && echo "STARTING ${FUNCNAME[0]}" && set -x
@@ -107,8 +104,6 @@ function insert_thread
         cdb2sql ${CDB2_OPTIONS} $db $stage - < $cmd_file >/dev/null 2>&1
         sleep $insert_sleep
     done
-
-#    rm $cmd_file
 }
 
 function runtest
@@ -126,6 +121,7 @@ function runtest
     rm $stop_file
     pidlist=""
 
+    i=0
     while [[ $i -lt $insert_count ]]; do
         insert_thread $cmd_file &
         pidlist="$pidlist $!"
@@ -140,7 +136,9 @@ function runtest
         let i=i+1
     done
     touch $stop_file
-    wait $pidlist
+    if [[ -n "$pidlist" ]]; then
+        wait $pidlist
+    fi
     rm $cmd_file
     exitdatabase
 }
