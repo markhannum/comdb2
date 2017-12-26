@@ -894,8 +894,10 @@ int comdb2_cheapstack_char_array(char *str, int maxln)
             if (first) {
                 ccount = snprintf(p, maxln, "%p", stack[i]);
                 first = 0;
-            } else
+            } else {
                 ccount = snprintf(p, maxln, " %p", stack[i]);
+            }
+
             p += ccount;
             maxln -= ccount;
         }

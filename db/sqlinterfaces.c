@@ -8273,6 +8273,13 @@ int handle_newsql_requests(struct thr_handle *thr_self, SBUF2 *sb)
             }
             if (sql_query->client_info->argv0) {
                 clnt.argv0 = strdup(sql_query->client_info->argv0);
+                fprintf(stderr, "XXX DEBUG TRACE XXX - GOT ARGV0 '%s'\n",
+                        clnt.argv0);
+            }
+            if (sql_query->client_info->stack) {
+                clnt.stack = strdup(sql_query->client_info->stack);
+                fprintf(stderr, "XXX DEBUG TRACE XXX - GOT STACK '%s'\n",
+                        clnt.stack);
             }
             if (sql_query->client_info->stack) {
                 clnt.stack = strdup(sql_query->client_info->stack);

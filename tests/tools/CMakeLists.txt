@@ -60,3 +60,4 @@ foreach(executable blob bound cdb2api_caller cdb2bind comdb2_blobtest insert_lot
 
     target_link_libraries(${executable} ${UNWIND_LIBRARY})
 endforeach()
+
