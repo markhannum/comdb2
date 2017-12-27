@@ -20,4 +20,5 @@ echo "$stk_per_second with stack enabled"
 echo "$nostk_per_second with stack disabled"
 
 echo "Test Successful"
+
 exit 0
