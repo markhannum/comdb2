@@ -60,5 +60,6 @@ int main(int argc, char *argv[])
 
     printf("Open/closed %d times in %d ms, %d per second\n",
             iterations, tot, secs ? iterations / secs : 0);
+
     return 0;
 }
