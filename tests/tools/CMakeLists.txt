@@ -59,5 +59,6 @@ target_link_libraries(stepper cdb2api mem dlmalloc bb ${OPENSSL_LIBRARIES} ${PRO
 foreach(executable blob bound cdb2api_caller cdb2bind comdb2_blobtest insert_lots_mt leakcheck localrep overflow_blobtest selectv serial sicountbug sirace simple_ssl utf8 insert register breakloop cdb2_client hatest comdb2_sqltest ptrantest recom stepper multithd cdb2_open verify_atomics_work)
 
     target_link_libraries(${executable} ${UNWIND_LIBRARY})
+
 endforeach()
 
