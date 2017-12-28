@@ -24,7 +24,7 @@ else()
   add_definitions(-DWITH_SSL=0)
 endif()
 
-option(WITH_CDB2OPEN_STACK "Turn OFF to disable walkback at cdb2_open" OFF)
+option(WITH_CDB2OPEN_STACK "Turn OFF to disable walkback at cdb2_open" ON)
 if(WITH_CDB2OPEN_STACK)
     add_definitions(-DWITH_CDB2OPEN_STACK=1)
 else()

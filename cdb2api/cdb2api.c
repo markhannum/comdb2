@@ -763,7 +763,6 @@ struct cdb2_hndl {
     int sent_client_info;
     char stack[MAX_STACK];
     int send_stack;
-    int dbinfo_flags;
 };
 
 void cdb2_set_min_retries(int min_retries)
