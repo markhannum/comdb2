@@ -39,6 +39,7 @@
 #include <string.h>
 #include <strings.h>
 #include <netinet/in.h>
+#include <poll.h>
 
 #include <memory_sync.h>
 
@@ -88,6 +89,16 @@ void free_cached_idx(uint8_t * *cached_idx);
     if (gbl_verbose_toblock_backouts)                                          \
         logmsg(LOGMSG_USER, "err line %d rc %d retrc %d\n", __LINE__, rc, retrc);           \
     goto err;
+#define VERIFY_TABLE_VERSION                                                   \
+    if (iq->usedb->tableversion != iq->usedbtablevers) {                       \
+        if (iq->debug)                                                         \
+            reqprintf(iq, "Stale buffer: usedb version %d vs curr ver %d\n",   \
+                      iq->usedbtablevers, iq->usedb->tableversion);            \
+        poll(NULL, 0, BDB_ATTR_GET(thedb->bdb_attr, SC_DELAY_VERIFY_ERROR));   \
+        *opfailcode = OP_FAILED_VERIFY;                                        \
+        retrc = ERR_VERIFY;                                                    \
+        ERR;                                                                   \
+    }
 
 int gbl_max_wr_rows_per_txn = 0;
 
@@ -192,10 +203,11 @@ add_record_int(struct ireq *iq, void *trans, const uint8_t *p_buf_tag_name,
 
     if (!(flags & RECFLAGS_NEW_SCHEMA)) { // dont lock if adding from SC
 
-        int d = BDB_ATTR_GET(thedb->bdb_attr, DELAY_LOCK_TABLE_RECORD_C);
-        if(d) {
-            if (iq->debug) reqprintf(iq, "Sleeping for %d usec", d);
-            usleep(d);
+        int d_ms = BDB_ATTR_GET(thedb->bdb_attr, DELAY_LOCK_TABLE_RECORD_C);
+        if (d_ms) {
+            if (iq->debug)
+                reqprintf(iq, "Sleeping for %d ms", d_ms);
+            usleep(1000 * d_ms);
         }
 
         rc = bdb_lock_table_read(iq->usedb->handle, trans);
@@ -212,15 +224,7 @@ add_record_int(struct ireq *iq, void *trans, const uint8_t *p_buf_tag_name,
             ERR;
         }
 
-        if (iq->usedb->tableversion != iq->usedbtablevers) {
-            if (iq->debug)
-                reqprintf(iq, "Stale buffer: usedb version %d "
-                              "vs curr ver %d\n",
-                          iq->usedbtablevers, iq->usedb->tableversion);
-            *opfailcode = OP_FAILED_VERIFY;
-            retrc = ERR_VERIFY;
-            ERR;
-        }
+        VERIFY_TABLE_VERSION;
     }
 
     rc = resolve_tag_name(iq, tagdescr, taglen, &dynschema, tag, sizeof(tag));
@@ -853,10 +857,11 @@ int upd_record(struct ireq *iq, void *trans, void *primkey, int rrn,
         prefixes++;
     }
 
-    int d = BDB_ATTR_GET(thedb->bdb_attr, DELAY_LOCK_TABLE_RECORD_C);
-    if(d) { 
-        if (iq->debug) reqprintf(iq, "Sleeping for %d usec", d);
-        usleep(d);
+    int d_ms = BDB_ATTR_GET(thedb->bdb_attr, DELAY_LOCK_TABLE_RECORD_C);
+    if (d_ms) {
+        if (iq->debug)
+            reqprintf(iq, "Sleeping for %d ms", d_ms);
+        usleep(1000 * d_ms);
     }
 
     rc = bdb_lock_table_read(iq->usedb->handle, trans);
@@ -873,15 +878,7 @@ int upd_record(struct ireq *iq, void *trans, void *primkey, int rrn,
         goto err;
     }
 
-    if (iq->usedb->tableversion != iq->usedbtablevers) {
-        if (iq->debug)
-            reqprintf(iq, "Stale buffer: usedb version %d "
-                          "vs curr ver %d\n",
-                      iq->usedbtablevers, iq->usedb->tableversion);
-        *opfailcode = OP_FAILED_VERIFY;
-        retrc = ERR_VERIFY;
-        ERR;
-    }
+    VERIFY_TABLE_VERSION;
 
     rc = resolve_tag_name(iq, tagdescr, taglen, &dynschema, tag, sizeof(tag));
     if (rc != 0) {
@@ -1851,10 +1848,11 @@ int del_record(struct ireq *iq, void *trans, void *primkey, int rrn,
     if (iq->osql_step_ix)
         gbl_osqlpf_step[*(iq->osql_step_ix)].step += 1;
 
-    int d = BDB_ATTR_GET(thedb->bdb_attr, DELAY_LOCK_TABLE_RECORD_C);
-    if(d) { 
-        if (iq->debug) reqprintf(iq, "Sleeping for %d usec", d);
-        usleep(d);
+    int d_ms = BDB_ATTR_GET(thedb->bdb_attr, DELAY_LOCK_TABLE_RECORD_C);
+    if (d_ms) {
+        if (iq->debug)
+            reqprintf(iq, "Sleeping for %d ms", d_ms);
+        usleep(1000 * d_ms);
     }
 
     rc = bdb_lock_table_read(iq->usedb->handle, trans);
@@ -1871,15 +1869,7 @@ int del_record(struct ireq *iq, void *trans, void *primkey, int rrn,
         goto err;
     }
 
-    if (iq->usedb->tableversion != iq->usedbtablevers) {
-        if (iq->debug)
-            reqprintf(iq, "Stale buffer: usedb version %d "
-                          "vs curr ver %d\n",
-                      iq->usedbtablevers, iq->usedb->tableversion);
-        *opfailcode = OP_FAILED_VERIFY;
-        retrc = ERR_VERIFY;
-        goto err;
-    }
+    VERIFY_TABLE_VERSION;
 
     if (primkey) {
         int fndrrn;
@@ -2172,11 +2162,12 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
                 use_new_tag ? ".NEW..ONDISK" : ".ONDISK", (char *)new_dta,
                 nd_len, keytag, key, NULL, blobs, blobs ? MAXBLOBS : 0, NULL);
         if (rc) {
-            logmsg(LOGMSG_ERROR, "upd_new_record_add2indices: %s newgenid 0x%llx "
-                            "conversions -> ix%d failed (use_new_tag %d)\n",
-                    (iq->idxInsert ? "create_key_from_ireq" 
+            logmsg(LOGMSG_ERROR,
+                   "upd_new_record_add2indices: %s newgenid 0x%llx "
+                   "conversions -> ix%d failed (use_new_tag %d) rc=%d\n",
+                   (iq->idxInsert ? "create_key_from_ireq"
                                   : "create_key_from_ondisk_blobs"),
-                    newgenid, ixnum, use_new_tag);
+                   newgenid, ixnum, use_new_tag, rc);
             break;
         }
 
@@ -2188,9 +2179,9 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
             reqmoref(iq, " RC %d", rc);
         }
         if (rc) {
-            logmsg(LOGMSG_ERROR, "upd_new_record_add2indices: ix_addk failed "
-                            "newgenid 0x%llx ix_addk  ix%d\n",
-                    newgenid, ixnum);
+            logmsg(LOGMSG_ERROR, "upd_new_record_add2indices: ix_addk "
+                                 "newgenid 0x%llx ix_addk  ix%d rc=%d\n",
+                   newgenid, ixnum, rc);
             fsnapf(stderr, key, getkeysize(iq->usedb, ixnum));
             break;
         }

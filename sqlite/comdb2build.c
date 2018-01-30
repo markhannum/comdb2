@@ -30,6 +30,7 @@
 extern pthread_key_t query_info_key;
 extern int gbl_commit_sleep;
 extern int gbl_convert_sleep;
+extern int gbl_check_access_controls;
 /******************* Utility ****************************/
 
 static inline int setError(Parse *pParse, int rc, const char *msg)
@@ -281,6 +282,14 @@ static void fillTableOption(struct schema_change_type* sc, int opt)
     else
         sc->force_rebuild = 0;
 
+    if (OPT_ON(opt, PAGE_ORDER))
+        sc->scanmode = SCAN_PAGEORDER;
+
+    if (OPT_ON(opt, READ_ONLY))
+        sc->live = 0;
+    else
+        sc->live = 1;
+
     sc->commit_sleep = gbl_commit_sleep;
     sc->convert_sleep = gbl_convert_sleep;
 }
@@ -507,7 +516,7 @@ int comdb2SendBpfunc(OpFunc *f)
 
 /**************************** Function prototypes ***************************/
 
-static void comdb2Rebuild(Parse *p, Token* nm, Token* lnm, uint8_t opt);
+static void comdb2Rebuild(Parse *p, Token* nm, Token* lnm, int opt);
 
 /************************** Function definitions ****************************/
 
@@ -659,7 +668,7 @@ out:
     free_schema_change_type(sc);
 }
 
-static inline void comdb2Rebuild(Parse *pParse, Token* nm, Token* lnm, uint8_t opt)
+static inline void comdb2Rebuild(Parse *pParse, Token* nm, Token* lnm, int opt)
 {
     sqlite3 *db = pParse->db;
     Vdbe *v  = sqlite3GetVdbe(pParse);
@@ -691,6 +700,14 @@ static inline void comdb2Rebuild(Parse *pParse, Token* nm, Token* lnm, uint8_t o
         sc->force_blob_rebuild = 1;
     }
 
+    if (OPT_ON(opt, PAGE_ORDER))
+        sc->scanmode = SCAN_PAGEORDER;
+
+    if (OPT_ON(opt, READ_ONLY))
+        sc->live = 0;
+    else
+        sc->live = 1;
+
     sc->commit_sleep = gbl_commit_sleep;
     sc->convert_sleep = gbl_convert_sleep;
 
@@ -709,20 +726,20 @@ out:
 }
 
 
-void comdb2RebuildFull(Parse* p, Token* nm,Token* lnm)
+void comdb2RebuildFull(Parse* p, Token* nm,Token* lnm, int opt)
 {
-    comdb2Rebuild(p, nm,lnm, REBUILD_ALL + REBUILD_DATA + REBUILD_BLOB);
+    comdb2Rebuild(p, nm,lnm, REBUILD_ALL + REBUILD_DATA + REBUILD_BLOB + opt);
 }
 
 
-void comdb2RebuildData(Parse* p, Token* nm, Token* lnm)
+void comdb2RebuildData(Parse* p, Token* nm, Token* lnm, int opt)
 {
-    comdb2Rebuild(p,nm,lnm,REBUILD_DATA);
+    comdb2Rebuild(p,nm,lnm,REBUILD_DATA + opt);
 }
 
-void comdb2RebuildDataBlob(Parse* p,Token* nm, Token* lnm)
+void comdb2RebuildDataBlob(Parse* p,Token* nm, Token* lnm, int opt)
 {
-    comdb2Rebuild(p, nm, lnm, REBUILD_BLOB);
+    comdb2Rebuild(p, nm, lnm, REBUILD_BLOB + opt);
 }
 
 void comdb2Truncate(Parse* pParse, Token* nm, Token* lnm)
@@ -761,7 +778,7 @@ out:
 }
 
 
-void comdb2RebuildIndex(Parse* pParse, Token* nm, Token* lnm, Token* index)
+void comdb2RebuildIndex(Parse* pParse, Token* nm, Token* lnm, Token* index, int opt)
 {
     sqlite3 *db = pParse->db;
     Vdbe *v  = sqlite3GetVdbe(pParse);
@@ -795,7 +812,7 @@ void comdb2RebuildIndex(Parse* pParse, Token* nm, Token* lnm, Token* index)
         setError(pParse, SQLITE_ERROR, "Index not found");
         goto out;
     }
-    
+
     free(indexname);
 
     sc->nothrevent = 1;
@@ -803,6 +820,15 @@ void comdb2RebuildIndex(Parse* pParse, Token* nm, Token* lnm, Token* index)
     sc->rebuild_index = 1;
     sc->index_to_rebuild = index_num;
     sc->scanmode = gbl_default_sc_scanmode;
+
+    if (OPT_ON(opt, PAGE_ORDER))
+        sc->scanmode = SCAN_PAGEORDER;
+
+    if (OPT_ON(opt, READ_ONLY))
+        sc->live = 0;
+    else
+        sc->live = 1;
+
     comdb2PrepareSC(v, pParse, 0, sc, &comdb2SqlSchemaChange_usedb,
                     (vdbeFuncArgFree)&free_schema_change_type);
     return;
@@ -1425,6 +1451,7 @@ void comdb2enableAuth(Parse* pParse, int on)
     arg->auth = auth;
     arg->type = BPFUNC_AUTHENTICATION;
     auth->enabled = on;
+    gbl_check_access_controls = 1;
 
     comdb2prepareNoRows(v, pParse, 0, arg, &comdb2SendBpfunc, 
         (vdbeFuncArgFree) &free_bpfunc_arg);
@@ -1851,6 +1878,9 @@ enum {
 };
 
 struct comdb2_constraint {
+    /* Name of the constraint. */
+    char *name;
+
     /*
        The following are helper fields to hold the column names and respective
        sort orders as specified in the query, to be later used to find the
@@ -2296,7 +2326,12 @@ static char *format_csc2(struct comdb2_ddl_context *ctx)
         if (nconstraints == 1)
             strbuf_append(csc2, "constraints\n\t{");
 
-        strbuf_appendf(csc2, "\n\t\t\"%s\" -> ", constraint->child->name);
+        strbuf_append(csc2, "\n\t\t");
+
+        if (constraint->name)
+            strbuf_appendf(csc2, "\"%s\" = ", constraint->name);
+
+        strbuf_appendf(csc2, "\"%s\" -> ", constraint->child->name);
         strbuf_appendf(csc2, "<\"%s\":\"%s\"> ", constraint->parent_table,
                        constraint->parent_key);
 
@@ -3016,6 +3051,18 @@ static int retrieve_schema(Parse *pParse, struct comdb2_ddl_context *ctx)
                 constraint->flags |= CONS_DEL_CASCADE;
             }
 
+            if (table->constraints[i].consname) {
+                /*
+                  Csc2 does not allow named constraints to have multiple
+                  parent key references.
+                */
+                assert(j == 0);
+                constraint->name =
+                    comdb2_strdup(ctx->mem, table->constraints[i].consname);
+                if (constraint->name == 0)
+                    goto oom;
+            }
+
             listc_abl(&ctx->schema->constraint_list, constraint);
         }
     }
@@ -3459,7 +3506,8 @@ static struct comdb2_constraint *
 find_cons_by_name(struct comdb2_ddl_context *ctx, const char *cons)
 {
     struct comdb2_constraint *constraint;
-    char constraint_name[MAXGENCONSLEN];
+    char *constraint_name;
+    char constraint_name_buf[MAXGENCONSLEN + 1];
 
     LISTC_FOR_EACH(&ctx->schema->constraint_list, constraint, lnk)
     {
@@ -3467,8 +3515,13 @@ find_cons_by_name(struct comdb2_ddl_context *ctx, const char *cons)
         if (constraint->flags & CONS_DELETED)
             continue;
 
-        gen_constraint_name2(constraint, constraint_name,
-                             sizeof(constraint_name));
+        if (constraint->name == 0) {
+            gen_constraint_name2(constraint, constraint_name_buf,
+                                 sizeof(constraint_name_buf));
+            constraint_name = constraint_name_buf;
+        } else {
+            constraint_name = constraint->name;
+        }
 
         if ((strcasecmp(cons, constraint_name)) == 0) {
             return constraint;
@@ -3938,7 +3991,8 @@ void comdb2CreateForeignKey(
     struct comdb2_index_column *idx_column;
     struct comdb2_ddl_context *ctx = pParse->comdb2_ddl_ctx;
     struct dbtable *parent_table;
-    char constraint_name[MAXGENCONSLEN];
+    char *constraint_name;
+    char constraint_name_buf[MAXCONSLEN + 1];
     int key_found = 0;
 
     if (use_sqlite_impl(pParse)) {
@@ -4116,12 +4170,27 @@ void comdb2CreateForeignKey(
     }
     constraint->flags = flags;
 
-    /*
-      Check whether a similar constraint already exists.
+    if (pParse->constraintName.n == 0) {
+        /*
+          Check whether a similar constraint already exists.
 
-      Generate the constraint name.
-    */
-    gen_constraint_name2(constraint, constraint_name, sizeof(constraint_name));
+          Generate the constraint name.
+        */
+        gen_constraint_name2(constraint, constraint_name_buf,
+                             sizeof(constraint_name_buf));
+        constraint_name = constraint_name_buf;
+    } else {
+        if (pParse->constraintName.n > MAXCONSLEN) {
+            setError(pParse, SQLITE_MISUSE, "Constraint name is too long.");
+            goto cleanup;
+        }
+        constraint->name = comdb2_strndup(ctx->mem, pParse->constraintName.z,
+                                          pParse->constraintName.n);
+        if (constraint->name == 0)
+            goto oom;
+        sqlite3Dequote(constraint->name);
+        constraint_name = constraint->name;
+    }
     if ((find_cons_by_name(ctx, constraint_name))) {
         pParse->rc = SQLITE_ERROR;
         sqlite3ErrorMsg(pParse, "Constraint '%s' already exists.",
