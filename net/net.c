@@ -2027,7 +2027,7 @@ static void dump_queue(netinfo_type *netinfo_ptr, host_node_type *host_node_ptr)
 {
     int now, cnt = 0, logput_cnt = 0, non_logput_cnt = 0;
 
-    if (netinfo_ptr->netcmp_rtn == NULL)
+    if (netinfo_ptr->getlsn_rtn == NULL)
         return;
 
     if ((now = time(NULL)) - host_node_ptr->last_queue_dump) {
