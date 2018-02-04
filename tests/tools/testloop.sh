@@ -1,6 +1,6 @@
 #!/bin/bash
 
-debug=1
+#debug=1
 [[ "$debug" == "1" ]] && set -x
 
 export CORE_ON_TIMEOUT=1

@@ -135,8 +135,8 @@ function longtest
 {
     [[ "$debug" == 1 ]] && set -x
     testround -G parition
-    testround -G sigstop
-    testround -G sigstop -G partition
+#    testround -G sigstop
+#    testround -G sigstop -G partition
 }
 
 function normaltest
