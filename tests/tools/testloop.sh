@@ -17,6 +17,7 @@ export setup_failures=0
 export timeouts=0
 export nomemory=0
 export noconn=0
+export jbroke=0
 export sshfail=0
 export goodtests=0
 export test_linger=$(( 60 * 2 ))
@@ -29,6 +30,7 @@ function print_status
     echo "Test timeouts  :  $timeouts" 
     echo "Out-of-memory  :  $nomemory"
     echo "Connection fail:  $noconn" 
+    echo "Jepsen broke   :  $jbroke"
     echo "SSH fail       :  $sshfail"
 }
 
@@ -99,6 +101,13 @@ while :; do
             if [[ $? == 0 ]]; then
                 echo "TransientConnectionException: continuing"
                 let noconn=noconn+1
+                err=0
+            fi
+
+            egrep "Jepsen broke" $l
+            if [[ $? == 0 ]]; then
+                echo "Jepsen broke error: continuing"
+                let jbroke=jbroke+1
                 err=0
             fi
 
