@@ -4,11 +4,10 @@
 [[ "$debug" == "1" ]] && set -x
 
 export CORE_ON_TIMEOUT=1
-#export NOKILL_ON_TIMEOUT=1
+export DOMAIL=0
 email="mhannum72@gmail.com"
 tests="jepsen_atomic_writes jepsen_a6_nemesis jepsen_a6 jepsen_bank_nemesis jepsen_bank jepsen_dirty_reads jepsen_g2 jepsen_register_nemesis jepsen_register jepsen_sets_nemesis jepsen_sets cinsert_linearizable register_linearizable"
 
-# mailperiod=86400
 mailperiod=7200
 lasttime=0
 
@@ -35,11 +34,11 @@ function print_status
 
 while :; do 
     let i=i+1 
-    print_status
     echo "$(date) ITERATION $i" 
     rm -Rf $(find . -type d -mmin +$test_linger | egrep test_)
     for x in $tests 
-    do echo "$(date) - starting $x" 
+    do print_status
+        echo "$(date) - starting $x" 
 
         for m in $CLUSTER; do ssh $m 'sudo iptables -F -w; sudo iptables -X -w';  done
         for m in $CLUSTER; do ssh $m 'killall -s 9 comdb2';  done
@@ -107,9 +106,11 @@ while :; do
 
                 echo "ERROR IN ITERATION $i" 
                 err=1
-                for addr in $email ; do
-                    mail -s "JEPSEN FAILURE ITERATION $i !!" $addr < $l
-                done
+                if [[ $DOMAIL = "1" ]]; then
+                    for addr in $email ; do
+                        mail -s "JEPSEN FAILURE ITERATION $i !!" $addr < $l
+                    done
+                fi
                 break 5
             fi
         fi
@@ -123,11 +124,14 @@ while :; do
         lasttime=now
         echo "Mailing results"
 
-        print_status > body.txt
 
-        for addr in $email ; do
-            mail -s "Successfully tested $i iterations" $addr < body.txt
-        done
+        if [[ $DOMAIL = "1" ]]; then
+            print_status > body.txt
+            for addr in $email ; do
+                mail -s "JEPSEN FAILURE ITERATION $i !!" $addr < $l
+            done
+        fi
+
         lasttime=$now
     fi
 
