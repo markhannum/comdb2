@@ -41,7 +41,9 @@ function print_status
 function mail_error
 {
     [[ "$debug" == "1" ]] && set -x
-    [[ $domail == "0" ]] && return 
+    if [[ $domail == "0" ]] ; then 
+        return 
+    fi
 
     text="$1"
     for addr in $email ; do
@@ -52,7 +54,9 @@ function mail_error
 function mail_status
 {
     [[ "$debug" == "1" ]] && set -x
-    [[ $domail == "0" ]] && return 
+    if [[ $domail == "0" ]] ; then
+        return
+    fi
 
     echo "Mailing results"
     print_status > body.txt
