@@ -88,6 +88,13 @@ function make_backup {
   echo " "
 }
 
+function copy_to_local {
+  [[ $debug == 1 ]] && set -x
+  if [[ -n "$CLUSTER" ]]; then
+    scp -r $machine:${LOCTMPDIR}/restore ${LOCTMPDIR}/restore
+  fi
+}
+
 function test_restoredb {
   [[ $debug == 1 ]] && set -x
   testname=$1
@@ -99,6 +106,12 @@ function test_restoredb {
   echo $restorecmd
   $restorecmd | $COMDB2AR_EXE x -x $COMDB2_EXE -I restore ${LOCTMPDIR}/restore/ ${LOCTMPDIR}/restore || failexit "Restore Failed"
   egrep -v "cluster nodes" ${LOCTMPDIR}/restore/${dbname}.lrl > ${LOCTMPDIR}/restore/${dbname}.single.lrl
+
+  # Rename some files
+  mv ${LOCTMPDIR}/restore/${dbname}.txn ${LOCTMPDIR}/restore/${dbname}_restore.txn
+  mv ${LOCTMPDIR}/restore/${dbname}.llmeta.dta ${LOCTMPDIR}/restore/${dbname}_restore.llmeta.dta
+  mv ${LOCTMPDIR}/restore/${dbname}.metadata.dta ${LOCTMPDIR}/restore/${dbname}_restore.metadata.dta
+  mv ${LOCTMPDIR}/restore/${dbname}_file_vers_map ${LOCTMPDIR}/restore/${dbname}_restore_file_vers_map
 
   echo "~~~~~~~~~~"
   $COMDB2_EXE ${dbname}_restore --lrl ${LOCTMPDIR}/restore/${dbname}.single.lrl -pidfile ${TMPDIR}/${dbname}_restore.pid &
@@ -186,6 +199,7 @@ echo " "
 
 counter=0
 
+copy_to_local
 for testreq in `ls t1-*.req`; do
   test_restoredb $testreq $counter
   let counter=counter+1
@@ -200,6 +214,7 @@ for i in $(seq 1 10); do
 done
 cdb2sql ${CDB2_OPTIONS} -f t1-3_insert.stmt $dbname default
 make_backup push_next_inserts
+copy_to_local
 test_restoredb t2.req 2
 killwriters
 
