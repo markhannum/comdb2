@@ -925,8 +925,6 @@ struct bdb_state_tag {
     signed char need_to_downgrade_and_lose;
 
     signed char rep_trace;
-    signed char check_for_isperm;
-    signed char got_isperm;
     signed char berkdb_rep_startupdone;
 
     signed char rep_started;
