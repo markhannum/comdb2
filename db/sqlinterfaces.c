@@ -4924,7 +4924,13 @@ static int send_row_new(struct sqlthdstate *thd, struct sqlclntstate *clnt,
     CDB2SQLRESPONSE sql_response = CDB2__SQLRESPONSE__INIT;
     int rc = 0;
     int i;
+    int ln = 0;
     size_t data_len = 0;
+    char **colbuf;
+
+    if (gbl_extended_sql_debug_trace) {
+        colbuf = calloc(sizeof(char *), ncols);
+    }
 
     for (i = 0; i < ncols; i++) {
         cdb2__sqlresponse__column__init(columns[i]);
@@ -4938,8 +4944,31 @@ static int send_row_new(struct sqlthdstate *thd, struct sqlclntstate *clnt,
             columns[i]->value.len = thd->offsets[i].len;
             columns[i]->value.data =
                 (uint8_t *)thd->buf + thd->offsets[i].offset;
+            if (gbl_extended_sql_debug_trace) {
+                hexdumpbuf(columns[i]->value.data, columns[i]->value.len, 
+                        &colbuf[i]);
+                ln += ((columns[i]->value.len * 2) + 4);
+            }
         }
         data_len += columns[i]->value.len;
+    }
+
+    if (gbl_extended_sql_debug_trace) {
+        int blen = (ln + 256);
+        char *buf = malloc(blen);
+        snprintf(buf, blen, "td=%u cnonce='%*s' RETURN COLS ", 
+                (uint32_t)pthread_self(), (int)clnt->sql_query->cnonce.len,
+                clnt->sql_query->cnonce.data);
+        for (i = 0; i < ncols; i++) {
+            strcat(buf, colbuf[i]);
+            strcat(buf, " ");
+        }
+        logmsg(LOGMSG_USER, "%s\n", buf);
+        for (i = 0; i < ncols; i++) {
+            free(colbuf[i]);
+        }
+        free(colbuf);
+        free(buf);
     }
 
     if (clnt->num_retry) {
