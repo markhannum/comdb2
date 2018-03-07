@@ -18,6 +18,7 @@ import java.io.*;
 import java.util.*;
 import java.util.logging.*;
 import javax.net.ssl.*;
+import java.text.MessageFormat;
 
 import com.google.protobuf.*;
 
@@ -346,11 +347,6 @@ public class Comdb2Handle extends AbstractConnection {
             mach = myDbHosts.get(dbHostConnected);
         }
 
-        if (debug) {
-            logger.setLevel(Level.ALL);
-            level = Level.INFO;
-        }
-
         String message = String.format(str, params);
         Object[] messageParams = new Object[] {
             Thread.currentThread().getId(),
@@ -363,8 +359,10 @@ public class Comdb2Handle extends AbstractConnection {
         logger.log(level,
                 "td={0} mach={1} snapshotFile={2} snapshotOffset={3} cnonce={4}: {5}",
                 messageParams);
+
         if (debug) {
-            logger.setLevel(curlevel);
+            MessageFormat form = new MessageFormat("td={0} mach={1} snapshotFile={2} snapshotOffset={3} cnonce={4}: {5}");
+            System.err.println(form.format(messageParams));
         }
     }
 
