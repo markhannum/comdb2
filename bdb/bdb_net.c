@@ -815,7 +815,7 @@ void send_coherency_leases(bdb_state_type *bdb_state, int lease_time,
             lastpr = now;
         }
     } else if (last_count != comcount) {
-        logmsg(LOGMSG_INFO, "%s: sending leases to all nodes, epoch=%ld\n",
+        logmsg(LOGMSG_INFO, "%s: master connected to all nodes, epoch=%ld\n",
                __func__, time(NULL));
     }
 
