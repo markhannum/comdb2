@@ -265,6 +265,7 @@ check_db_port_running_local() {
 }
 
 check_db_port_running_node() {
+    set -x
     node=$1
     dbport=`grep "\[ERROR\] net_listen: FAILED TO BIND to port" $TESTDIR/logs/${DBNAME}.${node}.db | grep -Po "port [0-9]*" | cut -f2 -d" " `
     if [ "x$dbport" == "x" ] ; then
