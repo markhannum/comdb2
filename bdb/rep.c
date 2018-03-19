@@ -983,8 +983,28 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
             logmsg(LOGMSG_USER, "--- sending seq %d to %s, nodelay is %d\n", tmpseq,
                     host, nodelay);
 
-        rc = net_send(bdb_state->repinfo->netinfo, host, USER_TYPE_BERKDB_REP,
-                      buf, bufsz, nodelay);
+        uint32_t sendflags = 0;
+
+        if (!is_logput)
+            sendflags |= (NET_SEND_NODROP|NET_SEND_NODELAY);
+
+        if (flags & DB_REP_NODROP)
+            sendflags |= NET_SEND_NODROP;
+
+        if (bdb_state->attr->net_inorder_logputs)
+            sendflags |= NET_SEND_INORDER;
+
+        if (nodelay)
+            sendflags |= NET_SEND_NODELAY;
+
+        if (flags & DB_REP_TRACE) {
+            logmsg(LOGMSG_USER, "%s line %d calling net_send_flags\n",
+                    __func__, __LINE__);
+            sendflags |= NET_SEND_TRACE;
+        }
+
+        rc = net_send_flags(bdb_state->repinfo->netinfo, host,
+                      USER_TYPE_BERKDB_REP, buf, bufsz, sendflags);
         if (rc != 0)
             outrc = 1;
     }
