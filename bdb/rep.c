@@ -600,7 +600,9 @@ static int throttle_updates_incoherent_nodes(bdb_state_type *bdb_state,
 
     /* INCOHERENT & INCOHERENT_SLOW */
     if (is_incoherent(bdb_state, host)) {
-        uint32_t window = gbl_incoherent_logput_window;
+        //uint32_t window = gbl_incoherent_logput_window;
+        uint32_t window = bdb_state->attr->catchup_window;
+
         DB_LSN *lsnp, *masterlsn;
         if (!window) {
             ret = 1;
@@ -1150,8 +1152,8 @@ static void *elect_thread(void *args)
     elect_time = bdb_state->attr->electtimebase * 1000;
 
 elect_again:
-
-    /*poll(NULL, 0, 100);*/
+    if (elect_again)
+        poll(NULL, 0, 100);
 
     /* moved this below elect_again: so that if we get stuck in an election
      * loop we can pick up changes to the election timeout - sam j */
