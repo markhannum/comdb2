@@ -594,7 +594,8 @@ int bdb_sync_cluster(bdb_state_type *bdb_state, int sync_all)
     return rc;
 }
 
-static int is_incoherent_complete(bdb_state_type *bdb_state, const char *host, int *incohwait)
+static int is_incoherent_complete(bdb_state_type *bdb_state, const char *host,
+        int *incohwait)
 {
     int is_incoherent, state;
 
