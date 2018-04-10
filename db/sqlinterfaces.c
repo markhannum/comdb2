@@ -872,11 +872,24 @@ static int fill_snapinfo(struct sqlclntstate *clnt, int *file, int *offset)
                 *offset = durable_offset;
 
                 if (gbl_extended_sql_debug_trace) {
+                    int myfile, myoffset;
                     logmsg(LOGMSG_USER, "%s line %d cnonce='%s' master "
                                         "returned durable-lsn "
                                         "[%d][%d], clnt->is_hasql_retry=%d\n",
                            __func__, __LINE__, cnonce, *file, *offset,
                            clnt->is_hasql_retry);
+                    /* If our current LSN isn't here, ABORT */
+                    bdb_get_lsn(thedb->bdb_env, &myfile, &myoffset);
+                    if (myfile < durable_file || (myfile == durable_file && 
+                                myoffset < durable_offset)) {
+                        /* This shouldn't be possible for jepsen-register */
+                        if (bdb_valid_lease(thedb->bdb_env)) {
+                            logmsg(LOGMSG_USER, "%s line %d, aborting on "
+                                    "invalid current LSN\n", __func__, 
+                                    __LINE__);
+                            abort();
+                        }
+                    }
                 }
             } else {
                 if (gbl_extended_sql_debug_trace) {
