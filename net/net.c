@@ -149,6 +149,12 @@ static int sbuf2write_wrapper(SBUF2 *sb, const char *buf, int nbytes)
     return sbuf2unbufferedwrite(sb, buf, nbytes);
 }
 
+static inline void update_timestamp(host_node_type *host_node_ptr)
+{
+    if (host_node_ptr->got_hello)
+        host_node_ptr->timestamp = time(NULL);
+}
+
 /* refresh connection periodically */
 static int connection_refresh(netinfo_type *netinfo_ptr,
                               host_node_type *host_node_ptr)
@@ -828,7 +834,8 @@ static int read_stream(netinfo_type *netinfo_ptr, host_node_type *host_node_ptr,
             } else if (errno == EINTR) { /* just read again */
                 continue;
             } else {
-                logmsgperror("read_stream");
+                host_node_printf(LOGMSG_ERROR, host_node_ptr, "read_stream: %s\n",
+                        strerror(errno));
                 break;
             }
         } else { /* n == 0; EOF */
@@ -3824,7 +3831,7 @@ static int process_user_message(netinfo_type *netinfo_ptr,
 
             /* update timestamp before checking it */
             Pthread_mutex_lock(&(host_node_ptr->timestamp_lock));
-            host_node_ptr->timestamp = time(NULL);
+            update_timestamp(host_node_ptr);
             host_node_ptr->running_user_func = 0;
             Pthread_mutex_unlock(&(host_node_ptr->timestamp_lock));
 
@@ -4602,7 +4609,7 @@ static void *reader_thread(void *arg)
 
     while (!host_node_ptr->decom_flag && !host_node_ptr->closed &&
            !netinfo_ptr->exiting) {
-        host_node_ptr->timestamp = time(NULL);
+        update_timestamp(host_node_ptr);
 
         if (netinfo_ptr->trace && debug_switch_net_verbose())
            logmsg(LOGMSG_USER, "RT: reading header %llu\n", gettmms());
@@ -4631,7 +4638,7 @@ static void *reader_thread(void *arg)
 
         /* We received data - update our timestamp.  We used to do this only
          * for heartbeat messages; do this for all types of message. */
-        host_node_ptr->timestamp = comdb2_time_epoch();
+        update_timestamp(host_node_ptr);
 
         if (netinfo_ptr->trace && debug_switch_net_verbose())
            logmsg(LOGMSG_USER, "RT: got packet type=%d %llu\n", wire_header.type,
