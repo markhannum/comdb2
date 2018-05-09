@@ -17,4 +17,5 @@ tag "frecord"
 keys
 {
    "ID"         = id
+   "DEC"        = id + d32 + d64 + d128
 }

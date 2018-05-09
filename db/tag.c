@@ -7441,7 +7441,9 @@ int extract_decimal_quantum(struct dbtable *db, int ix, char *inbuf, char *poutb
 
     decimals = 0;
     for (i = 0; i < s->nmembers; i++) {
-        decimals++;
+        if (s->member[i].type == SERVER_DECIMAL) {
+            decimals++;
+        }
     }
 
     if (outbuf && outlen && (outbuf_max < 4 * decimals)) {
