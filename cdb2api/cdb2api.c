@@ -3953,7 +3953,8 @@ read_record:
             if (is_rollback) {
                 PRINT_RETURN(0);
             }
-            else if (is_retryable(hndl, err_val)) {
+            else if (is_retryable(hndl, err_val) &&
+                    (hndl->snapshot_file || (!hndl->in_trans && !is_commit))) {
                 hndl->error_in_trans = 0;
                 newsql_disconnect(hndl, hndl->sb, __LINE__);
                 hndl->retry_all=1;
@@ -4056,7 +4057,8 @@ read_record:
 
             if (is_rollback) {
                 PRINT_RETURN(0);
-            } else if (is_retryable(hndl, err_val)) {
+            } else if (is_retryable(hndl, err_val) &&
+                    (hndl->snapshot_file || (!hndl->in_trans && !is_commit))) {
                 hndl->error_in_trans = 0;
                 newsql_disconnect(hndl, hndl->sb, __LINE__);
                 hndl->retry_all=1;
@@ -4175,7 +4177,8 @@ read_record:
 
     if (hndl->firstresponse->response_type == RESPONSE_TYPE__COLUMN_NAMES) {
         /* Handle rejects from Server. */
-        if (is_retryable(hndl, hndl->firstresponse->error_code)) {
+        if (is_retryable(hndl, hndl->firstresponse->error_code) &&
+                (hndl->snapshot_file || (!hndl->in_trans && !is_commit))) {
             newsql_disconnect(hndl, hndl->sb, __LINE__);
             hndl->sb = NULL;
             hndl->retry_all = 1;
