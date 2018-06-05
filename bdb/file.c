@@ -1885,6 +1885,8 @@ static int print_catchup_message(bdb_state_type *bdb_state, int phase,
                 } else
                     logmsg(LOGMSG_WARN, "I AM NOT MAKING ANY PROGRESS.\n");
             } else {
+                logmsg(LOGMSG_USER, "%s line %d calling rep_start as client "
+                        "with egen 0\n", __func__, __LINE__);
                 rc = bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL,
                                                  0, DB_REP_CLIENT);
 
@@ -2739,6 +2741,8 @@ if (!is_real_netinfo(bdb_state->repinfo->netinfo))
     start_udp_reader(bdb_state);
 
     if (startasmaster) {
+        logmsg(LOGMSG_USER, "%s line %d calling rep_start as master with egen "
+                "0\n", __func__, __LINE__);
         rc = dbenv->rep_start(dbenv, NULL, 0, DB_REP_MASTER);
         if (rc != 0) {
             logmsg(LOGMSG_ERROR, "dbenv_open: rep_start as master failed %d %s\n",
@@ -2749,6 +2753,8 @@ if (!is_real_netinfo(bdb_state->repinfo->netinfo))
     } else /* we start as a client */
     {
         /*fprintf(stderr, "dbenv_open: starting rep as client\n");*/
+        logmsg(LOGMSG_USER, "%s line %d calling rep_start as client with egen "
+                "0\n", __func__, __LINE__);
         rc = dbenv->rep_start(dbenv, NULL, 0, DB_REP_CLIENT);
         if (rc != 0) {
             logmsg(LOGMSG_ERROR, "dbenv_open: rep_start as client failed %d %s\n",
@@ -4653,6 +4659,9 @@ static int bdb_reopen_int(bdb_state_type *bdb_state)
     }
 
     /* now become a client of the replication group */
+    logmsg(LOGMSG_USER, "%s line %d calling rep_start as client with egen 0\n",
+            __func__, __LINE__);
+
     rc = bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL, 0, DB_REP_CLIENT);
     if (rc != 0) {
         logmsg(LOGMSG_ERROR, "rep_start as client failed\n");
@@ -4720,7 +4729,8 @@ static int bdb_downgrade_int(bdb_state_type *bdb_state, int noelect,
     Pthread_mutex_unlock(&(bdb_state->children_lock));
 
     /* now become a client of the replication group */
-    logmsg(LOGMSG_USER, "downgrade: starting rep as client\n");
+    logmsg(LOGMSG_USER, "%s line %d calling rep_start as client with egen 0\n",
+            __func__, __LINE__);
     rc = bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL, 0, DB_REP_CLIENT);
     if (rc != 0) {
         logmsg(LOGMSG_ERROR, "rep_start as client failed\n");
@@ -4772,6 +4782,8 @@ static int bdb_upgrade_int(bdb_state_type *bdb_state, uint32_t newgen, int *upgr
            set the master ! which unlocks the bdb_open_env or open_bdb_env,
            and db comes up finally.
         */
+        logmsg(LOGMSG_USER, "%s line %d calling rep_start as master with egen 0\n",
+                __func__, __LINE__);
         rc = bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL, 0, DB_REP_MASTER);
         if (rc != 0) {
             logmsg(LOGMSG_ERROR, "rep_start failed rc %d\n", rc);
@@ -4821,7 +4833,8 @@ static int bdb_upgrade_int(bdb_state_type *bdb_state, uint32_t newgen, int *upgr
         }
     }
     Pthread_mutex_unlock(&(bdb_state->children_lock));
-
+    logmsg(LOGMSG_USER, "%s line %d calling rep_start as master with egen %d\n",
+            __func__, __LINE__, newgen);
     rc = bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL, newgen, DB_REP_MASTER);
     if (rc != 0) {
         logmsg(LOGMSG_ERROR, "rep_start failed rc %d\n", rc);
@@ -5699,6 +5712,9 @@ bdb_open_int(int envonly, const char name[], const char dir[], int lrl,
             iammaster = 0;
 
         if (is_real_netinfo(bdb_state->repinfo->netinfo) && iammaster) {
+
+            logmsg(LOGMSG_USER, "%s line %d calling rep_start as master with egen %d\n",
+                    __func__, __LINE__, gen);
             rc = bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL, gen,
                                              DB_REP_MASTER);
             if (rc != 0) {
