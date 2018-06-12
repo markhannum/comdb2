@@ -1019,8 +1019,16 @@ restart:
 		lsn = rep->committed_lsn;
 
     static uint32_t last_egen = 0;
-    if(last_egen && last_egen >= rep->egen)
+    static uint32_t last_gen = 0;
+
+    if(last_gen && last_gen == rep->gen && last_egen && last_egen >= rep->egen)
         abort();
+
+    if (last_gen && last_gen != rep->gen) {
+        logmsg(LOGMSG_INFO, "Casting vote for new election @gen %u\n", rep->gen);
+    }
+
+    last_gen = rep->gen;
     last_egen = rep->egen;
 
 	/* Tally our own vote */
