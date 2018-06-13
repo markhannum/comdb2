@@ -479,9 +479,8 @@ retry:
         /* register this new member */
         rc = osql_register_sqlthr(clnt, type);
         if (rc) {
-            sql_debug_logf(clnt, __func__, __LINE__, "osql_register_sqlthr "
-                                                     " returns %d\n",
-                           rc);
+            sql_debug_logf(clnt, __func__, __LINE__,
+                           "osql_register_sqlthr returns %d\n", rc);
             return rc;
         }
     } else {
@@ -512,11 +511,11 @@ retry:
     }
 
     if (rc && osql->host) {
-        sql_debug_logf(clnt, __func__, __LINE__, "Tried to talk to %s and got "
-                                                 "%d returning SQLITE_BUSY\n",
+        sql_debug_logf(clnt, __func__, __LINE__,
+                       "Tried to talk to %s and got %d returning SQLITE_BUSY\n",
                        osql->host, rc);
-        logmsg(LOGMSG_ERROR, "Tried to talk to %s and got rc=%d - returning "
-                             "SQLITE_BUSY\n",
+        logmsg(LOGMSG_ERROR,
+               "Tried to talk to %s and got rc=%d - returning SQLITE_BUSY\n",
                osql->host, rc);
         rc = SQLITE_BUSY;
     }
@@ -613,9 +612,8 @@ again:
                                    : OSQL_RECOM_REQ,
                          keep_session);
     if (rc) {
-        sql_debug_logf(clnt, __func__, __LINE__, "osql_sock_start returns "
-                                                 "%d\n",
-                       rc);
+        sql_debug_logf(clnt, __func__, __LINE__,
+                       "osql_sock_start returns %d\n", rc);
         goto error;
     }
 
@@ -656,9 +654,8 @@ again:
             goto again;
         }
 
-        sql_debug_logf(clnt, __func__, __LINE__, "failed %d times to restart "
-                                                 "socksql session\n",
-                       retries);
+        sql_debug_logf(clnt, __func__, __LINE__,
+                       "failed %d times to restart socksql session\n", retries);
         logmsg(LOGMSG_ERROR,
                "%s:%d %s failed %d times to restart socksql session\n",
                __FILE__, __LINE__, __func__, retries);
@@ -718,9 +715,8 @@ retry:
                                     &bdberr);
         if (rc) {
             rcout = rc;
-            sql_debug_logf(clnt, __func__, __LINE__, "got %d and setting rcout"
-                                                     " to %d\n",
-                           rc, rcout);
+            sql_debug_logf(clnt, __func__, __LINE__,
+                           "got %d and setting rcout to %d\n", rc, rcout);
             goto err;
         }
     }
