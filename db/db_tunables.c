@@ -191,6 +191,7 @@ extern int gbl_abort_on_reconstruct_failure;
 extern int gbl_rand_elect_timeout;
 extern int gbl_rand_elect_min_ms;
 extern int gbl_rand_elect_max_ms;
+extern int gbl_online_recovery;
 
 extern long long sampling_threshold;
 
