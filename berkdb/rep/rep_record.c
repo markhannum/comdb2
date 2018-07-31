@@ -62,7 +62,6 @@ void bdb_rellock(void *bdb_state, const char *funcname, int line);
 int bdb_is_open(void *bdb_state);
 int rep_qstat_has_fills(void);
 
-int gbl_online_recovery = 1;
 extern int gbl_rep_printlock;
 extern int gbl_dispatch_rowlocks_bench;
 extern int gbl_rowlocks_bench_logical_rectype;
