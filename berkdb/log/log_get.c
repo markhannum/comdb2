@@ -303,7 +303,7 @@ __log_c_get_pp(logc, alsn, dbt, flags)
 	PANIC_CHECK(dbenv);
 
 	/* Validate arguments. */
-	switch (flags) {
+	switch (flags & ~(DB_LOG_PROBE)) {
 	case DB_CURRENT:
 	case DB_FIRST:
 	case DB_LAST:
@@ -349,16 +349,17 @@ __log_persistswap(persist)
 }
 
 static int
-__log_c_get_timed(logc, alsn, dbt, flags)
+__log_c_get_timed(logc, alsn, dbt, inflags)
 	DB_LOGC *logc;
 	DB_LSN *alsn;
 	DBT *dbt;
-	u_int32_t flags;
+	u_int32_t inflags;
 {
 	DB_ENV *dbenv;
 	DB_LSN saved_lsn;
 	LOGP *persist;
 	int ret;
+    u_int32_t flags = (inflags & ~(DB_LOG_PROBE));
 
 	dbenv = logc->dbenv;
 
@@ -383,7 +384,7 @@ __log_c_get_timed(logc, alsn, dbt, flags)
 	 * DB_FIRST, DB_NEXT, DB_LAST or DB_PREV, repeat the operation, log
 	 * file header records aren't useful to applications.
 	 */
-	if ((ret = __log_c_get_int(logc, alsn, dbt, flags)) != 0) {
+	if ((ret = __log_c_get_int(logc, alsn, dbt, inflags)) != 0) {
 		*alsn = saved_lsn;
 		return (ret);
 	}
@@ -391,10 +392,10 @@ __log_c_get_timed(logc, alsn, dbt, flags)
 	    flags == DB_NEXT || flags == DB_LAST || flags == DB_PREV)) {
 		switch (flags) {
 		case DB_FIRST:
-			flags = DB_NEXT;
+			inflags = DB_NEXT;
 			break;
 		case DB_LAST:
-			flags = DB_PREV;
+			inflags = DB_PREV;
 			break;
 		}
 
@@ -405,7 +406,7 @@ __log_c_get_timed(logc, alsn, dbt, flags)
 			__os_ufree(dbenv, dbt->data);
 			dbt->data = NULL;
 		}
-		if ((ret = __log_c_get_int(logc, alsn, dbt, flags)) != 0) {
+		if ((ret = __log_c_get_int(logc, alsn, dbt, inflags)) != 0) {
 			*alsn = saved_lsn;
 			return (ret);
 		}
@@ -458,7 +459,7 @@ __log_c_get_int(logc, alsn, dbt, flags)
 	logfile_validity status;
 	u_int32_t cnt;
 	u_int8_t *rp;
-	int eof, is_hmac, ret, st, tot;
+	int eof, is_hmac, ret, st, tot, rand_probe;
 
 	dbenv = logc->dbenv;
 	dblp = dbenv->lg_handle;
@@ -470,6 +471,8 @@ __log_c_get_int(logc, alsn, dbt, flags)
 	 * release it as soon as we're done.
 	 */
 	rlock = F_ISSET(logc, DB_LOG_LOCKED) ? L_ALREADY : L_NONE;
+    rand_probe = LF_ISSET(DB_LOG_PROBE);
+    LF_CLR(DB_LOG_PROBE);
 
 	nlsn = logc->c_lsn;
 	switch (flags) {
@@ -579,7 +582,7 @@ next_file:	++nlsn.file;
 		is_hmac = 0;
 	}
 	/* Check to see if the record is in the cursor's buffer. */
-	if ((ret = __log_c_incursor(logc, &nlsn, &hdr, &rp)) != 0) {
+	if ((ret = __log_c_incursor(logc, &nlsn, &hdr, &rp, rand_probe)) != 0) {
 		/*
 		fprintf(stderr, "__log_c_incursor error: %d for lsn=%d:%d \n",
 		    ret, nlsn.file, nlsn.offset);
@@ -800,11 +803,12 @@ __log_hdrswap(hdr, is_hmac)
  *	Check to see if the requested record is in the cursor's buffer.
  */
 static int
-__log_c_incursor_int(logc, lsn, hdr, pp)
+__log_c_incursor_int(logc, lsn, hdr, pp, probe)
 	DB_LOGC *logc;
 	DB_LSN *lsn;
 	HDR *hdr;
 	u_int8_t **pp;
+    int probe;
 {
 	u_int8_t *p;
 	int eof;
@@ -863,16 +867,17 @@ __log_c_incursor_int(logc, lsn, hdr, pp)
 }
 
 static int
-__log_c_incursor(logc, lsn, hdr, pp)
+__log_c_incursor(logc, lsn, hdr, pp, probe)
 	DB_LOGC *logc;
 	DB_LSN *lsn;
 	HDR *hdr;
 	u_int8_t **pp;
+    int probe;
 {
 	int rc;
 	int64_t start;
 	start = comdb2_time_epochus();
-	rc = __log_c_incursor_int(logc, lsn, hdr, pp);
+	rc = __log_c_incursor_int(logc, lsn, hdr, pp, probe);
 	logc->incursorus += (comdb2_time_epochus() - start);
 
 	if (rc == 0 && pp != NULL) 
