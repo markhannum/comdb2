@@ -273,7 +273,9 @@ static int db_comdb_truncate_log(Lua L) {
     }
     logmsg(LOGMSG_USER, "applying log from lsn {%u:%u}\n", file, offset);
 
-    truncate_log(file, offset);
+    if ((rc = truncate_log(file, offset, 1)) == -1) {
+        return luaL_error(L, "Can only truncate from master node");
+    }
 
     return 1;
 }
