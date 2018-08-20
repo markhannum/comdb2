@@ -202,7 +202,7 @@ int start_schema_change_tran(struct ireq *iq, tran_type *trans)
     if (rc != 0) {
         logmsg(LOGMSG_INFO, "Failed sc_set_running [%llx %s] rc %d\n", s->rqid,
                us, rc);
-        if (!s->db->doing_upgrade || s->fulluprecs || s->partialuprecs) {
+        if ((s->db && !s->db->doing_upgrade) || s->fulluprecs || s->partialuprecs) {
             errstat_set_strf(&iq->errstat, "Schema change already in progress");
             free_schema_change_type(s);
             return SC_CANT_SET_RUNNING;
