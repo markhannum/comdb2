@@ -2061,6 +2061,11 @@ static int handle_newsql_request(comdb2_appsock_arg_t *arg)
     if (arg->keepsocket)
         *arg->keepsocket = 1;
 
+    /* There are points when we can't accept any more connections. */
+    if (dbenv->no_more_sql_connections) {
+        return APPSOCK_RETURN_OK;
+    }
+
     if (tab->dbtype != DBTYPE_TAGGED_TABLE) {
         /*
           Don't change this message. The sql api recognises the first four
@@ -2075,11 +2080,6 @@ static int handle_newsql_request(comdb2_appsock_arg_t *arg)
 
     if (!arg->admin && !bdb_am_i_coherent(dbenv->bdb_env) &&
         !gbl_allow_incoherent_sql) {
-        return APPSOCK_RETURN_OK;
-    }
-
-    /* There are points when we can't accept any more connections. */
-    if (dbenv->no_more_sql_connections) {
         return APPSOCK_RETURN_OK;
     }
 

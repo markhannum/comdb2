@@ -5566,7 +5566,9 @@ int comdb2_reload_schemas(void *dbenv, void *inlsn)
     gbl_comdb2_reload_schemas = 1;
     logmsg(LOGMSG_INFO, "%s starting for [%d:%d]\n", __func__, *file, *offset);
     wrlock_schema_lk();
+
 retry_tran:
+    thedb->no_more_sql_connections = 1;
     tran = bdb_tran_begin_flags(thedb->bdb_env, NULL, &bdberr, 0);
     if (tran == NULL) {
         logmsg(LOGMSG_FATAL, "%s: failed to start tran\n", __func__);
@@ -5697,6 +5699,7 @@ retry_tran:
     }
 
     gbl_watcher_thread_ran = comdb2_time_epoch();
+    thedb->no_more_sql_connections = 1;
     unlock_schema_lk();
     logmsg(LOGMSG_INFO, "%s complete [%d:%d]\n", __func__, *file, *offset);
 
