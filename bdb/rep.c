@@ -2192,7 +2192,7 @@ void master_increment_gen(bdb_state_type *bdb_state)
     uint32_t mygen;
     bdb_state->dbenv->get_rep_gen(bdb_state->dbenv, &mygen);
     bdb_state->dbenv->rep_set_gen(bdb_state->dbenv, mygen+(20+(rand()%20)));
-    bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL, 0, DB_REP_MASTER);
+    bdb_state->dbenv->rep_start(bdb_state->dbenv, NULL, 0, DB_REP_MASTER|DB_REP_NOLOCK);
     bdb_add_dummy_llmeta();
 }
 

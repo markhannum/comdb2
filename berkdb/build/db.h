@@ -1094,6 +1094,7 @@ extern char *db_eid_invalid;
 #define	DB_REP_CLIENT		0x001
 #define	DB_REP_LOGSONLY		0x002
 #define	DB_REP_MASTER		0x004
+#define	DB_REP_NOLOCK		0x008
 
 /* Replication statistics. */
 struct __db_rep_stat {

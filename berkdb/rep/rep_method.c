@@ -202,7 +202,7 @@ __rep_start(dbenv, dbt, gen, flags)
 	rep = db_rep->region;
 
 	if ((ret = __db_fchk(dbenv, "DB_ENV->rep_start", flags,
-		DB_REP_CLIENT | DB_REP_LOGSONLY | DB_REP_MASTER)) != 0)
+		DB_REP_CLIENT | DB_REP_LOGSONLY | DB_REP_MASTER | DB_REP_NOLOCK)) != 0)
 		return (ret);
 
 	/* Exactly one of CLIENT and MASTER must be specified. */
@@ -227,7 +227,8 @@ __rep_start(dbenv, dbt, gen, flags)
 		return (EINVAL);
 	}
 
-	BDB_WRITELOCK("berk");
+    if (!LF_ISSET(DB_REP_NOLOCK))
+        BDB_WRITELOCK("berk");
 
 	/*
 	 * If we are about to become (or stay) a master.  Let's flush the log
@@ -235,7 +236,8 @@ __rep_start(dbenv, dbt, gen, flags)
 	 * client to master status.
 	 */
 	if (LF_ISSET(DB_REP_MASTER) && (ret = __log_flush(dbenv, NULL)) != 0) {
-		BDB_RELLOCK();
+        if (!LF_ISSET(DB_REP_NOLOCK))
+            BDB_RELLOCK();
 		return (ret);
 	}
 
@@ -488,7 +490,8 @@ errunlock:
 err:		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 	}
 
-	BDB_RELLOCK();
+    if (!LF_ISSET(DB_REP_NOLOCK))
+        BDB_RELLOCK();
 	return (ret);
 }
 
