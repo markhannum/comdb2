@@ -1,0 +1,3 @@
+enable_snapshot_isolation
+logmsg level info
+nowatch
