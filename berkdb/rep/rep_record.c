@@ -3645,6 +3645,9 @@ gap_check:		max_lsn_dbtp = NULL;
 		}
 		__os_free(dbenv, ckp_args);
 
+        if (gbl_is_physical_replicant)
+			ret = __log_flush(dbenv, NULL);
+
 		__memp_sync_out_of_band(dbenv, &rp->lsn);
 		break;
 	case DB___txn_regop_rowlocks:
