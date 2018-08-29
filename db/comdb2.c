@@ -5699,7 +5699,7 @@ retry_tran:
     }
 
     gbl_watcher_thread_ran = comdb2_time_epoch();
-    thedb->no_more_sql_connections = 1;
+    thedb->no_more_sql_connections = 0;
     unlock_schema_lk();
     logmsg(LOGMSG_INFO, "%s complete [%d:%d]\n", __func__, *file, *offset);
 
