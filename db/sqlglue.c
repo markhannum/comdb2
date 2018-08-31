@@ -8690,6 +8690,23 @@ char *sqlite3BtreeGetTblName(BtCursor *pCur)
     return pCur->db->tablename;
 }
 
+void cancel_snapisol_statements(void)
+{
+    int count=0;
+    struct sql_thread *thd;
+    pthread_mutex_lock(&gbl_sql_lock);
+    LISTC_FOR_EACH(&thedb->sql_threads, thd, lnk)
+    {
+        if (thd->clnt && (thd->clnt->dbtran.mode == TRANLEVEL_SERIAL ||
+                    thd->clnt->dbtran.mode == TRANLEVEL_SNAPISOL)) {
+            thd->clnt->stop_this_statement = 1;
+            count++;
+        }
+    }
+    pthread_mutex_unlock(&gbl_sql_lock);
+    logmsg(LOGMSG_INFO, "%s cancelled %d statements\n", __func__, count);
+}
+
 void cancel_sql_statement(int id)
 {
     int found = 0;

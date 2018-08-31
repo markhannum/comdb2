@@ -55,6 +55,8 @@ static int __rep_set_rep_transport __P((DB_ENV *, char *,
 		char *, int, void *)));
 static int __rep_set_check_standalone __P((DB_ENV *, int (*)(DB_ENV *)));
 static int __rep_set_truncate_sc_callback __P((DB_ENV *, int (*)(DB_ENV *, DB_LSN *)));
+static int __rep_set_pre_truncate_callback __P((DB_ENV *, int (*)(DB_ENV *, int, DB_LSN *)));
+static int __rep_set_post_truncate_callback __P((DB_ENV *, int (*)(DB_ENV *, int, DB_LSN *)));
 static int __rep_set_rep_truncate_callback __P((DB_ENV *, int (*)(DB_ENV *, DB_LSN *)));
 static int __rep_set_rep_db_pagesize __P((DB_ENV *, int));
 static int __rep_get_rep_db_pagesize __P((DB_ENV *, int *));
@@ -118,6 +120,8 @@ __rep_dbenv_create(dbenv)
 		dbenv->set_rep_request = __rep_set_request;
 		dbenv->set_rep_transport = __rep_set_rep_transport;
 		dbenv->set_truncate_sc_callback = __rep_set_truncate_sc_callback;
+		dbenv->set_pre_truncate_callback = __rep_set_pre_truncate_callback;
+		dbenv->set_post_truncate_callback = __rep_set_post_truncate_callback;
 		dbenv->set_rep_truncate_callback = __rep_set_rep_truncate_callback;
 		dbenv->rep_set_gen = __rep_set_gen_pp;
 		dbenv->rep_set_ignore_gen = __rep_set_ignore_gen;
@@ -895,6 +899,33 @@ __rep_set_rep_truncate_callback(dbenv, rep_truncate_callback)
 	return (0);
 }
 
+static int
+__rep_set_pre_truncate_callback(dbenv, pre_truncate_callback)
+	DB_ENV *dbenv;
+	int (*pre_truncate_callback) __P((DB_ENV *, int used, DB_LSN *lsn));
+{
+	PANIC_CHECK(dbenv);
+	if (pre_truncate_callback == NULL) {
+		__db_err(dbenv, "DB_ENV->pre_truncate_callback: no function specified");
+		return (EINVAL);
+	}
+	dbenv->pre_truncate_callback = pre_truncate_callback;
+	return (0);
+}
+
+static int
+__rep_set_post_truncate_callback(dbenv, post_truncate_callback)
+	DB_ENV *dbenv;
+	int (*post_truncate_callback) __P((DB_ENV *, int used, DB_LSN *lsn));
+{
+	PANIC_CHECK(dbenv);
+	if (post_truncate_callback == NULL) {
+		__db_err(dbenv, "DB_ENV->post_truncate_callback: no function specified");
+		return (EINVAL);
+	}
+	dbenv->post_truncate_callback = post_truncate_callback;
+	return (0);
+}
 
 static int
 __rep_set_truncate_sc_callback(dbenv, truncate_sc_callback)

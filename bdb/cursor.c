@@ -1844,6 +1844,20 @@ int bdb_clean_pglogs_queues(bdb_state_type *bdb_state)
     return 0;
 }
 
+/* Cancel txns, drain all cursor queues */
+void bdb_reset_asof(bdb_state_type *bdb_state, int file, int offset)
+{
+    struct commit_list *c;
+    pthread_mutex_lock(&bdb_asof_current_lsn_mutex);
+    while (c = listc_rtl(&pglogs_commit_list)) {
+        return_pglogs_commit_list(c);
+    }
+    bdb_clean_pglogs_queues(bdb_state);
+    bdb_asof_current_lsn.file = file;
+    bdb_asof_current_lsn.offset = offset;
+    pthread_mutex_unlock(&bdb_asof_current_lsn_mutex);
+}
+
 // Must be called holding the logfile_pglogs_repo_mutex
 static struct logfile_pglogs_entry *
 retrieve_logfile_pglogs(unsigned int filenum, int create)
@@ -2169,6 +2183,10 @@ static inline void set_del_lsn(const char *func, unsigned int line,
 #endif
 }
 
+pthread_mutex_t asof_lk = PTHREAD_MUTEX_INITIALIZER;
+
+extern int gbl_truncating_log;
+
 static void *pglogs_asof_thread(void *arg)
 {
     bdb_state_type *bdb_state = (bdb_state_type *)arg;
@@ -2177,12 +2195,19 @@ static void *pglogs_asof_thread(void *arg)
     struct commit_list *lcommit, *bcommit, *next;
     int pollms, ret;
 
-    while (!db_is_stopped()) {
+    pthread_mutex_lock(&asof_lk);
+
+    while (!db_is_stopped() || gbl_truncating_log) {
         // Remove list
         int count, i, dont_poll = 0, drain_limit;
         DB_LSN new_asof_lsn, lsn, del_lsn = {0};
         DB_LSN max_commit_lsn_in_queue = {0};
         // drain_limit = bdb_state->attr->asof_thread_drain_limit;
+
+        while (gbl_truncating_log) {
+            logmsg(LOGMSG_ERROR, "%s sleeping on truncate-log\n", __func__);
+            sleep (1);
+        }
 
         // Get commit list
         pthread_mutex_lock(&bdb_asof_current_lsn_mutex);
@@ -2363,13 +2388,14 @@ static void *pglogs_asof_thread(void *arg)
             lastpr = now;
         }
 #endif
-
+        pthread_mutex_unlock(&asof_lk);
         if (!dont_poll) {
             pollms = bdb_state->attr->asof_thread_poll_interval_ms <= 0
                          ? 500
                          : bdb_state->attr->asof_thread_poll_interval_ms;
             poll(NULL, 0, pollms);
         }
+        pthread_mutex_lock(&asof_lk);
     }
 
     return NULL;

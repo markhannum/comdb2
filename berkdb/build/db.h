@@ -2503,6 +2503,13 @@ struct __db_env {
 	int (*truncate_sc_callback)(DB_ENV *, DB_LSN *lsn);
 	int (*set_rep_truncate_callback) __P((DB_ENV *, int (*)(DB_ENV *, DB_LSN *lsn)));
 	int (*rep_truncate_callback)(DB_ENV *, DB_LSN *lsn);
+
+	int (*set_pre_truncate_callback) __P((DB_ENV *, int (*)(DB_ENV *, int, DB_LSN *lsn)));
+	int (*pre_truncate_callback)(DB_ENV *, int undo, DB_LSN *lsn);
+
+	int (*set_post_truncate_callback) __P((DB_ENV *, int (*)(DB_ENV *, int, DB_LSN *lsn)));
+	int (*post_truncate_callback)(DB_ENV *, int undo, DB_LSN *lsn);
+
     void (*rep_set_gen)(DB_ENV *, uint32_t gen);
     void (*rep_set_ignore_gen)(DB_ENV *, uint32_t gen);
 

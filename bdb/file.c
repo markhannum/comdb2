@@ -215,6 +215,29 @@ void set_repinfo_master_host(bdb_state_type *bdb_state, char *master,
     bdb_state->repinfo->master_host = master;
 }
 
+/* We are truncating asof files to this file / offset */
+static void bdb_truncate_asof_checkpoint(bdb_state_type *bdb_state, int filenum, int offset)
+{
+    struct checkpoint_list *ckp = NULL;
+    DB_LSN lsn;
+    lsn.file = filenum;
+    lsn.offset = offset;
+    Pthread_mutex_lock(&ckp_lst_mtx);
+    while ((ckp = listc_rbl(&ckp_lst)) != NULL) {
+        if (log_compare(&ckp->ckp_lsn, &lsn) > 0) {
+            free(ckp);
+        } else {
+            listc_abl(&ckp_lst, ckp);
+            break;
+        }
+    }
+
+    bdb_gbl_recoverable_lsn = lsn;
+    bdb_gbl_recoverable_timestamp = time(NULL);
+
+    Pthread_mutex_unlock(&ckp_lst_mtx);
+}
+
 static void bdb_checkpoint_list_delete_log(int filenum)
 {
     struct checkpoint_list *ckp = NULL;
@@ -246,6 +269,18 @@ static void bdb_snapshot_asof_delete_log(bdb_state_type *bdb_state, int filenum,
     bdb_delete_logfile_pglogs(bdb_state, filenum);
     bdb_delete_timestamp_lsn(bdb_state, timestamp);
 }
+
+extern void bdb_reset_asof(bdb_state_type *bdb_state, int file, int offset);
+
+void bdb_snapshot_asof_delete_truncate(bdb_state_type *bdb_state, int filenum,
+        int offset)
+{
+    bdb_truncate_asof_checkpoint(bdb_state, filenum, offset);
+    bdb_delete_logfile_pglogs(bdb_state, filenum);
+    bdb_delete_timestamp_lsn(bdb_state, time(NULL));
+    bdb_reset_asof(bdb_state, filenum, offset);
+}
+
 
 void bdb_checkpoint_list_get_ckplsn_before_lsn(DB_LSN lsn, DB_LSN *lsnout)
 {
@@ -2104,6 +2139,8 @@ extern int gbl_rowlocks;
 
 extern int comdb2_is_standalone(DB_ENV *dbenv);
 extern int comdb2_reload_schemas(DB_ENV *dbenv, DB_LSN *lsn);
+extern int comdb2_pre_truncate(DB_ENV *dbenv, int undo, DB_LSN *lsn);
+extern int comdb2_post_truncate(DB_ENV *dbenv, int undo, DB_LSN *lsn);
 extern int comdb2_replicated_truncate(DB_ENV *dbenv, DB_LSN *lsn);
 
 int bdb_is_standalone(void *dbenv, void *in_bdb_state)
@@ -2374,6 +2411,8 @@ static DB_ENV *dbenv_open(bdb_state_type *bdb_state)
                              berkdb_send_rtn);
 
     dbenv->set_check_standalone(dbenv, comdb2_is_standalone);
+    dbenv->set_pre_truncate_callback(dbenv, comdb2_pre_truncate);
+    dbenv->set_post_truncate_callback(dbenv, comdb2_post_truncate);
     dbenv->set_truncate_sc_callback(dbenv, comdb2_reload_schemas);
     dbenv->set_rep_truncate_callback(dbenv, comdb2_replicated_truncate);
 

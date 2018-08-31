@@ -5521,6 +5521,46 @@ void delete_prepared_stmts(struct sqlthdstate *thd);
 int reload_lua_sfuncs();
 int reload_lua_afuncs();
 void oldfile_list_clear(void);
+void cancel_snapisol_statements(void);
+extern int gbl_truncating_log;
+int bdb_osql_count_snapisol(void *bdb_state);
+void bdb_snapshot_asof_delete_truncate(bdb_state_type *bdb_state, int filenum,
+        int offset);
+
+extern pthread_mutex_t asof_lk;
+
+int comdb2_pre_truncate(void *dbenv, int undo, void *inlsn)
+{
+    int count=0, loop=0;
+    int *file = &(((int *)(inlsn))[0]);
+    int *offset = &(((int *)(inlsn))[1]);
+
+    pthread_mutex_lock(&asof_lk);
+    gbl_truncating_log = 1;
+    pthread_mutex_unlock(&asof_lk);
+
+    /* fail new snapshot sessions, wait for old sessions to complete */
+    if (undo) {
+        cancel_snapisol_statements();
+        while ((count = bdb_osql_count_snapisol(thedb->bdb_env)) != 0) {
+            logmsg(LOGMSG_INFO, "%s waiting for %d snapshot sessions to "
+                    "complete\n",__func__, count);
+            sleep (1);
+        }
+    }
+    return 0;
+}
+
+int comdb2_post_truncate(void *dbenv, int undo, void *inlsn)
+{
+    int *file = &(((int *)(inlsn))[0]);
+    int *offset = &(((int *)(inlsn))[1]);
+    if (undo) {
+        bdb_snapshot_asof_delete_truncate(thedb->bdb_env, *file, *offset);
+    }
+    gbl_truncating_log = 0;
+    return 0;
+}
 
 int comdb2_replicated_truncate(void *dbenv, void *inlsn)
 {

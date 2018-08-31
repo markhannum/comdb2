@@ -6662,11 +6662,15 @@ restart:
 
     logmsg(LOGMSG_INFO, "%s calling truncate with lsn [%d:%d]\n", __func__,
             lsnp->file, lsnp->offset);
+    /* If we are undoing any commits, we will need to halt any newsi
+     * transact_ions */
+    if (dbenv->pre_truncate_callback)
+        dbenv->pre_truncate_callback(dbenv, undo, lsnp);
+
     ret = __db_apprec(dbenv, lsnp, trunclsnp, undo, DB_RECOVER_NOCKP);
 
     logmsg(LOGMSG_INFO, "%s finished truncate, trunclsnp is [%d:%d]\n", __func__,
             trunclsnp->file, trunclsnp->offset);
-
 
     pthread_rwlock_unlock(&dbenv->recoverlk);
     have_recover_lk = 0;
@@ -6683,6 +6687,9 @@ restart:
     /* Tell replicants to truncate */
     if (F_ISSET(rep, REP_F_MASTER) && dbenv->rep_truncate_callback)
         dbenv->rep_truncate_callback(dbenv, trunclsnp);
+
+    if (dbenv->post_truncate_callback)
+        dbenv->post_truncate_callback(dbenv, undo, lsnp);
 
 err:
     if (have_recover_lk)

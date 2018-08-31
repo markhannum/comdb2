@@ -214,6 +214,7 @@ uint32_t bdb_latest_commit_gen = 0;
 pthread_mutex_t bdb_asof_current_lsn_mutex;
 pthread_cond_t bdb_asof_current_lsn_cond;
 
+
 void bdb_set_gbl_recoverable_lsn(void *lsn, int32_t timestamp)
 {
     if (!gbl_new_snapisol_asof)
@@ -241,7 +242,24 @@ unsigned int bdb_osql_trn_count = 0;
 int request_durable_lsn_from_master(bdb_state_type *bdb_state, 
         uint32_t *durable_file, uint32_t *durable_offset, uint32_t *durable_gen);
 
+int gbl_truncating_log = 0;
 
+int bdb_osql_count_snapisol(bdb_state_type *bdb_state)
+{
+    int count=0, rc;
+
+    rc = pthread_mutex_lock(&trn_repo_mtx);
+
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "pthread_mutex_lock %d %d\n", rc, errno);
+        abort();
+    }
+    if (trn_repo) {
+        count = listc_size(&trn_repo->trns);
+    }
+    rc = pthread_mutex_unlock(&trn_repo_mtx);
+    return count;
+}
 
 /**
  *  Register a shadow transaction with the repository
@@ -280,6 +298,13 @@ bdb_osql_trn_t *bdb_osql_trn_register(bdb_state_type *bdb_state,
     if ((shadow_tran->tranclass == TRANCLASS_SNAPISOL ||
          shadow_tran->tranclass == TRANCLASS_SERIALIZABLE)) {
         int behind = 0;
+
+        if (gbl_truncating_log) {
+            logmsg(LOGMSG_INFO,
+                   "%s returning NULL for snapisol because truncating_log "
+                   "flag is set\n", __func__);
+            return NULL;
+        }
 
         /* Assert that we have an lsn for ha-retries */
         if (is_ha_retry)
