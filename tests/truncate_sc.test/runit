@@ -12,7 +12,7 @@ export repname=rep$TESTID
 export repdir=${DBDIR}/$repname
 export comdb2ar=${COMDB2AR_EXE}
 export myhost=$(hostname)
-export physrep=1
+#export physrep=1
 export replive=1
 export total_tries=40
 export replog=$repdir/log.txt
@@ -30,7 +30,7 @@ function failexit
     typeset func="failexit"
     typeset f=$1
     write_prompt $func "$f failed: $2"
-    kill -9 $(cat $repdir/${repname}.pid)
+    [[ "$physrep" == 1 ]] && kill -9 $(cat $repdir/${repname}.pid)
     exit -1
 }
 
@@ -136,7 +136,7 @@ function create_table
     r=$?
     while [[ "$r" != 0 ]]; do
         let tries=tries-1
-        [[ "$tries" == 0 ]] && failexit "failed to create table  $1"
+        [[ "$tries" == 0 ]] && failexit "Failed to create table  $1"
         sleep 1
         $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table $1(a int)"
         r=$?
@@ -562,7 +562,6 @@ function assert_select_sp
     [[ $debug == "1" ]] && set -x
     typeset func="assert_select_sp"
     typeset prev_sp="$1"
-    typeset rep=$(select_sp_rep)
     typeset tries=$total_tries
     write_prompt $func "Assert select_sp is the same"
     typeset curr_sp=$(select_sp)
@@ -698,8 +697,8 @@ function assert_select_all_rep
     typeset func="assert_select_all_rep"
     typeset tries=$total_tries
     typeset good=0
-    [[ "$physrep" != 0 ]] && sleep $repsleep
-    while [[ "$physrep" != 0 && "$good" == "0" ]]; do
+    [[ "$physrep" == 1 ]] && sleep $repsleep
+    while [[ "$physrep" == 1 && "$good" == "0" ]]; do
         typeset sal=$(select_all_int)
         typeset rep=$(select_all_rep)
         if [[ "$sal" != "$rep" ]] ; then
@@ -1216,11 +1215,12 @@ EOF
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into strings(str) values ('{\"i\":20}')"
     lua_sfunc_lsn_1=$(get_current_lsn)
     lua_sfunc_jse_1=$(select_json_extract)
-    sleep $repsleep
-    write_prompt $func "Selecting json-extract from rep"
-    lua_sfunc_rep_1=$(select_json_extract_rep)
-    [[ "$lua_sfunc_rep_1" != "$lua_sfunc_jse_1" ]] && failexit $func "rep json-extract output differs"
-
+    if [[ "$physrep" == 1 ]]; then
+        sleep $repsleep
+        write_prompt $func "Selecting json-extract from rep"
+        lua_sfunc_rep_1=$(select_json_extract_rep)
+        [[ "$lua_sfunc_rep_1" != "$lua_sfunc_jse_1" ]] && failexit $func "rep json-extract output differs"
+    fi
 
     write_prompt $func "Dropping json_extract"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop lua scalar function json_extract"

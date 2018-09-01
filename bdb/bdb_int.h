@@ -469,6 +469,7 @@ struct tran_tag {
 
     /* Newsi pglogs queue hash */
     hash_t *pglogs_queue_hash;
+    signed char nolog;
 };
 
 struct seqnum_t {
@@ -1347,7 +1348,7 @@ int ll_dta_upgrade(bdb_state_type *bdb_state, int rrn, unsigned long long genid,
                    DB *dbp, tran_type *tran, int dtafile, int dtastripe,
                    DBT *dta);
 
-int add_snapisol_logging(bdb_state_type *bdb_state);
+int add_snapisol_logging(bdb_state_type *bdb_state, tran_type *tran);
 int phys_key_add(bdb_state_type *bdb_state, tran_type *tran,
                  unsigned long long genid, int ixnum, DBT *dbt_key,
                  DBT *dbt_data);

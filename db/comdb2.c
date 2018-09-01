@@ -5609,7 +5609,7 @@ int comdb2_reload_schemas(void *dbenv, void *inlsn)
 
 retry_tran:
     thedb->no_more_sql_connections = 1;
-    tran = bdb_tran_begin_flags(thedb->bdb_env, NULL, &bdberr, 0);
+    tran = bdb_tran_begin_flags(thedb->bdb_env, NULL, &bdberr, BDB_TRAN_NOLOG);
     if (tran == NULL) {
         logmsg(LOGMSG_FATAL, "%s: failed to start tran\n", __func__);
         abort();

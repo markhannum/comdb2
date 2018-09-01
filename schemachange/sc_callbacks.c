@@ -50,7 +50,7 @@ static int reload_rename_table(bdb_state_type *bdb_state, const char *name,
         return -1;
     }
 
-    tran = bdb_tran_begin(bdb_state, NULL, &bdberr);
+    tran = bdb_tran_begin_flags(bdb_state, NULL, &bdberr, BDB_TRAN_NOLOG);
     if (tran == NULL) {
         logmsg(LOGMSG_ERROR, "%s: failed to start tran\n", __func__);
         return -1;
@@ -93,7 +93,7 @@ static int reload_stripe_info(bdb_state_type *bdb_state)
     stop_threads(thedb);
     if (close_all_dbs() != 0) exit(1);
 
-    tran = bdb_tran_begin(bdb_state, NULL, &bdberr);
+    tran = bdb_tran_begin_flags(bdb_state, NULL, &bdberr, BDB_TRAN_NOLOG);
     if (tran == NULL) {
         logmsg(LOGMSG_ERROR, "%s: failed to start tran\n", __func__);
         resume_threads(thedb);
@@ -716,7 +716,7 @@ int scdone_callback(bdb_state_type *bdb_state, const char table[], void *arg,
     extern uint32_t gbl_rep_lockid;
 
     struct dbtable *olddb = get_dbtable_by_name(table);
-    tran = bdb_tran_begin(bdb_state, NULL, &bdberr);
+    tran = bdb_tran_begin_flags(bdb_state, NULL, &bdberr, BDB_TRAN_NOLOG);
     if (tran == NULL) {
         logmsg(LOGMSG_ERROR, "%s:%d can't begin transaction rc %d\n", __FILE__,
                __LINE__, bdberr);

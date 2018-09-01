@@ -124,7 +124,8 @@ static void txn_stats(FILE *out, bdb_state_type *bdb_state)
     active = stats->st_txnarray;
     for (i = 0; i < stats->st_nactive; i++) {
         logmsgf(LOGMSG_USER, out, "active transactions:\n");
-        logmsgf(LOGMSG_USER, out, " %d %d %s\n", active->txnid, active->parentid,
+        logmsgf(LOGMSG_USER, out, " td %u %d %d %s\n", active->tid,
+                active->txnid, active->parentid,
                 lsn_to_str(str, &(active->lsn)));
         active++;
     }

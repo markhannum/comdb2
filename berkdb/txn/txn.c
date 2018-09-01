@@ -572,6 +572,7 @@ __txn_begin_int_int(txn, retries, we_start_at_this_lsn, flags)
 	td->status = TXN_RUNNING;
 	td->flags = 0;
 	td->xa_status = 0;
+	td->thd_id = pthread_self();
 
 	off = R_OFFSET(&mgr->reginfo, td);
 	R_UNLOCK(dbenv, &mgr->reginfo);
@@ -611,8 +612,9 @@ __txn_begin_int_int(txn, retries, we_start_at_this_lsn, flags)
 
 err:
 	R_UNLOCK(dbenv, &mgr->reginfo);
-	if (!recovery)
+	if (!recovery) {
 		pthread_rwlock_unlock(&dbenv->recoverlk);
+	}
 	return (ret);
 }
 

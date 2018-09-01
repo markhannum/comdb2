@@ -162,9 +162,9 @@ static int get_row_lock_dta_minlk(bdb_state_type *bdb_state, DBC *dbcp,
 extern int gbl_is_physical_replicant;
 extern int gbl_comdb2_reload_schemas;
 
-int add_snapisol_logging(bdb_state_type *bdb_state)
+int add_snapisol_logging(bdb_state_type *bdb_state, tran_type *tran)
 {
-    if (bdb_state->attr->snapisol && !gbl_rowlocks && !gbl_is_physical_replicant && !gbl_comdb2_reload_schemas) {
+    if (bdb_state->attr->snapisol && !tran->nolog && !gbl_rowlocks) {
         return 1;
     } else {
         return 0;
@@ -196,7 +196,7 @@ int ll_dta_add(bdb_state_type *bdb_state, unsigned long long genid, DB *dbp,
     /* fall through */
     case TRANCLASS_PHYSICAL:
 
-        if (add_snapisol_logging(bdb_state)) {
+        if (add_snapisol_logging(bdb_state, tran)) {
             rc = bdb_state->dbenv->lock_clear_tracked_writelocks(
                 bdb_state->dbenv, tran->tid->txnid);
             if (rc) {
@@ -211,7 +211,7 @@ int ll_dta_add(bdb_state_type *bdb_state, unsigned long long genid, DB *dbp,
                              tran ? tran->tid : NULL, dbt_key, dbt_data,
                              tran_flags);
 
-        if (!outrc && add_snapisol_logging(bdb_state)) {
+        if (!outrc && add_snapisol_logging(bdb_state, tran)) {
             tran_type *parent = (tran->parent) ? tran->parent : tran;
             DBT dbt_tbl = {0};
             int iirc;
@@ -285,7 +285,7 @@ int ll_dta_del(bdb_state_type *bdb_state, tran_type *tran, int rrn,
     /* fall through */
     case TRANCLASS_PHYSICAL: {
 
-        if (add_snapisol_logging(bdb_state)) {
+        if (add_snapisol_logging(bdb_state, tran)) {
             rc = bdb_state->dbenv->lock_clear_tracked_writelocks(
                 bdb_state->dbenv, tran->tid->txnid);
             if (rc) {
@@ -410,7 +410,7 @@ int ll_dta_del(bdb_state_type *bdb_state, tran_type *tran, int rrn,
 
         rc = dbcp->c_close(dbcp);
 
-        if (!rc && add_snapisol_logging(bdb_state)) {
+        if (!rc && add_snapisol_logging(bdb_state, tran)) {
             tran_type *parent = (tran->parent) ? tran->parent : tran;
             DBT dbt_tbl = {0};
             int iirc;
@@ -482,7 +482,7 @@ int ll_key_del(bdb_state_type *bdb_state, tran_type *tran, int ixnum, void *key,
     /* fall through */
     case TRANCLASS_PHYSICAL:
 
-        if (add_snapisol_logging(bdb_state)) {
+        if (add_snapisol_logging(bdb_state, tran)) {
             rc = bdb_state->dbenv->lock_clear_tracked_writelocks(
                 bdb_state->dbenv, tran->tid->txnid);
             if (rc) {
@@ -571,7 +571,7 @@ int ll_key_del(bdb_state_type *bdb_state, tran_type *tran, int ixnum, void *key,
         /* now close our cursor */
         rc = dbcp->c_close(dbcp);
 
-        if (!rc && add_snapisol_logging(bdb_state)) {
+        if (!rc && add_snapisol_logging(bdb_state, tran)) {
             tran_type *parent = (tran->parent) ? tran->parent : tran;
             DBT dbt_tbl = {0};
             int iirc;
@@ -669,7 +669,7 @@ int ll_key_upd(bdb_state_type *bdb_state, tran_type *tran, char *table_name,
     /* fall through */
     case TRANCLASS_PHYSICAL:
 
-        if (add_snapisol_logging(bdb_state)) {
+        if (add_snapisol_logging(bdb_state, tran)) {
             rc = bdb_state->dbenv->lock_clear_tracked_writelocks(
                 bdb_state->dbenv, tran->tid->txnid);
             if (rc) {
@@ -747,7 +747,7 @@ int ll_key_upd(bdb_state_type *bdb_state, tran_type *tran, char *table_name,
         /* now close our cursor */
         rc = dbcp->c_close(dbcp);
 
-        if (!rc && add_snapisol_logging(bdb_state)) {
+        if (!rc && add_snapisol_logging(bdb_state, tran)) {
             tran_type *parent = (tran->parent) ? tran->parent : tran;
             DBT dbt_tbl = {0};
             int iirc;
@@ -821,7 +821,7 @@ int ll_key_add(bdb_state_type *bdb_state, unsigned long long ingenid,
     /* fall through */
     case TRANCLASS_PHYSICAL:
 
-        if (add_snapisol_logging(bdb_state)) {
+        if (add_snapisol_logging(bdb_state, tran)) {
             rc = bdb_state->dbenv->lock_clear_tracked_writelocks(
                 bdb_state->dbenv, tran->tid->txnid);
             if (rc) {
@@ -838,7 +838,7 @@ int ll_key_add(bdb_state_type *bdb_state, unsigned long long ingenid,
             return rc;
         }
 
-        if (!rc && add_snapisol_logging(bdb_state)) {
+        if (!rc && add_snapisol_logging(bdb_state, tran)) {
             tran_type *parent = (tran->parent) ? tran->parent : tran;
             DBT dbt_tbl = {0};
             int iirc;
@@ -940,7 +940,7 @@ static int ll_dta_upd_int(bdb_state_type *bdb_state, int rrn,
     /* fall through */
     case TRANCLASS_PHYSICAL:
 
-        if (add_snapisol_logging(bdb_state)) {
+        if (add_snapisol_logging(bdb_state, tran)) {
             rc = bdb_state->dbenv->lock_clear_tracked_writelocks(
                 bdb_state->dbenv, tran->tid->txnid);
             if (rc) {
@@ -1334,7 +1334,7 @@ static int ll_dta_upd_int(bdb_state_type *bdb_state, int rrn,
 
         bdberr = BDBERR_NOERROR;
 
-        if (!rc && add_snapisol_logging(bdb_state)) {
+        if (!rc && add_snapisol_logging(bdb_state, tran)) {
             tran_type *parent = (tran->parent) ? tran->parent : tran;
             DBT dbt_tbl = {0};
             int iirc;

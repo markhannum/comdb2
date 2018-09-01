@@ -1061,6 +1061,7 @@ struct __db_txn_active {
 	u_int32_t txnid;		/* Transaction ID */
 	u_int32_t parentid;		/* Transaction ID of parent */
 	DB_LSN	  lsn;			/* LSN when transaction began */
+    pthread_t tid;
 	u_int32_t xa_status;		/* XA status */
 	u_int8_t  xid[DB_XIDDATASIZE];	/* XA global transaction ID */
 };

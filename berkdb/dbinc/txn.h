@@ -42,6 +42,7 @@ typedef struct __txn_detail {
 	DB_LSN	last_lsn;		/* last lsn written for this txn */
 	DB_LSN	begin_lsn;		/* lsn of begin record */
 	roff_t	parent;			/* Offset of transaction's parent. */
+    pthread_t thd_id;
 
 #define	TXN_RUNNING		1
 #define	TXN_ABORTED		2

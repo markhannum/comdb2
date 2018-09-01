@@ -2197,15 +2197,15 @@ static void *pglogs_asof_thread(void *arg)
 
     pthread_mutex_lock(&asof_lk);
 
-    while (!db_is_stopped() || gbl_truncating_log) {
+    while (1) {
         // Remove list
         int count, i, dont_poll = 0, drain_limit;
         DB_LSN new_asof_lsn, lsn, del_lsn = {0};
         DB_LSN max_commit_lsn_in_queue = {0};
-        // drain_limit = bdb_state->attr->asof_thread_drain_limit;
 
-        while (gbl_truncating_log) {
-            logmsg(LOGMSG_ERROR, "%s sleeping on truncate-log\n", __func__);
+        while (db_is_stopped() || gbl_truncating_log) {
+            if (gbl_truncating_log)
+                logmsg(LOGMSG_INFO, "%s sleeping on truncate-log\n", __func__);
             sleep (1);
         }
 

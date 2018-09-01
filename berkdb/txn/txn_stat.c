@@ -109,6 +109,7 @@ __txn_stat(dbenv, statp, flags)
 			    ((TXN_DETAIL *)R_ADDR(&mgr->reginfo,
 			    txnp->parent))->txnid;
 		stats->st_txnarray[ndx].lsn = txnp->begin_lsn;
+		stats->st_txnarray[ndx].tid = txnp->thd_id;
 		if ((stats->st_txnarray[ndx].xa_status = txnp->xa_status) != 0)
 			memcpy(stats->st_txnarray[ndx].xid,
 			    txnp->xid, DB_XIDDATASIZE);
