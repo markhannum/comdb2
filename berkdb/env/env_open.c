@@ -315,9 +315,9 @@ __dbenv_open(dbenv, db_home, flags, mode)
         goto err;
     }
 
-    ret = pthread_rwlock_init(&dbenv->recoverlk, NULL);
+    ret = pthread_rwlock_init(&dbenv->online_recover_lk, NULL);
     if (ret) {
-        __db_err(dbenv, "Can't create recoverlk lock %d %s", ret, strerror(ret));
+        __db_err(dbenv, "Can't create online_recover_lk %d %s", ret, strerror(ret));
         goto err;
     }
 

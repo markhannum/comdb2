@@ -343,9 +343,18 @@ __rep_set_ignore_gen(dbenv, gen)
 {
 	DB_REP *db_rep;
 	REP *rep;
+	int ret;
+	extern pthread_mutex_t rep_apply_lk;
 	db_rep = dbenv->rep_handle;
 	rep = db_rep->region;
-    rep->ignore_gen = gen;
+	pthread_mutex_lock(&rep_apply_lk);
+	if ((ret = pthread_rwlock_wrlock(&dbenv->online_recover_lk)) != 0) {
+		logmsg(LOGMSG_FATAL, "%s error getting online_recover_lk, ret=%d\n",
+				__func__, ret);
+	}
+	rep->ignore_gen = gen;
+	pthread_rwlock_unlock(&dbenv->online_recover_lk);
+	pthread_mutex_unlock(&rep_apply_lk);
 }
 
 

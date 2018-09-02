@@ -2463,7 +2463,7 @@ struct __db_env {
 	struct fileid_track fileid_track;
 	db_recops recovery_pass;
 	pthread_rwlock_t dbreglk;
-	pthread_rwlock_t recoverlk;
+	pthread_rwlock_t online_recover_lk;
 	DB_LSN recovery_start_lsn;
 	int (*get_recovery_lsn) __P((DB_ENV*, DB_LSN*));
 	int (*set_recovery_lsn) __P((DB_ENV*, DB_LSN*));
@@ -2824,6 +2824,7 @@ struct __recovery_processor {
 	int has_logical_commit;
 	int has_schema_lock;
 	u_int32_t child;
+    u_int32_t ctrl_gen;
 	unsigned long long context;
 	u_int32_t lockid;
 	struct __recovery_queue **recovery_queues;
