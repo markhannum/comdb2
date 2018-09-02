@@ -1210,6 +1210,7 @@ end
 EOF
     write_prompt $func "Making json_extract a scalar sp"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create lua scalar function json_extract"
+    sleep $sleeptime
     write_prompt $func "Inserting some records"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into strings(str) values ('{\"i\":10}')"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into strings(str) values ('{\"i\":20}')"
