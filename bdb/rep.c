@@ -4677,6 +4677,7 @@ void berkdb_receive_msg(void *ack_handle, void *usr_ptr, char *from_host,
                     __func__, gen);
             bdb_state->dbenv->rep_set_ignore_gen(bdb_state->dbenv, gen);
         }
+        net_ack_message(ack_handle, 0);
 
         break;
 

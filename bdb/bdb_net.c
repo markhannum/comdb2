@@ -978,8 +978,8 @@ int send_ignore_gen(bdb_state_type *bdb_state)
     logmsg(LOGMSG_INFO, "%s sending ignore generation %u to cluster\n",
             __func__, gen);
     for (i = 0; i < count; i++) {
-        net_send(bdb_state->repinfo->netinfo, hostlist[i], USER_TYPE_IGNORE_GEN,
-                p_buf, sizeof(uint32_t), 0);
+        net_send_message(bdb_state->repinfo->netinfo, hostlist[i],
+                USER_TYPE_IGNORE_GEN, p_buf, sizeof(uint32_t), 1, 2 * 1000);
     }
     return 0;
 }
