@@ -25,6 +25,7 @@ static const char revid[] = "$Id: log.c,v 11.133 2003/09/13 19:20:37 bostic Exp 
 #include "dbinc/log.h"
 #include "dbinc/db_swap.h"
 #include "dbinc/txn.h"
+#include "logmsg.h"
 
 static int	__log_init __P((DB_ENV *, DB_LOG *));
 static int	__log_recover __P((DB_LOG *));
@@ -1062,15 +1063,23 @@ __log_vtruncate(dbenv, lsn, ckplsn, trunclsn)
 	int ret, t_ret;
 
 	/* Need to find out the length of this soon-to-be-last record. */
-	if ((ret = __log_cursor(dbenv, &logc)) != 0)
-		return (ret);
+	if ((ret = __log_cursor(dbenv, &logc)) != 0) {
+        logmsg(LOGMSG_FATAL, "%s error getting log cursor, %d\n", __func__,
+                ret);
+        abort();
+    }
 	memset(&log_dbt, 0, sizeof(log_dbt));
-	ret = __log_c_get(logc, lsn, &log_dbt, DB_SET);
+	if ((ret = __log_c_get(logc, lsn, &log_dbt, DB_SET))!=0) {
+        logmsg(LOGMSG_ERROR, "%s error in cget for [%d:%d], ret=%d\n",
+                __func__, lsn->file, lsn->offset, ret);
+    }
 	c_len = logc->c_len;
 	if ((t_ret = __log_c_close(logc)) != 0 && ret == 0)
 		ret = t_ret;
-	if (ret != 0)
+	if (ret != 0) {
+        logmsg(LOGMSG_ERROR, "%s failed, ret=%d\n", __func__, ret);
 		return (ret);
+    }
 
 	/* Now do the truncate. */
 	dblp = (DB_LOG *)dbenv->lg_handle;
@@ -1082,8 +1091,10 @@ __log_vtruncate(dbenv, lsn, ckplsn, trunclsn)
 	 * Flush the log so we can simply initialize the in-memory buffer
 	 * after the truncate.
 	 */
-	if ((ret = __log_flush_int(dblp, NULL, 0)) != 0)
+	if ((ret = __log_flush_int(dblp, NULL, 0)) != 0) {
+        logmsg(LOGMSG_ERROR,"%s log-flush returns %d\n", __func__, ret);
 		goto err;
+    }
 
 	end_lsn = lp->lsn;
 	lp->lsn = *lsn;
@@ -1126,8 +1137,12 @@ __log_vtruncate(dbenv, lsn, ckplsn, trunclsn)
 		*trunclsn = lp->lsn;
 
 	/* Truncate the log to the new point. */
-	if ((ret = __log_zero(dbenv, &lp->lsn, &end_lsn)) != 0)
+	if ((ret = __log_zero(dbenv, &lp->lsn, &end_lsn)) != 0) {
+        logmsg(LOGMSG_ERROR,"%s log_zero [%d:%d] to [%d:%d] returns %d\n",
+                __func__, lp->lsn.file, lp->lsn.offset, end_lsn.file,
+                end_lsn.offset, ret);
 		goto err;
+    }
 
 err:	R_UNLOCK(dbenv, &dblp->reginfo);
 	return (ret);
