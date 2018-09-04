@@ -1062,6 +1062,10 @@ __log_vtruncate(dbenv, lsn, ckplsn, trunclsn)
 	u_int32_t bytes, c_len;
 	int ret, t_ret;
 
+	/* Now do the truncate. */
+	dblp = (DB_LOG *)dbenv->lg_handle;
+	lp = (LOG *)dblp->reginfo.primary;
+
 	/* Need to find out the length of this soon-to-be-last record. */
 	if ((ret = __log_cursor(dbenv, &logc)) != 0) {
         logmsg(LOGMSG_FATAL, "%s error getting log cursor, %d\n", __func__,
@@ -1072,6 +1076,8 @@ __log_vtruncate(dbenv, lsn, ckplsn, trunclsn)
 	if ((ret = __log_c_get(logc, lsn, &log_dbt, DB_SET))!=0) {
         logmsg(LOGMSG_ERROR, "%s error in cget for [%d:%d], ret=%d\n",
                 __func__, lsn->file, lsn->offset, ret);
+        __log_flush_int(dblp, NULL, 0);
+        abort();
     }
 	c_len = logc->c_len;
 	if ((t_ret = __log_c_close(logc)) != 0 && ret == 0)
@@ -1081,9 +1087,6 @@ __log_vtruncate(dbenv, lsn, ckplsn, trunclsn)
 		return (ret);
     }
 
-	/* Now do the truncate. */
-	dblp = (DB_LOG *)dbenv->lg_handle;
-	lp = (LOG *)dblp->reginfo.primary;
 
 	R_LOCK(dbenv, &dblp->reginfo);
 
