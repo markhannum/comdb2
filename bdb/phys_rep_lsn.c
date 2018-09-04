@@ -237,9 +237,6 @@ int truncate_log_lock(bdb_state_type* bdb_state, unsigned int file,
 {
     extern int gbl_online_recovery;
     extern int gbl_is_physical_replicant;
-    DB_LSN trunc_lsn;
-    DBT logrec;
-    DB_LOGC *logc;
     char *msg = "truncate log";
     int online = gbl_online_recovery;
     int rc;
@@ -255,31 +252,6 @@ int truncate_log_lock(bdb_state_type* bdb_state, unsigned int file,
     } else {
         BDB_WRITELOCK(msg);
     }
-    trunc_lsn.file = file;
-    trunc_lsn.file = offset;
-
-    /* Verify LSN before truncating */
-    rc = bdb_state->dbenv->log_cursor(bdb_state->dbenv, &logc, 0);
-    if (rc) {
-        logmsg(LOGMSG_ERROR, "%s: can't get log cursor rc %d\n", __func__, rc);
-        BDB_RELLOCK();
-        return -1;
-    }
-
-    bzero(&logrec, sizeof(DBT));
-    logrec.flags = DB_DBT_MALLOC;
-    rc = logc->get(logc, &trunc_lsn, &logrec, DB_SET);
-    logc->close(logc, 0);
-
-    if (rc != 0) {
-        logmsg(LOGMSG_ERROR, "%s: error getting %d:%d: %d", __func__, file,
-                offset, rc);
-        BDB_RELLOCK();
-        return -1;
-    }
-
-    if (logrec.data)
-        free(logrec.data);
 
     bdb_state->dbenv->rep_verify_match(bdb_state->dbenv, file, offset, online);
     BDB_RELLOCK();

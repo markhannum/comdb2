@@ -74,12 +74,14 @@ function get_current_lsn
     [[ $debug == "1" ]] && set -x
     typeset func="get_current_lsn"
     typeset tries=$total_tries
-    r=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1")
+    typeset master=$(get_master)
+    r=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME --host $master "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1")
     while [[ -z "$r" ]]; do
         let tries=tries-1
         [[ "$tries" == "0" ]] && failexit $func "Failed to query lsn"
         sleep 1
-        r=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1")
+        master=$(get_master)
+        r=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME --host $master "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1")
     done
     echo "$r"
 }
