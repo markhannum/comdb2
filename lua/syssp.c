@@ -287,7 +287,8 @@ static int db_comdb_truncate_log(Lua L) {
         return luaL_error(L, 
                 "Minimum truncate lsn is {%d:%d}", min_file, min_offset);
     }
-    logmsg(LOGMSG_USER, "applying log from lsn {%u:%u}\n", file, offset);
+    logmsg(LOGMSG_INFO, "%s: truncating to lsn {%u:%u}\n", __func__, file,
+            offset);
 
     rc = truncate_log(file, offset, 1);
     logdelete_unlock();

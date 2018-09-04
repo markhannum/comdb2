@@ -194,9 +194,18 @@ function truncate_log
     [[ $debug == "1" ]] && set -x
     typeset func="truncate_log"
     typeset lsn="$1"
+    typeset tries=$total_tries
     typeset master=$(get_master)
     write_prompt $func "Truncating to $lsn"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "exec procedure sys.cmd.truncate_log(\"$lsn\")"
+    r=$?
+    while [[ $r != 0 ]]; do
+        let tries=tries-1
+        [[ "$tries" == 0 ]] && failexit $func "failed to truncate"
+        sleep 1
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME "exec procedure sys.cmd.truncate_log(\"$lsn\")"
+        r=$?
+    done
     typeset newlsn=$(get_current_lsn)
     write_prompt $func "Current lsn is $newlsn"
     sleep $sleeptime
