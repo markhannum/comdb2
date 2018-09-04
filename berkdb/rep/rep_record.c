@@ -3003,20 +3003,6 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 	max_lsn_dbtp = NULL;
 	bzero(&max_lsn, sizeof(max_lsn));
 
-    if (rep->ignore_gen >= rp->gen) {
-        static uint32_t count=0;
-        static time_t lastpr = 0;
-        int now;
-        count++;
-        if ((now = time(NULL)) - lastpr) {
-            logmsg(LOGMSG_INFO, "%s: ignoring lsn [%d:%d] gen %d on truncate, "
-                    "count=%u\n", __func__, rp->lsn.file, rp->lsn.offset, rp->gen,
-                    count);
-            lastpr=now;
-        }
-        return 0;
-    }
-
 	if (gbl_verify_rep_log_records && rec->size >= HDR_NORMAL_SZ)
 		LOGCOPY_32(&rectype, rec->data);
 
@@ -4133,11 +4119,6 @@ processor_thd(struct thdpool *pool, void *work, void *thddata, int op)
 	}
 
 	have_online_recover_lk = 1;
-	if (rep->ignore_gen >= rp->ctrl_gen) {
-		logmsg(LOGMSG_ERROR, "%s ignoring ctrl_gen %u, ignore_gen is %d\n",
-				__func__, rp->ctrl_gen, rep->ignore_gen);
-		goto err;
-	}
 
 	if ((ret = __log_cursor(dbenv, &logc)) != 0)
 		goto err;

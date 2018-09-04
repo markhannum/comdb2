@@ -446,6 +446,8 @@ __txn_begin_int_int(txn, retries, we_start_at_this_lsn, flags)
 	DB_LSN *we_start_at_this_lsn;
 	u_int32_t flags;
 {
+
+	void __set_last_txnid(DB_ENV *dbenv, u_int32_t txnid, const char *func, int line); 
 	DB_ENV *dbenv;
 	DB_LSN begin_lsn, null_lsn;
 	DB_TXNMGR *mgr;
@@ -518,8 +520,9 @@ __txn_begin_int_int(txn, retries, we_start_at_this_lsn, flags)
 	 * the maximum valid value, so check for it and wrap manually.
 	 */
 	if (region->last_txnid == TXN_MAXIMUM &&
-	    region->cur_maxid != TXN_MAXIMUM)
-		region->last_txnid = TXN_MINIMUM - 1;
+	    region->cur_maxid != TXN_MAXIMUM) {
+        __set_last_txnid(dbenv, TXN_MINIMUM - 1, __func__, __LINE__);
+    }
 
 	if (region->last_txnid == region->cur_maxid) {
 		if ((ret = __os_malloc(dbenv,
@@ -530,11 +533,14 @@ __txn_begin_int_int(txn, retries, we_start_at_this_lsn, flags)
 		    td != NULL;
 		    td = SH_TAILQ_NEXT(td, links, __txn_detail))
 			ids[nids++] = td->txnid;
-		region->last_txnid = TXN_MINIMUM - 1;
+        __set_last_txnid(dbenv, TXN_MINIMUM - 1, __func__, __LINE__);
 		region->cur_maxid = TXN_MAXIMUM;
-		if (nids != 0)
+		if (nids != 0) {
+            u_int32_t minp;
 			__db_idspace(ids, nids,
-			    &region->last_txnid, &region->cur_maxid);
+                    &minp, &region->cur_maxid);
+            __set_last_txnid(dbenv, minp, __func__, __LINE__);
+        }
 		__os_free(dbenv, ids);
 		if (DBENV_LOGGING(dbenv) &&
 		    (ret = __txn_recycle_log(dbenv, NULL,

@@ -79,6 +79,7 @@ __txn_regop_gen_recover(dbenv, dbtp, lsnp, op, info)
 	REP *rep;
 	DB_TXNHEAD *headp;
 	__txn_regop_gen_args *argp;
+    int from = 0;
 	int ret;
 
 #ifdef DEBUG_RECOVER
@@ -134,8 +135,10 @@ __txn_regop_gen_recover(dbenv, dbtp, lsnp, op, info)
 		else if (ret == TXN_NOTFOUND)
 			ret = __db_txnlist_add(dbenv,
 			    info, argp->txnid->txnid, TXN_IGNORE, NULL);
-		else if (ret != TXN_OK)
+		else if (ret != TXN_OK) {
+            from = __LINE__;
 			goto err;
+        }
 		/* else ret = 0; Not necessary because TXN_OK == 0 */
 	} else {
 		/* This is a normal commit; mark it appropriately. */
@@ -150,8 +153,10 @@ __txn_regop_gen_recover(dbenv, dbtp, lsnp, op, info)
 			    info, argp->txnid->txnid,
 			    argp->opcode == TXN_ABORT ?
 			    TXN_IGNORE : argp->opcode, lsnp);
-		else if (ret != TXN_OK)
+		else if (ret != TXN_OK) {
+            from = __LINE__;
 			goto err;
+        }
 		/* else ret = 0; Not necessary because TXN_OK == 0 */
 	}
 
@@ -164,9 +169,10 @@ __txn_regop_gen_recover(dbenv, dbtp, lsnp, op, info)
 
 	if (0) {
 err:		__db_err(dbenv,
-		    "txnid %lx commit record found, already on commit list",
-		    (u_long) argp->txnid->txnid);
+		    "txnid %lx commit record found, already on commit list, from line %d",
+		    (u_long) argp->txnid->txnid, from);
 		ret = EINVAL;
+        abort();
 	}
 	__os_free(dbenv, argp);
 
@@ -194,6 +200,7 @@ __txn_regop_recover(dbenv, dbtp, lsnp, op, info)
 	__txn_regop_args *argp;
 	unsigned long long context = 0;
 	int ret;
+    int from = 0;
 
 #ifdef DEBUG_RECOVER
 	(void)__txn_regop_print(dbenv, dbtp, lsnp, op, info);
@@ -234,8 +241,10 @@ __txn_regop_recover(dbenv, dbtp, lsnp, op, info)
 		else if (ret == TXN_NOTFOUND)
 			ret = __db_txnlist_add(dbenv,
 			    info, argp->txnid->txnid, TXN_IGNORE, NULL);
-		else if (ret != TXN_OK)
+		else if (ret != TXN_OK) {
+            from = __LINE__;
 			goto err;
+        }
 		/* else ret = 0; Not necessary because TXN_OK == 0 */
 	} else {
 		/* This is a normal commit; mark it appropriately. */
@@ -250,8 +259,10 @@ __txn_regop_recover(dbenv, dbtp, lsnp, op, info)
 			    info, argp->txnid->txnid,
 			    argp->opcode == TXN_ABORT ?
 			    TXN_IGNORE : argp->opcode, lsnp);
-		else if (ret != TXN_OK)
+		else if (ret != TXN_OK) {
+            from = __LINE__;
 			goto err;
+        }
 		/* else ret = 0; Not necessary because TXN_OK == 0 */
 	}
 
@@ -263,9 +274,10 @@ __txn_regop_recover(dbenv, dbtp, lsnp, op, info)
 
 	if (0) {
 err:		__db_err(dbenv,
-		    "txnid %lx commit record found, already on commit list",
-		    (u_long)argp->txnid->txnid);
+		    "txnid %lx commit record found, already on commit list, from line %d",
+		    (u_long)argp->txnid->txnid, from);
 		ret = EINVAL;
+        abort();
 	}
 	__os_free(dbenv, argp);
 
@@ -327,6 +339,7 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 	__txn_regop_rowlocks_args *argp;
 	LTDESC *lt = NULL;
 	int ret;
+    int from = 0;
 
 #ifdef DEBUG_RECOVER
 	(void)__txn_regop_rowlocks_print(dbenv, dbtp, lsnp, op, info);
@@ -365,6 +378,7 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 			{
 				logmsg(LOGMSG_ERROR, "%s: error allocating ltrans, ret=%d\n", 
 					__func__, ret);
+                from = __LINE__;
 				goto err;
 			}
 
@@ -374,6 +388,7 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 			{
 				logmsg(LOGMSG_ERROR, "%s: error calling txn_logical-start, %d\n", 
 					__func__, ret);
+                from = __LINE__;
 				goto err;
 			}
 
@@ -392,6 +407,7 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 			{
 				logmsg(LOGMSG_ERROR, "%s: txn_logical_commit error, %d\n", __func__, 
 					ret);
+                from = __LINE__;
 				goto err;
 			}
 
@@ -418,8 +434,10 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 		{
 			if ((ret = __txn_create_ltrans(dbenv, argp->ltranid,
 						       &lt, lsnp, &argp->begin_lsn, 
-						       &argp->last_commit_lsn)) != 0)
+						       &argp->last_commit_lsn)) != 0) {
+                from = __LINE__;
 				goto err;
+            }
 		}
 
 		lt->last_lsn = argp->last_commit_lsn;
@@ -432,6 +450,7 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 			{
 				logmsg(LOGMSG_ERROR, "%s: txn_logical_commit error, %d\n", __func__, 
 					ret);
+                from = __LINE__;
 				goto err;
 			}
 
@@ -450,8 +469,10 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 		else if (ret == TXN_NOTFOUND)
 			ret = __db_txnlist_add(dbenv,
 					       info, argp->txnid->txnid, TXN_IGNORE, NULL);
-		else if (ret != TXN_OK)
+		else if (ret != TXN_OK) {
+            from = __LINE__;
 			goto err;
+        }
 		/* else ret = 0; Not necessary because TXN_OK == 0 */
 	}
 	else
@@ -464,8 +485,10 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 			{
 				if((ret = __txn_create_ltrans(dbenv, argp->ltranid, 
 							      &lt, lsnp, &argp->begin_lsn, 
-							      &argp->last_commit_lsn)) != 0)
+							      &argp->last_commit_lsn)) != 0) {
+                    from = __LINE__;
 					goto err;
+                }
 			}
 
 			lt->last_lsn = *lsnp;
@@ -477,6 +500,7 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 								     lt->ltranid, lsnp)) != 0)
 				{
 					logmsg(LOGMSG_ERROR, "%s: txn_logical_commit error, %d\n", __func__, ret);
+                    from = __LINE__;
 					goto err;
 				}
                 
@@ -495,8 +519,10 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 					       info, argp->txnid->txnid,
 					       argp->opcode == TXN_ABORT ?
 					       TXN_IGNORE : argp->opcode, lsnp);
-		else if (ret != TXN_OK)
+		else if (ret != TXN_OK) {
+            from = __LINE__;
 			goto err;
+        }
 		/* else ret = 0; Not necessary because TXN_OK == 0 */
 	}
 
@@ -509,9 +535,10 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 
 	if (0) {
 err:		__db_err(dbenv,
-		    "txnid %lx commit record found, already on commit list",
-		    (u_long) argp->txnid->txnid);
+		    "txnid %lx commit record found, already on commit list, from linen %d",
+		    (u_long) argp->txnid->txnid, from);
 		ret = EINVAL;
+        abort();
 	}
 	__os_free(dbenv, argp);
 

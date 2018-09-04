@@ -370,6 +370,16 @@ __txn_region_destroy(dbenv, infop)
 	COMPQUIET(infop, NULL);
 }
 
+void __set_last_txnid(DB_ENV *dbenv, u_int32_t txnid, const char *func, int line)
+{
+	DB_TXNMGR *mgr;
+	DB_TXNREGION *region;
+	region = mgr->reginfo.primary;
+    region->last_txnid = txnid;
+    // XXX change to debug
+    logmsg(LOGMSG_INFO, "%s line %d set last_txnid to %u\n", func, line, txnid);
+}
+
 /*
  * __txn_id_set --
  *	Set the current transaction ID and current maximum unused ID (for
@@ -390,7 +400,7 @@ __txn_id_set(dbenv, cur_txnid, max_txnid)
 
 	mgr = dbenv->tx_handle;
 	region = mgr->reginfo.primary;
-	region->last_txnid = cur_txnid;
+    __set_last_txnid(dbenv, cur_txnid, __func__, __LINE__);
 	region->cur_maxid = max_txnid;
 
 	ret = 0;

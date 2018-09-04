@@ -251,7 +251,6 @@ int truncate_log_lock(bdb_state_type* bdb_state, unsigned int file,
     } else {
         BDB_WRITELOCK(msg);
     }
-    send_ignore_gen(bdb_state);
     bdb_state->dbenv->rep_verify_match(bdb_state->dbenv, file, offset, online);
     BDB_RELLOCK();
 

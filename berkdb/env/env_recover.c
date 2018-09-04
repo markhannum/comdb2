@@ -693,8 +693,7 @@ void log_recovery_progress(int stage, int progress)
 	}
 }
 
-
-
+void __set_last_txnid(DB_ENV *dbenv, u_int32_t txnid, const char *func, int line);
 
 /*
  * __db_apprec --
@@ -1241,8 +1240,9 @@ __db_apprec(dbenv, max_lsn, trunclsn, update, flags)
 		    0 ? LIMBO_TIMESTAMP : LIMBO_RECOVER)) != 0)
 		 goto err;
 
-	if (max_lsn == NULL)
-		region->last_txnid = ((DB_TXNHEAD *)txninfo)->maxid;
+	if (max_lsn == NULL) {
+        __set_last_txnid(dbenv, ((DB_TXNHEAD *)txninfo)->maxid, __func__, __LINE__);
+    }
 
 	if (dbenv->tx_timestamp != 0) {
 		/* We are going to truncate, so we'd best close the cursor. */
