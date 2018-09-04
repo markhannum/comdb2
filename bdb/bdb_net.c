@@ -18,6 +18,7 @@
 #include <string.h>
 #include <alloca.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -470,13 +471,17 @@ static void *udp_reader(void *arg)
     uint8_t *p_buf, *p_buf_end;
     filepage_type fp;
 
-    while (!db_is_stopped()) {
+    while (1) {
 #ifdef UDP_DEBUG
         struct sockaddr_in addr;
         struct sockaddr_in *paddr = &addr;
         struct sockaddr *ptr;
         socklen_t socklen = sizeof(addr);
         ptr = (struct sockaddr *)&addr;
+        if (db_is_stopped()) {
+            sleep (1);
+            continue;
+        }
         nrecv = recvfrom(fd, &buff, sizeof(buff), 0, ptr, &socklen);
 #else
         struct sockaddr_in *paddr = NULL;
