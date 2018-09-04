@@ -5555,7 +5555,7 @@ int comdb2_post_truncate(void *dbenv, int undo, void *inlsn)
 {
     int *file = &(((int *)(inlsn))[0]);
     int *offset = &(((int *)(inlsn))[1]);
-    if (undo) {
+    if (undo && gbl_snapisol && gbl_new_snapisol) {
         bdb_snapshot_asof_delete_truncate(thedb->bdb_env, *file, *offset);
     }
     gbl_truncating_log = 0;
