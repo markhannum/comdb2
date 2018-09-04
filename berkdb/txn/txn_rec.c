@@ -172,6 +172,7 @@ err:		__db_err(dbenv,
 		    "txnid %lx commit record found, already on commit list, from line %d",
 		    (u_long) argp->txnid->txnid, from);
 		ret = EINVAL;
+        dbenv->log_flush(dbenv, NULL);
         abort();
 	}
 	__os_free(dbenv, argp);
