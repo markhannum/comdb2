@@ -1584,8 +1584,8 @@ static int insert_ltran_pglog(bdb_state_type *bdb_state,
         NULL) {
         ltran_ent = allocate_ltran_pglogs_key();
         if (!ltran_ent) {
-            Pthread_mutex_unlock(&bdb_gbl_ltran_pglogs_mutex);
             logmsg(LOGMSG_ERROR, "%s: fail malloc ltran_ent\n", __func__);
+            Pthread_mutex_unlock(&bdb_gbl_ltran_pglogs_mutex);
             return -1;
         }
         ltran_ent->logical_tranid = logical_tranid;

@@ -23,22 +23,22 @@ extern pthread_key_t lock_key;
 
 #define Pthread_mutex_lock(mutex_ptr)                                          \
     {                                                                          \
-        fprintf(stderr, "pthread_mutex_lock try (%d)  %s:%d\n", mutex_ptr,     \
+        logmsg(LOGMSG_INFO, "pthread_mutex_lock try (%d)  %s:%d\n", mutex_ptr, \
                 __FILE__, __LINE__);                                           \
         if (pthread_mutex_lock(mutex_ptr) != 0) {                              \
-            fprintf(stderr, "lock failed: %s\n", strerror(errno));             \
+            logmsg(LOGMSG_FATAL, "lock failed: %s\n", strerror(errno));        \
             abort();                                                           \
         }                                                                      \
-        fprintf(stderr, "pthread_mutex_lock got (%d)  %s:%d\n", mutex_ptr,     \
+        logmsg(LOGMSG_INFO, "pthread_mutex_lock got (%d)  %s:%d\n", mutex_ptr, \
                 __FILE__, __LINE__);                                           \
     }
 
 #define Pthread_mutex_unlock(mutex_ptr)                                        \
     {                                                                          \
-        fprintf(stderr, "pthread_mutex_unlock(%d)  %s:%d\n", mutex_ptr,        \
+        logmsg(LOGMSG_INFO, "pthread_mutex_unlock(%d)  %s:%d\n", mutex_ptr,    \
                 __FILE__, __LINE__);                                           \
         if (pthread_mutex_unlock(mutex_ptr) != 0) {                            \
-            fprintf(stderr, "unlock failed: %s\n", strerror(errno));           \
+            logmsg(LOGMSG_FATAL, "unlock failed: %s\n", strerror(errno));      \
             abort();                                                           \
         }                                                                      \
     }
@@ -49,7 +49,7 @@ extern pthread_key_t lock_key;
     {                                                                          \
         int pt_mutex_rcode;                                                    \
         if ((pt_mutex_rcode = pthread_mutex_lock(mutex_ptr)) != 0) {           \
-            fprintf(stderr, "pthread_mutex_lock rcode is %d\n",                \
+            logmsg(LOGMSG_FATAL, "pthread_mutex_lock rcode is %d\n",           \
                     pt_mutex_rcode);                                           \
             abort();                                                           \
         }                                                                      \
@@ -59,7 +59,7 @@ extern pthread_key_t lock_key;
     {                                                                          \
         int pt_mutex_rcode;                                                    \
         if ((pt_mutex_rcode = pthread_mutex_unlock(mutex_ptr)) != 0) {         \
-            fprintf(stderr, "pthread_mutex_unlock rcode is %d\n",              \
+            logmsg(LOGMSG_FATAL, "pthread_mutex_unlock rcode is %d\n",         \
                     pt_mutex_rcode);                                           \
             abort();                                                           \
         }                                                                      \
