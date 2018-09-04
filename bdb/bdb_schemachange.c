@@ -379,7 +379,6 @@ int bdb_reload_rowlocks(bdb_state_type *bdb_state, scdone_t type, int *bdberr)
         str = "disable_rowlocks";
     }
 
-    BDB_WRITELOCK(str);
     if (type == rowlocks_on) {
         logmsg(LOGMSG_INFO, "%s enabling rowlocks\n", __func__);
         gbl_rowlocks = 1;
@@ -387,7 +386,6 @@ int bdb_reload_rowlocks(bdb_state_type *bdb_state, scdone_t type, int *bdberr)
         logmsg(LOGMSG_INFO, "%s disabling rowlocks\n", __func__);
         gbl_rowlocks = 0;
     }
-    BDB_RELLOCK();
     return 0;
 }
 
