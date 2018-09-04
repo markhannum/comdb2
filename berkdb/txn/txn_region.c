@@ -374,6 +374,7 @@ void __set_last_txnid(DB_ENV *dbenv, u_int32_t txnid, const char *func, int line
 {
 	DB_TXNMGR *mgr;
 	DB_TXNREGION *region;
+	mgr = dbenv->tx_handle;
 	region = mgr->reginfo.primary;
     region->last_txnid = txnid;
     // XXX change to debug
