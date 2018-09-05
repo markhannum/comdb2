@@ -1107,14 +1107,9 @@ function luasp
     typeset func="luasp"
     write_prompt $func "Creating t1"
     typeset tries=$total_tries
+    assert_notable t1
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int, b blob)"
-    r=$?
-    while [[ "$r" != 0 ]]; do
-        let tries=tries-1
-        [[ "$tries" == 0 ]] && failexit $func "Couldn't create table t1"
-        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int, b blob)"
-    done
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values(1, x'12')" >/dev/null
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values(1, x'12')"
     luasp_lsn_1=$(get_current_lsn)
     luasp_sal_1=$(select_all)
     luasp_rtn_1=$(select_sp)
