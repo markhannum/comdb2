@@ -7,6 +7,7 @@ bash -n "$0" | exit 1
 dbnm=$1
 
 export sleeptime=5
+export scsleeptime=10
 export repsleep=5
 export repname=rep$TESTID
 export repdir=${DBDIR}/$repname
@@ -1122,6 +1123,7 @@ local function main()
 end
 }$$
 EOF
+    sleep $scsleeptime
     luasp_lsn_2=$(get_current_lsn)
     luasp_sal_2=$(select_all)
     luasp_ssp_2=$(select_sp)
@@ -1135,6 +1137,7 @@ local function main()
 end
 }$$
 EOF
+    sleep $scsleeptime
     luasp_lsn_3=$(get_current_lsn)
     luasp_sal_3=$(select_all)
     luasp_ssp_3=$(select_sp)
@@ -1142,6 +1145,7 @@ EOF
 
     write_prompt $func "Making v2 default sp"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "put default procedure return_number 'v2'"
+    sleep $scsleeptime
     luasp_lsn_4=$(get_current_lsn)
     luasp_sal_4=$(select_all)
     luasp_ssp_4=$(select_sp)
@@ -1149,6 +1153,7 @@ EOF
 
     write_prompt $func "Dropping v1"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop procedure return_number 'v1'"
+    sleep $scsleeptime
     luasp_lsn_5=$(get_current_lsn)
     luasp_sal_5=$(select_all)
     luasp_ssp_5=$(select_sp)
@@ -1164,6 +1169,7 @@ local function main()
 end
 }$$
 EOF
+    sleep $scsleeptime
     luasp_lsn_6=$(get_current_lsn)
     luasp_sal_6=$(select_all)
     luasp_ssp_6=$(select_sp)
@@ -1172,6 +1178,7 @@ EOF
 
     write_prompt $func "Altering t1"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "alter table t1 add c blob"
+    sleep $scsleeptime
     luasp_lsn_7=$(get_current_lsn)
     luasp_sal_7=$(select_all)
     luasp_ssp_7=$(select_sp)
