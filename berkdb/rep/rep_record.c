@@ -6407,6 +6407,12 @@ __rep_dorecovery(dbenv, lsnp, trunclsnp, online)
 	}
 	have_recover_lk = 1;
 
+    if (F_ISSET(rep, REP_F_MASTER) && !gbl_is_physical_replicant) {
+        logmsg(LOGMSG_INFO, "%s setting truncate_gen to %d\n", __func__, 
+                rep->gen);
+        rep->truncate_gen = rep->gen;
+    }
+
 restart:
 	lockid = DB_LOCK_INVALIDID;
 	count = 0;
@@ -6591,13 +6597,13 @@ restart:
 		lockid = DB_LOCK_INVALIDID;
 	}
 
-	/* comdb2_reload_schemas will get the schema lock */
-	if (schema_lk_count && dbenv->truncate_sc_callback)
-		dbenv->truncate_sc_callback(dbenv, trunclsnp);
-
 	/* Tell replicants to truncate */
 	if (F_ISSET(rep, REP_F_MASTER) && dbenv->rep_truncate_callback)
 		dbenv->rep_truncate_callback(dbenv, trunclsnp);
+
+	/* comdb2_reload_schemas will get the schema lock */
+	if (schema_lk_count && dbenv->truncate_sc_callback)
+		dbenv->truncate_sc_callback(dbenv, trunclsnp);
 
 	if (dbenv->post_truncate_callback)
 		dbenv->post_truncate_callback(dbenv, undo, lsnp);

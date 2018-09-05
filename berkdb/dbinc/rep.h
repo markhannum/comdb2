@@ -28,7 +28,8 @@ typedef struct __rep {
 	u_int32_t	gen;		/* Replication generation number. */
 	u_int32_t	recover_gen;	/* Last generation number in log. */
     u_int32_t   committed_gen;  /* Last generation number written to a commit record */
-    DB_LSN      committed_lsn;  /* Last committed-lsn */
+	u_int32_t   truncate_gen;   /* Forbid checkpoints and logputs equal or less than this */
+	DB_LSN	  committed_lsn;  /* Last committed-lsn */
 	int		asites;		/* Space allocated for sites. */
 	int		nsites;		/* Number of sites in group. */
 	int		priority;	/* My priority in an election. */

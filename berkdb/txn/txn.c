@@ -905,6 +905,7 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 	DBT list_dbt_rl;
 	DB_ENV *dbenv;
 	DB_REP *db_rep;
+    int gencnt = 0;
 	REP *rep;
 	DB_LOCKREQ request;
 	DB_TXN *kid;
@@ -1094,6 +1095,14 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 					} else
 						gen = 0;
 
+                    if (gen && gen <= rep->truncate_gen) {
+                        logmsg(LOGMSG_FATAL, "%s line %d aborting before "
+                                "emitting faulty record, trun-gen=%u, "
+                                "my-gen=%u\n", __func__, __LINE__,
+                                rep->truncate_gen, rep->gen);
+                        __log_flush_pp(dbenv, NULL);
+                        abort();
+                    }
 					ret =
 					    __txn_regop_rowlocks_log(dbenv,
 					    txnp, lsn_out, &context, lflags,
@@ -1133,6 +1142,15 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 						gen = rep->gen;
 						MUTEX_UNLOCK(dbenv,
 						    db_rep->rep_mutexp);
+
+                        if (gen && gen <= rep->truncate_gen) {
+                            logmsg(LOGMSG_FATAL, "%s line %d aborting before "
+                                    "emitting faulty record, trun-gen=%u, "
+                                    "my-gen=%u\n", __func__, __LINE__,
+                                    rep->truncate_gen, rep->gen);
+                            __log_flush_pp(dbenv, NULL);
+                            abort();
+                        }
 
 						ret =
 						    __txn_regop_gen_log(dbenv,
@@ -2156,6 +2174,12 @@ __txn_checkpoint(dbenv, kbytes, minutes, flags)
 	TXN_DETAIL *txnp;
 	DB_LOG *dblp;
 	LOG *lp;
+	DB_REP *db_rep;
+	REP *rep;
+
+	db_rep = dbenv->rep_handle;
+	rep = db_rep->region;
+
 	time_t last_ckp_time, now;
 	int32_t timestamp;
 	u_int32_t bytes, gen, mbytes;
@@ -2312,8 +2336,15 @@ do_ckp:
 			return (0);
 		}
 
-		if (REP_ON(dbenv))
+		if (REP_ON(dbenv)) {
 			__rep_get_gen(dbenv, &gen);
+            if (rep->truncate_gen && rep->truncate_gen >= gen) {
+                pthread_rwlock_unlock(&dbenv->online_recover_lk);
+                logmsg(LOGMSG_INFO, "%s deferring checkpoint: gen is %u, "
+                        "truncate_gen is %u\n", __func__, gen, rep->truncate_gen);
+                return (0);
+            }
+        }
 
 		/* Get the fq-lock now to preserve our locking order */
 		dblp = dbenv->lg_handle;
