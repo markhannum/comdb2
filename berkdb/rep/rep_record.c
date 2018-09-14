@@ -1354,6 +1354,7 @@ skip:				/*
 		fromline = __LINE__;
 		if ((ret = __log_cursor(dbenv, &logc)) != 0)
 			goto errlock;
+
 		/* A confused replicant can send a request
 		 * for an invalid log record, and cause the master
 		 * to panic.  Don't let that happen. */
