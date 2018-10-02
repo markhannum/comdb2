@@ -397,7 +397,7 @@ DEF_ATTR(WARN_SLOW_REPLICANTS, warn_slow_replicants, BOOLEAN, 1,
          "Warn if any replicant's average response times over the last 10 "
          "seconds are significantly worse than the second worst replicant's.")
 DEF_ATTR(MAKE_SLOW_REPLICANTS_INCOHERENT, make_slow_replicants_incoherent,
-         BOOLEAN, 1, "Make slow replicants incoherent.")
+         BOOLEAN, 0, "Make slow replicants incoherent.")
 DEF_ATTR(SLOWREP_INCOHERENT_FACTOR, slowrep_incoherent_factor, QUANTITY, 2,
          "Make replicants incoherent that are this many times worse than the "
          "second worst replicant. This is the threshold for "
