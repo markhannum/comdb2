@@ -4412,13 +4412,13 @@ static inline int sql_writer_recover_deadlock(struct sqlclntstate *clnt)
         do {
             struct timespec ts;
             count++;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec++;
             if (count > 5) {
                 logmsg(LOGMSG_ERROR,
                        "%s wait for sql to release locks, count=%d\n", __func__,
                        count);
             }
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec++;
             pthread_cond_timedwait(&clnt->write_cond, &clnt->write_lock, &ts);
         /* Must check emitting_flag to handle trylock failures */
         } while (clnt->need_recover_deadlock == 1 && clnt->emitting_flag);
