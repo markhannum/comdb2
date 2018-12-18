@@ -2263,7 +2263,10 @@ retry_connect:
                hndl->node_seq, hndl->flags, hndl->num_hosts,
                hndl->num_hosts_sameroom);
 
-    if ((hndl->node_seq == 0) &&
+
+    if (hndl->flags & CDB2_CONNECT_MASTER) {
+        hndl->node_seq = hndl->master;
+    } else if ((hndl->node_seq == 0) &&
         ((hndl->flags & CDB2_RANDOM) || ((hndl->flags & CDB2_RANDOMROOM) &&
                                          (hndl->num_hosts_sameroom == 0)))) {
         hndl->node_seq = cdb2_random_int() % hndl->num_hosts;
@@ -2290,12 +2293,14 @@ retry_connect:
         }
     }
 
-    int start_seq = hndl->node_seq;
-    if (0 == cdb2_try_connect_range(hndl, start_seq, hndl->num_hosts))
-        return 0;
+    if (!(hndl->flags & CDB2_CONNECT_MASTER)) {
+        int start_seq = hndl->node_seq;
+        if (0 == cdb2_try_connect_range(hndl, start_seq, hndl->num_hosts))
+            return 0;
 
-    if (0 == cdb2_try_connect_range(hndl, 0, start_seq))
-        return 0;
+        if (0 == cdb2_try_connect_range(hndl, 0, start_seq))
+            return 0;
+    }
 
     if (hndl->sb == NULL) {
         /* Can't connect to any of the non-master nodes, try connecting to
@@ -4603,6 +4608,14 @@ void cdb2_cluster_info(cdb2_hndl_tp *hndl, char **cluster, int *ports, int max,
         if (ports)
             (ports[i]) = hndl->ports[i];
     }
+}
+
+const char *cdb2_master(cdb2_hndl_tp *hndl)
+{
+    if (hndl == NULL)
+        return "unallocated cdb2 handle";
+
+    return hndl->hosts[hndl->master];
 }
 
 const char *cdb2_cnonce(cdb2_hndl_tp *hndl)
