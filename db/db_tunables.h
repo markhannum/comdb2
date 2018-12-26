@@ -1659,4 +1659,9 @@ REGISTER_TUNABLE("force_incoherent",
                  TUNABLE_BOOLEAN, &gbl_force_incoherent,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("online_recovery",
+                 "Don't get the bdb-writelock for recovery.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_online_recovery,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
 #endif /* _DB_TUNABLES_H */
