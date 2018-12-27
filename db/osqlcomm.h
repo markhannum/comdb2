@@ -420,4 +420,9 @@ int osql_get_replicant_numops(const char *rpl, int has_uuid);
 int osql_extract_type(int usertype, void *dtap, int datalen, uuid_t *uuid,
         unsigned long long *rqid);
 
+int net_osql_rpl_tail(void *hndl, void *uptr, char *fromnode,
+                             int usertype, void *dtap, int dtalen, void *tail,
+                             int tailen, uint32_t flags);
+
+
 #endif
