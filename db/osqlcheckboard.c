@@ -535,7 +535,8 @@ int osql_chkboard_wait_commitrc(unsigned long long rqid, uuid_t uuid,
             /* is it the time to check the master? have we already done so? */
             now = comdb2_time_epochms();
 
-            if ((poke_timeout > 0) &&
+            extern int gbl_is_physical_replicant;
+            if (!gbl_is_physical_replicant && (poke_timeout > 0) &&
                 (entry->last_updated + poke_timeout + tm_recov_deadlk < now)) {
                 /* timeout the request */
                 logmsg(LOGMSG_ERROR,
@@ -553,7 +554,8 @@ int osql_chkboard_wait_commitrc(unsigned long long rqid, uuid_t uuid,
 
             if ((poke_freq > 0) && (entry->last_checked + poke_freq <= now)) {
                 /* try poke again */
-                if (entry->master == 0 || entry->master == gbl_mynode) {
+                if (gbl_is_physical_replicant) {
+                } else if (entry->master == 0 || entry->master == gbl_mynode) {
                     /* local checkup */
                     rc = osql_repository_session_exists(entry->rqid,
                                                         entry->uuid);
