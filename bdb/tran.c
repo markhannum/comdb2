@@ -1464,8 +1464,6 @@ void abort_at_exit(void)
     abort();
 }
 
-#include <physwrite.h>
-
 static int bdb_tran_commit_with_seqnum_int_int(
     bdb_state_type *bdb_state, tran_type *tran, seqnum_type *seqnum,
     int *bdberr, int getseqnum, uint64_t *out_txnsize, void *blkseq, int blklen,
@@ -1477,7 +1475,6 @@ static int bdb_tran_commit_with_seqnum_int_int(
     int set_seqnum = 0;
     uint32_t generation = 0;
     tran_type *physical_tran = NULL;
-    extern __thread physwrite_results_t *physwrite_results;
     DB_LSN lsn;
     DB_LSN old_lsn;
 
@@ -1924,12 +1921,6 @@ static int bdb_tran_commit_with_seqnum_int_int(
     /* Huh? */
     default:
         abort();
-    }
-
-    if (physwrite_results) {
-        assert(physwrite_results->done == 0);
-        physwrite_results->commit_file = lsn.file;
-        physwrite_results->commit_offset = lsn.offset;
     }
 
     /* we're done if we werent told to get the seqnum */

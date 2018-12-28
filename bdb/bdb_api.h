@@ -2126,5 +2126,7 @@ int truncate_asof_pglogs(bdb_state_type *bdb_state, int file, int offset);
 
 void bdb_set_logical_live_sc(bdb_state_type *bdb_state);
 void bdb_clear_logical_live_sc(bdb_state_type *bdb_state);
+int last_durable_lsn(bdb_state_type *bdb_state, uint32_t *file,
+        uint32_t *offset, uint32_t *generation);
 
 #endif
