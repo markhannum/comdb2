@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <time.h>
+#include <poll.h>
 
 #include "phys_rep_lsn.h"
 #include "dbinc/rep_types.h"
@@ -104,20 +105,21 @@ int start_replication(void)
     return 0;
 }
 
-void close_repl_connection(void)
+void close_repl_connection(const char *func, int line)
 {
-    curr_cnct->last_failed = time(NULL);
     curr_cnct->is_up = 0;
     cdb2_close(repl_db);
     repl_db_connected = 0;
     if (gbl_verbose_physrep) {
-        logmsg(LOGMSG_USER, "%s closed handle\n", __func__);
+        logmsg(LOGMSG_USER, "%s closed handle from %s line %d\n",
+                __func__, func, line);
     }
 }
 
 int gbl_physrep_register_interval = 3600;
 static int last_register;
 int gbl_blocking_physrep = 0;
+int gbl_physrep_poll_ms = 1000;
 
 static void *keep_in_sync(void *args)
 {
@@ -143,9 +145,13 @@ repl_loop:
     while (do_repl) {
         if (repl_db_connected && ((now = time(NULL)) - last_register) >
                                      gbl_physrep_register_interval) {
-            close_repl_connection();
+            close_repl_connection(__func__, __LINE__);
+            repl_db = NULL;
             if (gbl_verbose_physrep) {
-                logmsg(LOGMSG_USER, "%s: forcing re-registration\n", __func__);
+                logmsg(LOGMSG_USER, "%s: forcing re-registration: "
+                        "last_register is %d, interval is %d time is %d\n",
+                        __func__, last_register, gbl_physrep_register_interval,
+                        now);
             }
         }
         if (repl_db_connected == 0) {
@@ -154,7 +160,7 @@ repl_loop:
                 info = get_last_lsn(thedb->bdb_env);
                 do_truncate = 1;
             } else {
-                sleep(1);
+                poll(NULL, 0, gbl_physrep_poll_ms);
                 continue;
             }
         }
@@ -163,7 +169,8 @@ repl_loop:
             info = get_last_lsn(thedb->bdb_env);
             prev_info = handle_truncation(repl_db, info);
             if (prev_info.file == 0) {
-                close_repl_connection();
+                close_repl_connection(__func__, __LINE__);
+                poll(NULL, 0, gbl_physrep_poll_ms);
                 continue;
             }
 
@@ -173,8 +180,21 @@ repl_loop:
             do_truncate = 0;
         }
 
-        if (repl_db_connected == 0)
+        if (prev_info.file == 0) {
+            prev_info = get_last_lsn(thedb->bdb_env);
+            if (prev_info.file == 0) {
+                close_repl_connection(__func__, __LINE__);
+                do_truncate = 1;
+                poll(NULL, 0, gbl_physrep_poll_ms);
+                continue;
+            }
+            gen = prev_info.gen;
+        }
+
+        if (repl_db_connected == 0) {
+            poll(NULL, 0, gbl_physrep_poll_ms);
             continue;
+        }
 
         info = get_last_lsn(thedb->bdb_env);
         if (info.file > 0) {
@@ -196,7 +216,7 @@ repl_loop:
 
             if ((rc = cdb2_run_statement(repl_db, sql_cmd)) != CDB2_OK) {
                 logmsg(LOGMSG_ERROR, "Couldn't query the database, retrying\n");
-                close_repl_connection();
+                close_repl_connection(__func__, __LINE__);
                 continue;
             }
 
@@ -204,12 +224,13 @@ repl_loop:
                 if (gbl_verbose_physrep)
                     logmsg(LOGMSG_USER, "%s can't find the next record\n",
                            __func__);
-                close_repl_connection();
+                close_repl_connection(__func__, __LINE__);
                 continue;
             }
 
             /* our log matches, so apply each record log received */
             while (do_repl && !do_truncate &&
+                   prev_info.file > 0 &&
                    (rc = cdb2_next_record(repl_db)) == CDB2_OK) {
                 /* check the generation id to make sure the master hasn't
                  * switched */
@@ -233,15 +254,22 @@ repl_loop:
             }
 
             if (rc != CDB2_OK_DONE || do_truncate) {
+                if (gbl_blocking_physrep)
+                    close_repl_connection(__func__, __LINE__);
                 do_truncate = 1;
+                continue;
+            }
+
+            if (prev_info.file == 0) {
+                close_repl_connection(__func__, __LINE__);
                 continue;
             }
         }
 
-        sleep(1);
+        poll(NULL, 0, gbl_physrep_poll_ms);
     }
 
-    close_repl_connection();
+    close_repl_connection(__func__, __LINE__);
 
     backend_thread_event(thedb, COMDB2_THR_EVENT_DONE_RDWR);
 
@@ -288,6 +316,7 @@ static LOG_INFO handle_record(LOG_INFO prev_info)
 {
     /* vars for 1 record */
     void *blob;
+    LOG_INFO next_info = {0};
     int blob_len;
     char *lsn;
     int64_t *timestamp;
@@ -301,6 +330,7 @@ static LOG_INFO handle_record(LOG_INFO prev_info)
 
     if ((rc = char_to_lsn(lsn, &file, &offset)) != 0) {
         logmsg(LOGMSG_ERROR, "Could not parse lsn:%s\n", lsn);
+        return next_info;
     }
 
     if (gbl_deferred_phys_flag && timestamp) {
@@ -327,8 +357,9 @@ static LOG_INFO handle_record(LOG_INFO prev_info)
                            REP_NEWFILE, NULL, 0);
         }
 
-        rc = apply_log(thedb->bdb_env->dbenv, file, offset, REP_LOG, blob,
-                       blob_len);
+        if (rc == 0)
+            rc = apply_log(thedb->bdb_env->dbenv, file, offset, REP_LOG, blob,
+                    blob_len);
     } else {
         logmsg(LOGMSG_WARN, "Been asked to stop, drop LSN {%u:%u}\n", file,
                offset);
@@ -336,13 +367,12 @@ static LOG_INFO handle_record(LOG_INFO prev_info)
     }
 
     if (rc != 0) {
-        logmsg(LOGMSG_ERROR, "Something went wrong with applying the logs\n");
+        logmsg(LOGMSG_ERROR, "%s: apply_log returned %d\n", __func__, rc);
+    } else {
+        next_info.file = file;
+        next_info.offset = offset;
+        next_info.size = blob_len;
     }
-
-    LOG_INFO next_info;
-    next_info.file = file;
-    next_info.offset = offset;
-    next_info.size = blob_len;
 
     return next_info;
 }
@@ -407,7 +437,7 @@ static int register_self()
             logmsg(LOGMSG_ERROR,
                    "Couldn't open connection to the cluster to find tier\n");
         }
-        sleep(1);
+        poll(NULL, 0, gbl_physrep_poll_ms);
     }
 
     logmsg(LOGMSG_WARN, "Been told to stop replicating\n");
@@ -464,8 +494,8 @@ static int find_new_repl_db(void)
                   seedsort);
             for (j = 0; j < cnct_idx[i]; j++) {
                 cnct = local_rep_dbs[i][j];
-                if (((now = time(NULL)) - cnct->last_failed) >
-                    gbl_physrep_reconnect_penalty) {
+                now = time(NULL);
+                if ((now - cnct->last_failed) > gbl_physrep_reconnect_penalty) {
                     if (gbl_verbose_physrep) {
                         logmsg(LOGMSG_USER,
                                "%s connecting against mach %s "
@@ -501,9 +531,9 @@ static int find_new_repl_db(void)
                     if (gbl_verbose_physrep) {
                         logmsg(LOGMSG_USER,
                                "%s skipping mach %s db %s tier %d idx %d: on "
-                               "recent last_fail @%ld vs %d\n",
+                               "recent last_fail @%ld vs %d: %ld\n",
                                __func__, cnct->hostname, cnct->dbname, i, j,
-                               cnct->last_failed, now);
+                               cnct->last_failed, now, now - cnct->last_failed);
                     }
                 }
             }
