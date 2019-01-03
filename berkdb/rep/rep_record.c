@@ -2988,7 +2988,7 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 	max_lsn_dbtp = NULL;
 	bzero(&max_lsn, sizeof(max_lsn));
 
-	if (rep->ignore_gen >= rp->gen) {
+	if (!gbl_is_physical_replicant && rep->ignore_gen >= rp->gen) {
 		static uint32_t count=0;
 		static time_t lastpr = 0;
 		int now;
