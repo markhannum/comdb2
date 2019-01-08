@@ -1179,7 +1179,7 @@ restart:
 		lsn = rep->committed_lsn;
 
 	static uint32_t last_egen = 0;
-	if(last_egen && last_egen >= rep->egen)
+	if(last_egen && last_egen > rep->egen)
 		abort();
 	last_egen = rep->egen;
 
