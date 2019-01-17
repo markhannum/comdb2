@@ -910,11 +910,14 @@ struct cdb2_hndl {
     uint64_t timestampus; // client query timestamp of first try
     int ports[MAX_NODES];
     int hosts_connected[MAX_NODES];
+    SBUF2 *connections[MAX_NODES];
     SBUF2 *sb;
     int dbnum;
     int num_hosts;
     int num_hosts_sameroom;
     int node_seq;
+    int parallel_connections;
+    int parallel_connection_count;
     int in_trans;
     int temp_trans;
     int is_retry;
@@ -1986,11 +1989,14 @@ static int cdb2portmux_route(cdb2_hndl_tp *hndl, const char *remote_host,
     return fd;
 }
 
+enum { CONNECT_FLAGS_PARALLEL = 0x00000001, CONNECT_FLAGS_DISCARD = 0x00000002 };
+
 /* Tries to connect to specified node using sockpool.
  * If there is none, then makes a new socket connection.
  */
 static int newsql_connect(cdb2_hndl_tp *hndl, char *host, int port, int myport,
-                          int timeoutms, int indx)
+                          SBUF2 **connection, int timeoutms, int indx,
+                          uint32_t flags)
 {
 
     debugprint("entering, host '%s:%d'\n", host, port);
@@ -2049,24 +2055,32 @@ static int newsql_connect(cdb2_hndl_tp *hndl, char *host, int port, int myport,
     }
 #endif
 
-    hndl->sb = sb;
+    (*connection) = sb;
+    if (!(flags & CONNECT_FLAGS_PARALLEL))
+            hndl->sb = sb;
     hndl->num_set_commands_sent = 0;
     hndl->sent_client_info = 0;
     return 0;
 }
 
-static int newsql_disconnect(cdb2_hndl_tp *hndl, SBUF2 *sb, int line)
+static int newsql_disconnect_int(cdb2_hndl_tp *hndl, SBUF2 **insb, int line,
+        uint32_t flags)
 {
+    SBUF2 *sb = (*insb);
+
     if (sb == NULL)
         return 0;
 
-    debugprint("disconnecting from %s\n", hndl->hosts[hndl->connected_host]);
+    if (!(flags & CONNECT_FLAGS_PARALLEL)) {
+        debugprint("disconnecting from %s\n", hndl->hosts[hndl->connected_host]);
+    } else {
+        debugprint("disconnecting from parallel connection %p\n", sb);
+    }
     int fd = sbuf2fileno(sb);
 
     int timeoutms = 10 * 1000;
-    if (hndl->is_admin ||
-        (hndl->firstresponse &&
-         (!hndl->lastresponse ||
+    if ((flags & CONNECT_FLAGS_DISCARD) || hndl->is_admin ||
+        (hndl->firstresponse && (!hndl->lastresponse ||
           (hndl->lastresponse->response_type != RESPONSE_TYPE__LAST_ROW))) ||
         (!hndl->firstresponse) || hndl->in_trans) {
         sbuf2close(sb);
@@ -2075,9 +2089,29 @@ static int newsql_disconnect(cdb2_hndl_tp *hndl, SBUF2 *sb, int line)
         cdb2_socket_pool_donate_ext(hndl->newsql_typestr, fd, timeoutms / 1000,
                                     hndl->dbnum, 5, NULL, NULL);
     }
+    if (!(flags & CONNECT_FLAGS_PARALLEL)) {
+        hndl->connections[hndl->connected_host] = NULL;
+        hndl->sb = NULL;
+    }
+    else {
+        (*insb) = NULL;
+        hndl->parallel_connection_count--;
+        assert(hndl->parallel_connection_count >= 0);
+    }
+
     hndl->use_hint = 0;
-    hndl->sb = NULL;
     return 0;
+}
+
+static int newsql_disconnect(cdb2_hndl_tp *hndl, SBUF2 *sb, int line)
+{
+    return newsql_disconnect_int(hndl, &sb, line, 0);
+}
+
+static int newsql_disconnect_parallel(cdb2_hndl_tp *hndl, SBUF2 **sb, int line,
+        uint32_t flags)
+{
+    return newsql_disconnect_int(hndl, sb, line, flags|CONNECT_FLAGS_PARALLEL);
 }
 
 /* returns port number, or -1 for error*/
@@ -2183,7 +2217,8 @@ static inline int cdb2_try_on_same_room(cdb2_hndl_tp *hndl)
             try_node == hndl->connected_host || hndl->hosts_connected[i] == 1)
             continue;
         int ret = newsql_connect(hndl, hndl->hosts[try_node],
-                                 hndl->ports[try_node], 0, 100, i);
+                                 hndl->ports[try_node], 0,
+                                 &hndl->connections[try_node], 100, i, 0);
         if (ret != 0)
             continue;
         hndl->hosts_connected[try_node] = 1;
@@ -2203,7 +2238,8 @@ static inline int cdb2_try_connect_range(cdb2_hndl_tp *hndl, int begin, int end)
             i == hndl->connected_host || hndl->hosts_connected[i] == 1)
             continue;
         int ret =
-            newsql_connect(hndl, hndl->hosts[i], hndl->ports[i], 0, 100, i);
+            newsql_connect(hndl, hndl->hosts[i], hndl->ports[i], 0,
+                    &hndl->connections[i], 100, i, 0);
         if (ret != 0)
             continue;
         hndl->connected_host = i;
@@ -2257,10 +2293,53 @@ static inline int cdb2_try_resolve_ports(cdb2_hndl_tp *hndl)
     return 0;
 }
 
+static int replace_connection(cdb2_hndl_tp *hndl)
+{
+    int idx, i;
+
+    if (hndl->parallel_connection_count == 0)
+        return -1;
+
+    if (hndl->sb)
+        newsql_disconnect(hndl, hndl->sb, __LINE__);
+
+    /* Grab a parallel connection */
+    for (i = 0; i < hndl->parallel_connection_count; i++) {
+        while(idx < hndl->num_hosts && hndl->connections[idx] != NULL)
+            idx++;
+        assert(idx < hndl->num_hosts);
+        hndl->parallel_connection_count--;
+        debugprint("connected_host from parallel connection=%s\n",
+                hndl->hosts[idx]);
+        hndl->sb = hndl->connections[idx];
+        hndl->connected_host = idx;
+    }
+
+    return (hndl->sb == NULL) ? -1 : 0;
+}
+
 static int cdb2_connect_sqlhost(cdb2_hndl_tp *hndl)
 {
+    int idx;
     if (hndl->sb) {
         newsql_disconnect(hndl, hndl->sb, __LINE__);
+    }
+
+    if (replace_connection(hndl) == 0) {
+        return 0;
+    }
+
+    /* Grab a parallel connection */
+    for (int i = 0; i < hndl->parallel_connection_count; i++) {
+        while(idx < hndl->num_hosts && hndl->connections[idx] != NULL)
+            idx++;
+        assert(idx < hndl->num_hosts);
+        hndl->parallel_connection_count--;
+        debugprint("connected_host from parallel connection=%s\n",
+                hndl->hosts[idx]);
+        hndl->sb = hndl->connections[idx];
+        hndl->connected_host = idx;
+        return 0;
     }
 
     int requery_done = 0;
@@ -2311,8 +2390,9 @@ retry_connect:
         bzero(hndl->hosts_connected, sizeof(hndl->hosts_connected));
         if (hndl->ports[hndl->master] > 0) {
             int ret = newsql_connect(hndl, hndl->hosts[hndl->master],
-                                     hndl->ports[hndl->master], 0, 100,
-                                     hndl->master);
+                                     hndl->ports[hndl->master], 0,
+                                     &hndl->connections[hndl->master],
+                                     100, hndl->master, 0);
             if (ret == 0) {
                 hndl->connected_host = hndl->master;
                 return 0;
@@ -2335,6 +2415,86 @@ retry_connect:
 
     hndl->connected_host = -1;
     return -1;
+}
+
+static int close_parallel_connections(cdb2_hndl_tp *hndl)
+{
+    int i, idx = 0;
+    if (!hndl->is_hasql || hndl->parallel_connections == 0)
+        return 0;
+
+    for (i = 0 ; i < hndl->parallel_connection_count ; i++) {
+
+        while(idx < hndl->num_hosts && hndl->connections[idx] == NULL)
+            idx++;
+
+        if (idx >= hndl->num_hosts)
+            abort();
+
+        newsql_disconnect_parallel(hndl, &hndl->connections[idx],
+                __LINE__, 0);
+    }
+
+    assert(hndl->parallel_connection_count == 0);
+    return 0;
+
+}
+
+static int refresh_parallel_connections(cdb2_hndl_tp *hndl)
+{
+    int i, idx = 0, ret;
+    if (!hndl->is_hasql || hndl->parallel_connections == 0)
+        return 0;
+
+    if (hndl->sb == NULL && cdb2_connect_sqlhost(hndl))
+        return -1;
+
+    for (i = hndl->parallel_connection_count ; i < hndl->parallel_connections;
+            i++) {
+
+        while(idx < hndl->num_hosts && hndl->connections[idx] != NULL)
+            idx++;
+
+        if (idx >= hndl->num_hosts)
+            return -1;
+
+        if ((ret = newsql_connect(hndl, hndl->hosts[idx], hndl->ports[idx], 0,
+                    &hndl->connections[idx], 100, idx, 1)) == 0)
+            hndl->parallel_connection_count++;
+    }
+
+    return hndl->parallel_connection_count;
+}
+
+static int parallel_fread(cdb2_hndl_tp *hndl, int sz, void *orig)
+{
+    char *buf = NULL;
+    int b_read, i;
+
+    if (hndl->parallel_connection_count == 0)
+        return 0;
+
+    if (sz > 1024)
+        buf = malloc(sz);
+    else
+        buf = alloca(sz);
+
+    for (i = 0; i < hndl->parallel_connection_count; i++) {
+        if (hndl->connections[i] && hndl->connections[i] != hndl->sb) {
+            if ((b_read = sbuf2fread((char *)buf, 1, sz, hndl->connections[i]))
+                    != sz) {
+                newsql_disconnect_parallel(hndl, &hndl->connections[i],
+                        __LINE__, CONNECT_FLAGS_DISCARD);
+            } else if (orig && memcmp(buf, orig, sz)) {
+                newsql_disconnect_parallel(hndl, &hndl->connections[i],
+                        __LINE__, CONNECT_FLAGS_DISCARD);
+            }
+        }
+    }
+
+    if (sz > 1024)
+        free(buf);
+    return 0;
 }
 
 static inline void ack(cdb2_hndl_tp *hndl)
@@ -2367,8 +2527,13 @@ static int cdb2_read_record(cdb2_hndl_tp *hndl, uint8_t **buf, int *len, int *ty
         goto after_callback;
 
 retry:
-    b_read = sbuf2fread((char *)&hdr, 1, sizeof(hdr), sb);
+    while((b_read = sbuf2fread((char *)&hdr, 1, sizeof(hdr), sb)) != sizeof(hdr) &&
+            hndl->parallel_connection_count > 0)
+            replace_connection(hndl);
+
     debugprint("READ HDR b_read=%d, sizeof(hdr)=(%lu):\n", b_read, sizeof(hdr));
+
+    parallel_fread(hndl, sizeof(hdr), &hdr);
 
     if (b_read != sizeof(hdr)) {
         debugprint("bad read or numbytes, b_read=%d, sizeof(hdr)=(%lu):\n",
@@ -2410,7 +2575,11 @@ retry:
         goto after_callback;
     }
 
-    b_read = sbuf2fread((char *)(*buf), 1, hdr.length, sb);
+    while ((b_read = sbuf2fread((char *)(*buf), 1, hdr.length, sb)) != hdr.length &&
+            hndl->parallel_connection_count > 0)
+            replace_connection(hndl);
+
+    parallel_fread(hndl, hdr.length, NULL);
     debugprint("READ MSG b_read(%d) hdr.length(%d) type(%d)\n", b_read,
                hdr.length, hdr.type);
 
@@ -2502,6 +2671,7 @@ static void clear_responses(cdb2_hndl_tp *hndl)
 
 static int cdb2_effects_request(cdb2_hndl_tp *hndl)
 {
+    int i;
     if (hndl && !hndl->in_trans) {
         return -1;
     }
@@ -2532,7 +2702,22 @@ static int cdb2_effects_request(cdb2_hndl_tp *hndl)
     sbuf2write((char *)&hdr, sizeof(hdr), hndl->sb);
     sbuf2write((char *)buf, len, hndl->sb);
 
+    for (i = 0; i < hndl->parallel_connection_count; i++) {
+        if (hndl->connections[i] && hndl->connections[i] != hndl->sb) {
+            sbuf2write((char *)&hdr, sizeof(hdr), hndl->connections[i]);
+            sbuf2write((char *)buf, len, hndl->connections[i]);
+        }
+    }
+
     int rc = sbuf2flush(hndl->sb);
+
+    for (i = 0; i < hndl->parallel_connection_count; i++) {
+        if (hndl->connections[i] && hndl->connections[i] != hndl->sb)
+            if (sbuf2flush(hndl->connections[i]) < 0)
+                newsql_disconnect_parallel(hndl, &hndl->connections[i],
+                        __LINE__, CONNECT_FLAGS_DISCARD);
+    }
+
     free(buf);
     if (rc < 0)
         return -1;
@@ -3095,6 +3280,8 @@ int cdb2_close(cdb2_hndl_tp *hndl)
     if (hndl->sb)
         newsql_disconnect(hndl, hndl->sb, __LINE__);
 
+    close_parallel_connections(hndl);
+
     if (hndl->firstresponse) {
         cdb2__sqlresponse__free_unpacked(hndl->firstresponse, NULL);
         free((void *)hndl->first_buf);
@@ -3583,6 +3770,12 @@ static void process_set_local(cdb2_hndl_tp *hndl, const char *set_command)
         return;
     }
 
+    if (strncasecmp(p, "parallel", 8) == 0) {
+        p += sizeof("PARALLEL");
+        p = cdb2_skipws(p);
+        hndl->parallel_connections = atoi(p);
+    }
+
     if (strncasecmp(p, "admin", 5) == 0) {
         p += sizeof("ADMIN");
         p = cdb2_skipws(p);
@@ -3906,6 +4099,7 @@ static int cdb2_run_statement_typed_int(cdb2_hndl_tp *hndl, const char *sql,
         clear_snapshot_info(hndl, __LINE__);
         if ((rc = next_cnonce(hndl)) != 0)
             PRINT_RETURN(rc);
+        refresh_parallel_connections(hndl);
     }
     hndl->retry_all = 1;
     int run_last = 1;
