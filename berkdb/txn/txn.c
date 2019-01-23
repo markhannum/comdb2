@@ -890,6 +890,34 @@ static void transfer_pages_to_parent(DB_ENV *dbenv, DB_TXN *txn, DB_TXN *ptxn)
     txn->page_hash = NULL;
 }
 
+struct dbenv_commit_lsn {
+    DB_ENV *dbenv;
+    DB_LSN commit_lsn;
+};
+
+int bdb_insert_physpage(void *bdb_state, int8_t *fileid, db_pgno_t pg,
+        DB_LSN commit_lsn, void *page, size_t pgsz);
+
+static int copy_page_to_global(void *obj, void *arg)
+{
+    TXN_PAGE_TP *page = (TXN_PAGE_TP *)obj;
+    struct dbenv_commit_lsn *harg = (struct dbenv_commit_lsn *)arg;
+    bdb_insert_physpage(harg->dbenv->app_private, page->fileid, page->pgno,
+            harg->commit_lsn, page->page, page->pgsz);
+    __os_free(harg->dbenv, obj);
+    return 0;
+}
+
+static void copy_txn_pages_to_global(DB_ENV *dbenv, DB_TXN *txn, DB_LSN commit_lsn)
+{
+    struct dbenv_commit_lsn harg;
+    harg.dbenv = dbenv;
+    harg.commit_lsn = commit_lsn;
+    hash_for(txn->page_hash, copy_page_to_global, &harg);
+    hash_free(txn->page_hash);
+    txn->page_hash = NULL;
+}
+
 /*
  * __txn_commit --
  *	Commit a transaction.
@@ -1178,6 +1206,8 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 				}
 				Pthread_rwlock_unlock(&gbl_dbreg_log_lock);
 
+                copy_txn_pages_to_global(dbenv, txnp, txnp->last_lsn);
+
 				if (gbl_new_snapisol) {
 					if (!txnp->pglogs_hashtbl) {
 						DB_ASSERT(
@@ -1421,6 +1451,7 @@ int copy_page_to_txn(DB_ENV *dbenv, DB_TXN *txn, DB_MPOOLFILE *mpf, db_pgno_t pg
             abort();
         memcpy(&pgbuf->fileid, mpf->fileid, DB_FILE_ID_LEN);
         pgbuf->pgno = pg;
+        pgbuf->pgsz = mpf->mfp->stat.st_pagesize;
         ZERO_LSN(pgbuf->commit_lsn);
         memcpy(pgbuf->page, page, mpf->mfp->stat.st_pagesize);
         hash_add(txn->page_hash, pgbuf);
@@ -1436,9 +1467,6 @@ out:
         last_pr = now;
     }
     return 0;
-
-
-
 }
 
 

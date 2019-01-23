@@ -2449,6 +2449,30 @@ int bdb_insert_pglogs_int(hash_t *pglogs_hashtbl, unsigned char *fileid,
 int bdb_insert_physpage(void *bdb_state, int8_t *fileid, db_pgno_t pg,
         DB_LSN commit_lsn, void *page, size_t pgsz)
 {
+    int rc = 0, bdberr = 0, rtn = -1;
+    struct logfile_pglogs_entry *l_entry;
+    physpage_tmptbl_key rec;
+    Pthread_mutex_lock(&logfile_pglogs_repo_mutex);
+    if (logfile_pglogs_repo == NULL) {
+        Pthread_mutex_unlock(&logfile_pglogs_repo_mutex);
+        return rtn;
+    }
+    l_entry = retrieve_logfile_pglogs(bdb_state, commit_lsn.file, 1);
+    Pthread_mutex_lock(&l_entry->physpage_lk);
+    Pthread_mutex_unlock(&logfile_pglogs_repo_mutex);
+    memcpy(rec.fileid, fileid, DB_FILE_ID_LEN);
+    rec.pgno = pg;
+    rec.commit_lsn = commit_lsn;
+
+    rc = bdb_temp_table_insert(bdb_state, l_entry->physpage_cur, &rec,
+            sizeof(physpage_tmptbl_key), page, pgsz, &bdberr);
+
+    Pthread_mutex_unlock(&l_entry->physpage_lk);
+    if (rc) {
+        logmsg(LOGMSG_FATAL, "%s:%d failed with rc=%d, bdberr=%d\n", __func__,
+               __LINE__, rc, bdberr);
+        abort();
+    }
     return 0;
 }
 

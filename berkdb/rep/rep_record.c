@@ -389,10 +389,6 @@ out:
     return 0;
 }
 
-
-
-
-
 static inline void send_dupmaster(DB_ENV *dbenv, const char *func, int line)
 {
 	static unsigned long long call_count = 0;
