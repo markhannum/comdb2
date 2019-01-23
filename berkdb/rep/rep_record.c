@@ -4536,7 +4536,7 @@ int bdb_transfer_pglogs_to_queues(void *bdb_state, void *pglogs,
 
 static unsigned long long getlock_poll_count = 0;
 int gbl_rep_lock_time_ms = 0;
-int gbl_phys_snapshot = 1;
+extern int gbl_phys_snapshot;
 
 /*
  * __rep_process_txn --
@@ -4850,7 +4850,7 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 
         if (gbl_phys_snapshot) {
             if ((ret = __lock_get_list(dbenv, lockid, LOCK_GET_LIST_COPYPAGE,
-                            0, lock_dbt, NULL, NULL, NULL, stdout)) != 0)
+                            0, lock_dbt, &maxlsn, NULL, NULL, stdout)) != 0)
                 abort();
         }
 
@@ -5575,7 +5575,7 @@ bad_resize:	;
 
     if (gbl_phys_snapshot) {
         if ((ret = __lock_get_list(dbenv, lockid, LOCK_GET_LIST_COPYPAGE,
-                        0, lock_dbt, NULL, NULL, NULL, stdout)) != 0)
+                        0, lock_dbt, &maxlsn, NULL, NULL, stdout)) != 0)
             abort();
     }
 

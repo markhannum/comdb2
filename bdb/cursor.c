@@ -2449,13 +2449,15 @@ int bdb_insert_pglogs_int(hash_t *pglogs_hashtbl, unsigned char *fileid,
 int bdb_insert_physpage(void *bdb_state, int8_t *fileid, db_pgno_t pg,
         DB_LSN commit_lsn, void *page, size_t pgsz)
 {
-    int rc = 0, bdberr = 0, rtn = -1;
+    int rc = 0, bdberr = 0;
     struct logfile_pglogs_entry *l_entry;
     physpage_tmptbl_key rec;
     Pthread_mutex_lock(&logfile_pglogs_repo_mutex);
     if (logfile_pglogs_repo == NULL) {
         Pthread_mutex_unlock(&logfile_pglogs_repo_mutex);
-        return rtn;
+        logmsg(LOGMSG_ERROR, "%s adding to pagelogs before repo is inited\n",
+                __func__);
+        return 0;
     }
     l_entry = retrieve_logfile_pglogs(bdb_state, commit_lsn.file, 1);
     Pthread_mutex_lock(&l_entry->physpage_lk);
