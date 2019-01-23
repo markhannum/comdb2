@@ -948,6 +948,13 @@ typedef enum {
 		(op) == DB_TXN_BACKWARD_ROLL || (op) == DB_TXN_BACKWARD_ALLOC)
 #define	DB_REDO(op)	((op) == DB_TXN_FORWARD_ROLL || (op) == DB_TXN_APPLY)
 
+typedef  struct __txn_page_t {
+    int8_t fileid[DB_FILE_ID_LEN];
+    db_pgno_t pgno;
+    DB_LSN commit_lsn;
+    char page[1];
+} TXN_PAGE_TP;
+
 struct __db_txn {
 	DB_TXNMGR	*mgrp;		/* Pointer to transaction manager. */
 	DB_TXN		*parent;	/* Pointer to transaction's parent. */
@@ -1049,6 +1056,7 @@ struct __db_txn {
 					 * this is a new one */
 	void            *pglogs_hashtbl;
    pthread_mutex_t pglogs_mutex;
+   hash_t *page_hash;
 };
 
 /*

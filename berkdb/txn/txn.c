@@ -348,6 +348,10 @@ __txn_begin_main(dbenv, parent, txnpp, flags, retries)
 	return (0);
 
 err:
+    if (txn->page_hash) {
+        hash_free(txn->page_hash);
+        txn->page_hash = NULL;
+    }
 	__os_free(dbenv, txn);
 	return (ret);
 }
@@ -586,6 +590,7 @@ __txn_begin_int_int(txn, retries, we_start_at_this_lsn, flags)
 	txn->id = __txn_id;
 	txn->prepare = __txn_prepare;
 	txn->set_timeout = __txn_set_timeout;
+    txn->page_hash = hash_init(DB_FILE_ID_LEN + sizeof(db_pgno_t));
 
 	if (!recovery)
 		F_SET(txn, TXN_RECOVER_LOCK);
@@ -866,6 +871,24 @@ int __lock_set_parent_has_pglk_lsn(DB_ENV *dbenv, u_int32_t parentid, u_int32_t 
 /* This prevents dbreg logs from being logged between the LOCK_PUT_READ and
  * the commit record */
 extern pthread_rwlock_t gbl_dbreg_log_lock;
+
+static int transfer_pages(void *obj, void *arg)
+{
+    TXN_PAGE_TP *page = (TXN_PAGE_TP *)obj;
+    DB_TXN *ptxn = (DB_TXN *)arg;
+    /* We don't expect parent to have any locks */
+    if (hash_find(ptxn->page_hash, page))
+        abort();
+    hash_add(ptxn->page_hash, page);
+    return 0;
+}
+
+static void transfer_pages_to_parent(DB_ENV *dbenv, DB_TXN *txn, DB_TXN *ptxn)
+{
+    hash_for(txn->page_hash, transfer_pages, ptxn);
+    hash_free(txn->page_hash);
+    txn->page_hash = NULL;
+}
 
 /*
  * __txn_commit --
@@ -1195,6 +1218,7 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 				goto err;
 			}
 
+            transfer_pages_to_parent(dbenv, txnp, txnp->parent);
 
 			if (__lock_set_parent_has_pglk_lsn(dbenv,
 				txnp->parent->txnid, txnp->txnid) != 0)
@@ -1374,7 +1398,48 @@ __txn_commit_rl_pp(txnp, flags, ltranid, llid, last_commit_lsn, rlocks,
 	return (ret);
 }
 
+int copy_page_to_txn(DB_ENV *dbenv, DB_TXN *txn, DB_MPOOLFILE *mpf, db_pgno_t pg)
+{
+    TXN_PAGE_TP *pgbuf = NULL;
+    static int good_count = 0;
+    static int notfound_count = 0;
+    static int call_count = 0;
+    static time_t last_pr = 0;
+    time_t now;
+    int ret;
 
+    if (mpf != NULL) {
+        PAGE *page;
+        if ((ret = __memp_fget(mpf, &pg, 0, &page)) != 0) {
+            if (ret != DB_PAGE_NOTFOUND)
+                abort();
+            notfound_count++;
+            goto out;
+        }
+        size_t bufsz = offsetof(TXN_PAGE_TP, page) + mpf->mfp->stat.st_pagesize;
+        if ((ret = __os_malloc(dbenv, bufsz, &pgbuf)) != 0)
+            abort();
+        memcpy(&pgbuf->fileid, mpf->fileid, DB_FILE_ID_LEN);
+        pgbuf->pgno = pg;
+        ZERO_LSN(pgbuf->commit_lsn);
+        memcpy(pgbuf->page, page, mpf->mfp->stat.st_pagesize);
+        hash_add(txn->page_hash, pgbuf);
+        if ((ret = __memp_fput(mpf, page, 0)) != 0)
+            abort();
+    }
+    good_count++;
+out:
+    call_count++;
+    if ((now = time(NULL)) > last_pr) {
+        logmsg(LOGMSG_USER, "%s called %d times, %d good, %d not-found\n",
+                __func__, call_count, good_count, notfound_count);
+        last_pr = now;
+    }
+    return 0;
+
+
+
+}
 
 
 /*
@@ -1877,6 +1942,12 @@ __txn_end(txnp, is_commit)
 		STAILQ_REMOVE(&txnp->logs, lr, __txn_logrec, links);
 		__os_free(dbenv, lr);
 	}
+
+    if (txnp->page_hash) {
+        hash_free(txnp->page_hash);
+        txnp->page_hash = NULL;
+    }
+
 	if (F_ISSET(txnp, TXN_MALLOC)) {
 		MUTEX_THREAD_LOCK(dbenv, mgr->mutexp);
 		TAILQ_REMOVE(&mgr->txn_chain, txnp, links);

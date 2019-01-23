@@ -5431,7 +5431,8 @@ ilock_type_str(int type)
 	}
 }
 
-extern int copy_page_to_queue(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg);
+extern int copy_page_to_global(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg,
+        DB_LSN commit_lsn);
 
 static int
 __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
@@ -5550,7 +5551,7 @@ __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
 			}
 
             if (mpf)
-                copy_page_to_queue(dbenv, mpf, lock->pgno);
+                copy_page_to_global(dbenv, mpf, lock->pgno, *maxlsn);
 
 			GET_LSNCOUNT(dp, nlsns);
 			if (LF_ISSET(LOCK_GET_LIST_PRINTLOCK)) {
@@ -5744,7 +5745,7 @@ __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
 				}
 
                 if (mpf)
-                    copy_page_to_queue(dbenv, mpf, lock->pgno);
+                    copy_page_to_global(dbenv, mpf, lock->pgno, *maxlsn);
 
 				if (LF_ISSET(LOCK_GET_LIST_PRINTLOCK)) {
                     if (fp) 

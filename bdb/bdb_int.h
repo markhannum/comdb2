@@ -253,6 +253,12 @@ struct timestamp_lsn_key {
     unsigned long long context;
 };
 
+typedef struct physpage_tmptbl_key {
+    unsigned char fileid[DB_FILE_ID_LEN];
+    db_pgno_t pgno;
+    DB_LSN commit_lsn;
+} physpage_tmptbl_key;
+
 typedef struct pglogs_tmptbl_key {
     unsigned char fileid[DB_FILE_ID_LEN];
     db_pgno_t pgno;
@@ -277,6 +283,10 @@ struct logfile_pglogs_entry {
     pthread_mutex_t relinks_lk;
     struct temp_table *relinks_tbl;
     struct temp_cursor *relinks_cur;
+
+    pthread_mutex_t physpage_lk;
+    struct temp_table *physpage_tbl;
+    struct temp_cursor *physpage_cur;
 };
 
 struct checkpoint_list {
