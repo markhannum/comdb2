@@ -5431,6 +5431,8 @@ ilock_type_str(int type)
 	}
 }
 
+extern int copy_page_to_queue(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg);
+
 static int
 __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
     pglogs, keycnt, get_lock, ret_dp, fp)
@@ -5447,6 +5449,8 @@ __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
 {
 	DBT obj_dbt;
 	DB_LOCK ret_lock;
+	DB_MPOOLFILE *mpf;
+    DB *file_dbp;
 	DB_LOCK_ILOCK *lock;
 	DB_LOCKER *sh_locker;
 	DB_LOCKTAB *lt = NULL;
@@ -5458,7 +5462,7 @@ __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
 	int ret;
 	void *dp = NULL;
 
-	if (!pglogs)
+	if (!pglogs && !LF_ISSET(LOCK_GET_LIST_COPYPAGE))
 		return (0);
 
 	if (list->size == 0)
@@ -5466,7 +5470,8 @@ __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
 
 	ret = 0;
 	dp = list->data;
-	*keycnt = 0;
+    if (keycnt)
+        *keycnt = 0;
 
 	GET_COUNT(dp, nlocks);
 	if (get_lock)
@@ -5493,7 +5498,8 @@ __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
 	}
 	if (LF_ISSET(LOCK_GET_LIST_GETLOCK | LOCK_GET_LIST_PAGELOGS))
 		bdb_pglogs_key_list_init(pglogs, nkeys);
-	*keycnt = nkeys;
+    if (keycnt)
+        *keycnt = nkeys;
 	keyidx = 0;
 	for (i = 0; i < nlocks; i++) {
 		GET_PCOUNT(dp, npgno);
@@ -5505,6 +5511,29 @@ __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
 		obj_dbt.data = dp;
 		obj_dbt.size = size;
 		dp = ((u_int8_t *)dp) + ALIGN(size, sizeof(u_int32_t));
+
+        if (size == sizeof(DB_LOCK_ILOCK) && 
+                IS_WRITELOCK(lock_mode) &&
+                ((DB_LOCK_ILOCK*)obj_dbt.data)->type == DB_HANDLE_LOCK) {
+            logmsg(LOGMSG_INFO, "Skipped write handle lock on replicant\n");
+            continue;
+        }
+
+        mpf = NULL;
+        if (LF_ISSET(LOCK_GET_LIST_COPYPAGE) &&
+                size == sizeof(DB_LOCK_ILOCK) &&
+                ((DB_LOCK_ILOCK*)obj_dbt.data)->type == DB_PAGE_LOCK) {
+            UID_TO_DBREG *u = hash_find(dbenv->uid_to_dbreg, lock->fileid);
+            if (u == NULL)
+                abort();
+            if (u) {
+                if ((ret = __dbreg_id_to_db(dbenv, NULL, &file_dbp,
+                                u->fileid, 1, NULL, 0)) != 0)
+                    abort();
+                mpf = file_dbp->mpf;
+            } 
+        }
+
 		do {
 			if (LF_ISSET(LOCK_GET_LIST_GETLOCK)) {
 				uint32_t lflags =
@@ -5519,6 +5548,9 @@ __lock_list_parse_pglogs_int(dbenv, locker, flags, lock_mode, list, maxlsn,
 					goto err;
 				}
 			}
+
+            if (mpf)
+                copy_page_to_queue(dbenv, mpf, lock->pgno);
 
 			GET_LSNCOUNT(dp, nlsns);
 			if (LF_ISSET(LOCK_GET_LIST_PRINTLOCK)) {
@@ -5595,7 +5627,12 @@ __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
 	u_int32_t *keycnt;
     FILE *fp;
 {
+    static void *pgbuf = NULL;
+    static int pgbuf_sz = 0;
 	DBT obj_dbt;
+    DB *file_dbp;
+	DB_MPOOLFILE *mpf;
+    int pgsz;
 	DB_LOCK ret_lock;
 	DB_LOCK_ILOCK *lock;
 	DB_LOCKER *sh_locker;
@@ -5604,6 +5641,7 @@ __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
 	db_pgno_t save_pgno;
 	u_int16_t npgno, size;
 	u_int32_t i, nkeys = 0, nlocks = 0;
+    int dbreg;
 	int ret;
 	void *dp;
 	int locked_region = 0;
@@ -5618,7 +5656,8 @@ __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
 		region = lt->reginfo.primary;
 	}
 	dp = list->data;
-	*keycnt = 0;
+    if (keycnt)
+        *keycnt = 0;
 
 	if (list->size == sizeof(unsigned long long)) {
 		/* special case, no locks, only context
@@ -5673,6 +5712,22 @@ __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
                 logmsg(LOGMSG_INFO, "Skipped write handle lock on replicant\n");
                 continue;
             }
+
+			mpf = NULL;
+			if (LF_ISSET(LOCK_GET_LIST_COPYPAGE) &&
+					size == sizeof(DB_LOCK_ILOCK) &&
+					((DB_LOCK_ILOCK*)obj_dbt.data)->type == DB_PAGE_LOCK) {
+				UID_TO_DBREG *u = hash_find(dbenv->uid_to_dbreg, lock->fileid);
+				if (u == NULL)
+					abort();
+				if (u) {
+					if ((ret = __dbreg_id_to_db(dbenv, NULL, &file_dbp,
+									u->fileid, 1, NULL, 0)) != 0)
+						abort();
+					mpf = file_dbp->mpf;
+				} 
+			}
+
 			do {
 				if (LF_ISSET(LOCK_GET_LIST_GETLOCK)) {
 					uint32_t lflags =
@@ -5687,6 +5742,10 @@ __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
 						goto err;
 					}
 				}
+
+                if (mpf)
+                    copy_page_to_queue(dbenv, mpf, lock->pgno);
+
 				if (LF_ISSET(LOCK_GET_LIST_PRINTLOCK)) {
                     if (fp) 
                         fprintf(fp, "\t\tFILEID: ");
@@ -5759,7 +5818,7 @@ __lock_get_list_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
 
 	gbl_lock_get_list_start = time(NULL);
 	rc = __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list,
-	    pcontext, maxlsn, pglogs, keycnt, fp);
+	    NULL, maxlsn, pglogs, keycnt, fp);
 	gbl_lock_get_list_start = 0;
 	return rc;
 }

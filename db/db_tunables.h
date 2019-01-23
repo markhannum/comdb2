@@ -1629,4 +1629,14 @@ REGISTER_TUNABLE("abort_on_missing_osql_session",
                  TUNABLE_BOOLEAN, &gbl_abort_on_missing_osql_session,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("uid_to_dbreg_hash",
+                 "Maintain a uid-to-dbreg hash.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_uid_to_dbreg_hash,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("phys_snapshot",
+                 "Page-level snapshot implementation.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_phys_snapshot,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
 #endif /* _DB_TUNABLES_H */

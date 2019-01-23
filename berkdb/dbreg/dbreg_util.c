@@ -187,6 +187,16 @@ __dbreg_open_files_int(dbenv, flags)
 		 * For this we output DBREG_RCLOSE records so the files will be
 		 * closed on the forward pass.
 		 */
+		UID_TO_DBREG *u = hash_find(dbenv->uid_to_dbreg,
+				fnp->ufid);
+		if(!u) {
+			if ((ret = __os_malloc(dbenv, sizeof(*u), &u)) != 0)
+				abort();
+			memcpy(u->uid, fnp->ufid, DB_FILE_ID_LEN);
+			hash_add(dbenv->uid_to_dbreg, u);
+		}
+		u->fileid = fnp->id;
+
 		if ((ret = __dbreg_register_log(dbenv,
 			    NULL, &r_unused, oflags,
 			    F_ISSET(dblp,

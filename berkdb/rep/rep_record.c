@@ -312,6 +312,46 @@ extern int gbl_verbose_master_req;
 int gbl_last_master_req = 0;
 extern int rep_qstat_has_master_req(void);
 
+int copy_page_to_queue(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg)
+{
+    static void *pgbuf = NULL;
+    static int pgbuf_sz = 0;
+    static int good_count = 0;
+    static int notfound_count = 0;
+    static int call_count = 0;
+    static time_t last_pr = 0;
+    time_t now;
+    int ret;
+
+    if (mpf != NULL) {
+        PAGE *page;
+        if ((ret = __memp_fget(mpf, &pg, 0, &page)) != 0) {
+            if (ret != DB_PAGE_NOTFOUND)
+                abort();
+            notfound_count++;
+            goto out;
+        }
+        size_t pgsz = mpf->mfp->stat.st_pagesize;
+        if (pgsz > pgbuf_sz) {
+            if ((ret = __os_realloc(dbenv, pgsz, &pgbuf)) != 0)
+                abort();
+            pgbuf_sz = pgsz;
+        }
+        memcpy(pgbuf, page, pgsz);
+        if ((ret = __memp_fput(mpf, page, 0)) != 0)
+            abort();
+    }
+    good_count++;
+out:
+    call_count++;
+    if ((now = time(NULL)) > last_pr) {
+        logmsg(LOGMSG_USER, "%s called %d times, %d good, %d not-found\n",
+                __func__, call_count, good_count, notfound_count);
+        last_pr = now;
+    }
+    return 0;
+}
+
 static inline void send_dupmaster(DB_ENV *dbenv, const char *func, int line)
 {
 	static unsigned long long call_count = 0;
@@ -4454,6 +4494,7 @@ int bdb_transfer_pglogs_to_queues(void *bdb_state, void *pglogs,
 
 static unsigned long long getlock_poll_count = 0;
 int gbl_rep_lock_time_ms = 0;
+int gbl_phys_snapshot = 1;
 
 /*
  * __rep_process_txn --
@@ -4764,6 +4805,12 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 			}
 			comdb2_early_ack(dbenv, maxlsn, *commit_gen);
 		} 
+
+        if (gbl_phys_snapshot) {
+            if ((ret = __lock_get_list(dbenv, lockid, LOCK_GET_LIST_COPYPAGE,
+                            0, lock_dbt, NULL, NULL, NULL, stdout)) != 0)
+                abort();
+        }
 
 		if (txn_rl_args)
 			timestamp = txn_rl_args->timestamp;
@@ -5483,6 +5530,12 @@ bad_resize:	;
 		}
 		comdb2_early_ack(dbenv, maxlsn, *commit_gen);
 	}
+
+    if (gbl_phys_snapshot) {
+        if ((ret = __lock_get_list(dbenv, lockid, LOCK_GET_LIST_COPYPAGE,
+                        0, lock_dbt, NULL, NULL, NULL, stdout)) != 0)
+            abort();
+    }
 
 	if (txn_rl_args)
 		timestamp = txn_rl_args->timestamp;
