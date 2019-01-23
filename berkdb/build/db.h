@@ -952,6 +952,7 @@ typedef  struct __txn_page_t {
     int8_t fileid[DB_FILE_ID_LEN];
     db_pgno_t pgno;
     DB_LSN commit_lsn;
+    size_t pgsz;
     char page[1];
 } TXN_PAGE_TP;
 
