@@ -1654,4 +1654,15 @@ REGISTER_TUNABLE(
     "Number of iterations of PBKDF2 algorithm for password hashing.",
     TUNABLE_INTEGER, &gbl_pbkdf2_iterations, NOZERO | SIGNED, NULL, NULL,
     pbkdf2_iterations_update, NULL);
+
+REGISTER_TUNABLE("uid_to_dbreg_hash",
+                 "Maintain a uid-to-dbreg hash.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_uid_to_dbreg_hash,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("phys_snapshot",
+                 "Page-level snapshot implementation.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_phys_snapshot,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
 #endif /* _DB_TUNABLES_H */

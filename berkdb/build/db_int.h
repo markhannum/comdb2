@@ -393,6 +393,12 @@ typedef struct __dbpginfo {
 	DBTYPE  type;			/* DB type */
 } DB_PGINFO;
 
+
+typedef struct __uid_to_dbreg {
+    u_int8_t uid[DB_FILE_ID_LEN];
+    int32_t fileid;
+} UID_TO_DBREG;
+
 /*******************************************************
  * Log.
  *******************************************************/

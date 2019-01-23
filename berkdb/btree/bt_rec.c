@@ -59,9 +59,9 @@ __bam_split_recover(dbenv, dbtp, lsnp, op, info)
 	void *info;
 {
 	__bam_split_args *argp;
-	DB *file_dbp;
+	DB *file_dbp = NULL;
 	DB *dbp = NULL;
-	DBC *dbc;
+	DBC *dbc = NULL;
 	DB_MPOOLFILE *mpf;
 	PAGE *_lp, *lp, *np, *pp, *_rp, *rp, *sp;
 	db_pgno_t pgno, root_pgno;

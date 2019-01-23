@@ -270,6 +270,14 @@ __fop_file_remove_recover(dbenv, dbtp, lsnp, op, info)
 	 * This record is only interesting on the backward, forward, and
 	 * apply phases.
 	 */
+	if (op == DB_TXN_APPLY || op == DB_TXN_FORWARD_ROLL) {
+		UID_TO_DBREG *u = hash_find(dbenv->uid_to_dbreg, argp->real_fid.data);
+		if (u) {
+			hash_del(dbenv->uid_to_dbreg, u);
+			__os_free(dbenv, u);
+		}
+	}
+
 	if (op != DB_TXN_BACKWARD_ROLL &&
 	    op != DB_TXN_FORWARD_ROLL && op != DB_TXN_APPLY)
 		goto done;

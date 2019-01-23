@@ -64,6 +64,9 @@ int
 __dbreg_register_print(DB_ENV *dbenv, DBT *dbtp, DB_LSN *lsnp, db_recops notused2, void *notused3);
 
 
+int gbl_uid_to_dbreg_hash = 1;
+
+
 /*
  * PUBLIC: int __dbreg_register_recover
  * PUBLIC:     __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
@@ -92,6 +95,20 @@ __dbreg_register_recover(dbenv, dbtp, lsnp, op, info)
 	do_open = do_close = 0;
 	if ((ret = __dbreg_register_read(dbenv, dbtp->data, &argp)) != 0)
 		goto out;
+
+	if ((op == DB_TXN_OPENFILES || op == DB_TXN_POPENFILES ||
+                op == DB_TXN_APPLY) && gbl_uid_to_dbreg_hash) {
+        UID_TO_DBREG *u = hash_find(dbenv->uid_to_dbreg,
+                argp->uid.data);
+        if (!u) {
+            if ((ret = __os_malloc(dbenv, sizeof(*u), &u)) != 0) {
+                goto out;
+            }
+            memcpy(u->uid, argp->uid.data, DB_FILE_ID_LEN);
+            hash_add(dbenv->uid_to_dbreg, u);
+        }
+        u->fileid = argp->fileid;
+    }
 
 	/* we're in a forward recovery pass opening files - */
 	if ((op == DB_TXN_OPENFILES || op == DB_TXN_POPENFILES) &&

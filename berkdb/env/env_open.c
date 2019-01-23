@@ -370,6 +370,7 @@ __dbenv_open(dbenv, db_home, flags, mode)
 		Pthread_mutex_init(&dbenv->ltrans_active_lk, NULL);
 		Pthread_mutex_init(&dbenv->locked_lsn_lk, NULL);
 	}
+	dbenv->uid_to_dbreg = hash_init(DB_FILE_ID_LEN);
 	dbenv->mintruncate_state = MINTRUNCATE_START;
 	ZERO_LSN(dbenv->mintruncate_first);
 	ZERO_LSN(dbenv->last_mintruncate_dbreg_start);

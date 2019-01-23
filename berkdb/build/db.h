@@ -2492,6 +2492,7 @@ struct __db_env {
 
 	/* These fields are for changes to recovery code. */ 
 	struct fileid_track fileid_track;
+    hash_t *uid_to_dbreg;
 	pthread_mutex_t mintruncate_lk;
 	int mintruncate_state;
 	DB_LSN mintruncate_first;
