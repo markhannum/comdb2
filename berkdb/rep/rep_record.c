@@ -312,7 +312,8 @@ extern int gbl_verbose_master_req;
 int gbl_last_master_req = 0;
 extern int rep_qstat_has_master_req(void);
 
-int copy_page_to_queue(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg)
+static int copy_page_to_global_bench(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg,
+        DB_LSN commit_lsn)
 {
     static void *pgbuf = NULL;
     static int pgbuf_sz = 0;
@@ -323,24 +324,26 @@ int copy_page_to_queue(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg)
     time_t now;
     int ret;
 
-    if (mpf != NULL) {
-        PAGE *page;
-        if ((ret = __memp_fget(mpf, &pg, 0, &page)) != 0) {
-            if (ret != DB_PAGE_NOTFOUND)
-                abort();
-            notfound_count++;
-            goto out;
-        }
-        size_t pgsz = mpf->mfp->stat.st_pagesize;
-        if (pgsz > pgbuf_sz) {
-            if ((ret = __os_realloc(dbenv, pgsz, &pgbuf)) != 0)
-                abort();
-            pgbuf_sz = pgsz;
-        }
-        memcpy(pgbuf, page, pgsz);
-        if ((ret = __memp_fput(mpf, page, 0)) != 0)
+    if (mpf == NULL)
+        abort();
+
+    PAGE *page;
+    if ((ret = __memp_fget(mpf, &pg, 0, &page)) != 0) {
+        if (ret != DB_PAGE_NOTFOUND)
             abort();
+        notfound_count++;
+        goto out;
     }
+    size_t pgsz = mpf->mfp->stat.st_pagesize;
+    if (pgsz > pgbuf_sz) {
+        if ((ret = __os_realloc(dbenv, pgsz, &pgbuf)) != 0)
+            abort();
+        pgbuf_sz = pgsz;
+    }
+    memcpy(pgbuf, page, pgsz);
+    if ((ret = __memp_fput(mpf, page, 0)) != 0)
+        abort();
+
     good_count++;
 out:
     call_count++;
@@ -351,6 +354,44 @@ out:
     }
     return 0;
 }
+
+int gbl_phys_snapshot_bench = 0;
+
+int bdb_insert_physpage(void *bdb_state, uint8_t *fileid, db_pgno_t pg,
+        DB_LSN commit_lsn, void *page, size_t pgsz);
+
+int copy_page_to_global(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg,
+        DB_LSN commit_lsn)
+{
+    int ret;
+    void *pgmem;
+    PAGE *page;
+    size_t pgsz;
+
+    if (gbl_phys_snapshot_bench)
+        return copy_page_to_global_bench(dbenv, mpf, pg, commit_lsn);
+
+    if (mpf == NULL)
+        abort();
+
+    if ((ret = __memp_fget(mpf, &pg, 0, &page)) != 0) {
+        if (ret != DB_PAGE_NOTFOUND)
+            abort();
+        goto out;
+    }
+
+    pgsz = mpf->mfp->stat.st_pagesize;
+    if ((ret = bdb_insert_physpage(dbenv->app_private, mpf->fileid, pg,
+                    commit_lsn, page, pgsz)) != 0)
+        abort();
+
+out:
+    return 0;
+}
+
+
+
+
 
 static inline void send_dupmaster(DB_ENV *dbenv, const char *func, int line)
 {

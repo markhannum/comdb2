@@ -219,6 +219,7 @@ extern int gbl_logdelete_lock_trace;
 extern int gbl_flush_log_at_checkpoint;
 extern int gbl_uid_to_dbreg_hash;
 extern int gbl_phys_snapshot;
+extern int gbl_phys_snapshot_bench;
 
 extern long long sampling_threshold;
 

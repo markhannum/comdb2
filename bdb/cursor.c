@@ -1655,6 +1655,27 @@ static int logfile_pglog_tmptbl_cmp(void *_, int key1len, const void *key1,
         return log_compare(&pkey1->lsn, &pkey2->lsn);
 }
 
+static int logfile_physpage_tmptbl_cmp(void *_, int key1len, const void *key1,
+                                     int key2len, const void *key2)
+{
+    int rc;
+    physpage_tmptbl_key *pkey1;
+    physpage_tmptbl_key *pkey2;
+    assert(key1len == key2len);
+    pkey1 = (physpage_tmptbl_key *)key1;
+    pkey2 = (physpage_tmptbl_key *)key2;
+    rc = memcmp(pkey1->fileid, pkey2->fileid, DB_FILE_ID_LEN);
+    if (rc != 0)
+        return rc;
+    if (pkey1->pgno != pkey2->pgno) {
+        if (pkey1->pgno < pkey2->pgno)
+            return -1;
+        else
+            return 1;
+    } else 
+        return log_compare(&pkey1->commit_lsn, &pkey2->commit_lsn);
+}
+
 static int logfile_relink_tmptbl_cmp(void *_, int key1len, const void *key1,
                                      int key2len, const void *key2)
 {
@@ -1733,6 +1754,24 @@ retrieve_logfile_pglogs(bdb_state_type *bdb_state, unsigned int filenum,
         }
         bdb_temp_table_set_cmp_func(e->relinks_tbl, logfile_relink_tmptbl_cmp);
 
+        Pthread_mutex_init(&e->physpage_lk, NULL);
+        e->physpage_tbl = bdb_temp_table_create(bdb_state, &bdberr);
+        if (e->physpage_tbl == NULL) {
+            logmsg(LOGMSG_FATAL,
+                   "%s:%d failed to create temp table, bdberr=%d\n", __func__,
+                   __LINE__, bdberr);
+            abort();
+        }
+        e->physpage_cur =
+            bdb_temp_table_cursor(bdb_state, e->physpage_tbl, NULL, &bdberr);
+        if (e->physpage_cur == NULL) {
+            logmsg(LOGMSG_FATAL,
+                   "%s:%d failed to create temp cursor, bdberr=%d\n", __func__,
+                   __LINE__, bdberr);
+            abort();
+        }
+        bdb_temp_table_set_cmp_func(e->physpage_tbl, logfile_physpage_tmptbl_cmp);
+
         hash_add(logfile_pglogs_repo, e);
 
 #ifdef NEWSI_DEBUG
@@ -1793,6 +1832,23 @@ int bdb_delete_logfile_pglogs(bdb_state_type *bdb_state, int filenum, int flags)
             e->relinks_tbl = NULL;
             Pthread_mutex_unlock(&e->relinks_lk);
             Pthread_mutex_destroy(&e->relinks_lk);
+
+            Pthread_mutex_lock(&e->physpage_lk);
+            rc =
+                bdb_temp_table_close_cursor(bdb_state, e->physpage_cur, &bdberr);
+            if (rc) {
+                logmsg(LOGMSG_ERROR, "%s:%d error closing temp cursor %d %d\n",
+                       __func__, __LINE__, rc, bdberr);
+            }
+            e->physpage_cur = NULL;
+            rc = bdb_temp_table_close(bdb_state, e->physpage_tbl, &bdberr);
+            if (rc) {
+                logmsg(LOGMSG_ERROR, "%s:%d error closing temp table %d %d\n",
+                       __func__, __LINE__, rc, bdberr);
+            }
+            e->physpage_tbl = NULL;
+            Pthread_mutex_unlock(&e->physpage_lk);
+            Pthread_mutex_destroy(&e->physpage_lk);
 
             hash_del(logfile_pglogs_repo, e);
             free(e);
@@ -2387,6 +2443,12 @@ int bdb_insert_pglogs_int(hash_t *pglogs_hashtbl, unsigned char *fileid,
 #endif
     listc_abl(&pglogs_ent->lsns, lsnent);
 
+    return 0;
+}
+
+int bdb_insert_physpage(void *bdb_state, int8_t *fileid, db_pgno_t pg,
+        DB_LSN commit_lsn, void *page, size_t pgsz)
+{
     return 0;
 }
 

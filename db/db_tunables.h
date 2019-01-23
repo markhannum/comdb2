@@ -1665,4 +1665,11 @@ REGISTER_TUNABLE("phys_snapshot",
                  TUNABLE_BOOLEAN, &gbl_phys_snapshot,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("phys_snapshot_bench",
+                 "Perform only phys_snapshot benchmark copy routines.  "
+                 "(Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_phys_snapshot_bench,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+
 #endif /* _DB_TUNABLES_H */

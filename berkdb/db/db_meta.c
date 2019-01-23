@@ -861,6 +861,11 @@ __db_lprint(dbc)
 	    (F_ISSET((dbc)->dbp, DB_AM_DIRTY) &&			\
 	    (lockp)->mode == DB_LOCK_WRITE) ? LCK_DOWNGRADE : 0 : 0)
 
+extern int gbl_phys_snapshot;
+
+int copy_page_to_txn(DB_ENV *dbenv, DB_TXN *txn, DB_MPOOLFILE *mpf, db_pgno_t pgno);
+
+
 /*
  * __db_lget --
  *	The standard lock get call.
@@ -951,6 +956,8 @@ lck_couple:	couple[0].op = has_timeout? DB_LOCK_GET_TIMEOUT : DB_LOCK_GET;
 			goto lck_couple;
 		ret = __lock_get(dbenv,
 		    dbc->locker, lkflags, &dbc->lock_dbt, mode, lockp);
+        if (gbl_phys_snapshot && dbc->txn && mode == DB_LOCK_WRITE)
+            copy_page_to_txn(dbenv, dbc->txn, dbp->mpf, dbc->lock.pgno);
 		break;
 	}
 
