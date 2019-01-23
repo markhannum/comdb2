@@ -874,12 +874,13 @@ extern pthread_rwlock_t gbl_dbreg_log_lock;
 
 static int transfer_pages(void *obj, void *arg)
 {
-    TXN_PAGE_TP *page = (TXN_PAGE_TP *)obj;
+    TXN_PAGE_TP *page = (TXN_PAGE_TP *)obj, *ppage;
     DB_TXN *ptxn = (DB_TXN *)arg;
     /* We don't expect parent to have any locks */
-    if (hash_find(ptxn->page_hash, page))
-        abort();
-    hash_add(ptxn->page_hash, page);
+    if ((ppage = hash_find(ptxn->page_hash, page)) != NULL) {
+        assert(ppage != page);
+    } else
+        hash_add(ptxn->page_hash, page);
     return 0;
 }
 

@@ -490,6 +490,7 @@ int gbl_rowlocks = 0;
 int gbl_disable_tagged_api = 1;
 int gbl_snapisol = 0;
 int gbl_new_snapisol = 0;
+int gbl_phys_snapshot = 0;
 int gbl_new_snapisol_asof = 0;
 int gbl_new_snapisol_logging = 0;
 int gbl_disable_new_snapshot = 0;
@@ -3580,7 +3581,7 @@ static int init(int argc, char **argv)
     if (gbl_berkdb_iomap) 
         bdb_berkdb_iomap_set(thedb->bdb_env, 1);
 
-    if (!gbl_exit && gbl_new_snapisol && gbl_snapisol) {
+    if (!gbl_exit && gbl_snapisol && (gbl_new_snapisol || gbl_phys_snapshot)) {
         bdb_attr_set(thedb->bdb_attr, BDB_ATTR_PAGE_ORDER_TABLESCAN, 0);
 
         if (bdb_gbl_pglogs_mem_init(thedb->bdb_env) != 0)
