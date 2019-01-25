@@ -1439,7 +1439,7 @@ int copy_page_to_txn(DB_ENV *dbenv, DB_TXN *txn, DB_MPOOLFILE *mpf, db_pgno_t pg
     time_t now;
     int ret;
 
-    if (mpf != NULL) {
+    if (LOGGING_ON(dbenv) && mpf != NULL) {
         PAGE *page;
         if ((ret = __memp_fget(mpf, &pg, 0, &page)) != 0) {
             if (ret != DB_PAGE_NOTFOUND)
