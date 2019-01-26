@@ -1433,6 +1433,8 @@ static int newsql_send_intrans_response(struct sqlclntstate *clnt)
     return appdata->send_intrans_response;
 }
 
+extern int gbl_phys_snapshot;
+
 /* Process sql query if it is a set command. */
 static int process_set_commands(struct dbenv *dbenv, struct sqlclntstate *clnt,
                                 CDB2SQLQUERY *sql_query)
@@ -1473,7 +1475,9 @@ static int process_set_commands(struct dbenv *dbenv, struct sqlclntstate *clnt,
                     clnt->dbtran.mode = TRANLEVEL_SOSQL;
                 } else if (strncasecmp(sqlstr, "snap", 4) == 0) {
                     sqlstr += 4;
-                    clnt->dbtran.mode = TRANLEVEL_SNAPISOL;
+                    clnt->dbtran.mode = (gbl_phys_snapshot ?
+                            TRANLEVEL_PHYS_SNAPSHOT:
+                            TRANLEVEL_SNAPISOL);
                     clnt->verify_retries = 0;
                     if (clnt->hasql_on == 1) {
                         newsql_set_high_availability(clnt);

@@ -35,7 +35,8 @@ enum OSQL_REQ_TYPE {
 
     OSQL_SNAPISOL_REQ = 7,
     OSQL_SNAP_UID_REQ = 8,
-    OSQL_MAX_REQ = 9,
+    OSQL_PHYS_SNAP_REQ = 9,
+    OSQL_MAX_REQ = 10,
 };
 
 /* codes for blockproc <-> osql comm */
@@ -82,6 +83,8 @@ int tran2netreq(int dbtran);
 int tran2netrpl(int dbtran);
 
 int recom_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
+                 char *tzname, int is_distributed_tran);
+int phys_snap_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
                  char *tzname, int is_distributed_tran);
 int recom_abort(struct sqlclntstate *clnt);
 

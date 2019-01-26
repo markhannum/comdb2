@@ -428,6 +428,29 @@ tran_type *trans_start_readcommitted(struct ireq *iq, int trak)
     return out_trans;
 }
 
+tran_type *trans_start_phys_snapshot(struct ireq *iq, int trak)
+{
+    void *bdb_handle = bdb_handle_from_ireq(iq);
+    tran_type *out_trans = NULL;
+    int bdberr = 0;
+
+    iq->gluewhere = "bdb_tran_begin_phys_snapshot";
+    if (gbl_extended_sql_debug_trace) {
+        logmsg(LOGMSG_USER, "td=%x %s called\n", (int)pthread_self(), __func__);
+    }
+
+    out_trans = bdb_tran_begin_phys_snapshot(bdb_handle, trak, &bdberr);
+    iq->gluewhere = "bdb_tran_begin_phys_snapshot done";
+
+    if (out_trans == NULL) {
+        logmsg(LOGMSG_ERROR, "*ERROR* %s:failed err %d\n", __func__, bdberr);
+        return NULL;
+    }
+    return out_trans;
+}
+
+
+
 tran_type *trans_start_snapisol(struct ireq *iq, int trak, int epoch, int file,
                                 int offset, int *error, int is_ha_retry)
 {

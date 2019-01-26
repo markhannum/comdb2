@@ -657,7 +657,8 @@ tran_type *bdb_tran_begin_socksql(bdb_state_type *, int trak, int *bdberr);
 
 tran_type *bdb_tran_begin_readcommitted(bdb_state_type *, int trak,
                                         int *bdberr);
-
+tran_type *bdb_tran_begin_phys_snapshot(bdb_state_type *, int trak,
+                                        int *bdberr);
 tran_type *bdb_tran_begin_serializable(bdb_state_type *bdb_state, int trak,
                                        int *bdberr, int epoch, int file,
                                        int offset, int is_ha_retry);

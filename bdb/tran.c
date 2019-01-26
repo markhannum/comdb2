@@ -1153,6 +1153,7 @@ static tran_type *bdb_tran_begin_ll_int(bdb_state_type *bdb_state,
     switch (tran->tranclass) {
     case TRANCLASS_SNAPISOL:
     case TRANCLASS_SERIALIZABLE:
+    case TRANCLASS_PHYS_SNAPSHOT:
         /* THIS HAS TO BE DONE AT THE MOMENT OF REGISTRATION 
            tran->startgenid = bdb_get_commit_genid(bdb_state); */ /*get_gblcontext(
                                                                  bdb_state);*/
@@ -1261,6 +1262,7 @@ tran_type *bdb_tran_begin_shadow_int(bdb_state_type *bdb_state, int tranclass,
         tran->trak = trak;
 
         if (tran->tranclass == TRANCLASS_SNAPISOL ||
+            tran->tranclass == TRANCLASS_PHYS_SNAPSHOT ||
             tran->tranclass == TRANCLASS_SERIALIZABLE) {
             rc = bdb_osql_cache_table_versions(bdb_state, tran, trak, bdberr);
             if (rc) {
@@ -1409,6 +1411,15 @@ tran_type *bdb_tran_begin_set_retries(bdb_state_type *bdb_state,
     tran = bdb_tran_begin_pp(bdb_state, parent, retries, bdberr, 0);
     return tran;
 }
+
+
+tran_type *bdb_tran_begin_phys_snapshot(bdb_state_type *bdb_state, int trak,
+                                        int *bdberr)
+{
+    return bdb_tran_begin_shadow_int(bdb_state, TRANCLASS_PHYS_SNAPSHOT, trak,
+                                     bdberr, 0, 0, 0, 0);
+}
+
 
 tran_type *bdb_tran_begin_readcommitted(bdb_state_type *bdb_state, int trak,
                                         int *bdberr)
@@ -1559,6 +1570,7 @@ static int bdb_tran_commit_with_seqnum_int_int(
             logmsg(LOGMSG_ERROR, "%s %d %d\n", __func__, rc, *bdberr);
     /* fallthrough */
     case TRANCLASS_SOSQL:
+    case TRANCLASS_PHYS_SNAPSHOT:
     case TRANCLASS_READCOMMITTED:
         bdb_tran_free_shadows(bdb_state, tran);
         break;
@@ -2240,16 +2252,18 @@ int bdb_tran_commit(bdb_state_type *bdb_state, tran_type *tran, int *bdberr)
     if(tran->is_rowlocks_trans)
        has_bdblock = 0;
     else */
-    if (tran->tranclass == TRANCLASS_SOSQL)
-        has_bdblock = 0;
-    else if (tran->tranclass == TRANCLASS_READCOMMITTED)
-        has_bdblock = 0;
-    else if (tran->tranclass == TRANCLASS_SNAPISOL)
-        has_bdblock = 0;
-    else if (tran->tranclass == TRANCLASS_SERIALIZABLE)
-        has_bdblock = 0;
-    else
-        has_bdblock = 1;
+    switch(tran->tranclass) {
+        case TRANCLASS_SOSQL:
+        case TRANCLASS_PHYS_SNAPSHOT:
+        case TRANCLASS_READCOMMITTED:
+        case TRANCLASS_SNAPISOL:
+        case TRANCLASS_SERIALIZABLE:
+            has_bdblock = 0;
+            break;
+        default:
+            has_bdblock = 1;
+            break;
+    }
 
     rc = bdb_tran_commit_with_seqnum_int(bdb_state, tran, NULL, bdberr, 0, NULL,
                                          NULL, 0, NULL, 0);
@@ -2316,6 +2330,7 @@ int bdb_tran_abort_int_int(bdb_state_type *bdb_state, tran_type *tran,
             logmsg(LOGMSG_ERROR, "%s %d %d\n", __func__, rc, *bdberr);
     /* fallthrough */
     case TRANCLASS_SOSQL:
+    case TRANCLASS_PHYS_SNAPSHOT:
     case TRANCLASS_READCOMMITTED:
         bdb_tran_free_shadows(bdb_state, tran);
         break;

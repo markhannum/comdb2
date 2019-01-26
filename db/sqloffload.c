@@ -444,6 +444,23 @@ static int sorese_abort(struct sqlclntstate *clnt, int osqlreq_type)
     return 0;
 }
 
+int phys_snap_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
+        char *tzname, int is_distributed_tran)
+{
+    int rc = 0;
+
+    /* temp hook for sql transactions */
+    if (clnt->dbtran.dtran) {
+        rc = fdb_trans_commit(clnt);
+        if (rc) {
+            logmsg(LOGMSG_ERROR, "%s distributed failure rc=%d\n", __func__, rc);
+            return rc;
+        }
+    }
+
+    return rese_commit(clnt, thd, tzname, OSQL_PHYS_SNAP_REQ, is_distributed_tran);
+}
+
 int recom_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
                  char *tzname, int is_distributed_tran)
 {
@@ -479,6 +496,11 @@ int snapisol_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
 {
 
     return rese_commit(clnt, thd, tzname, OSQL_SNAPISOL_REQ, 0);
+}
+
+int phys_snap_abort(struct sqlclntstate *clnt)
+{
+    return sorese_abort(clnt, OSQL_PHYS_SNAP_REQ);
 }
 
 int snapisol_abort(struct sqlclntstate *clnt)
@@ -542,6 +564,10 @@ int req2netreq(int reqtype)
 
     case OSQL_SNAPISOL_REQ:
         return NET_OSQL_SNAPISOL_REQ;
+
+    /* XXX phys-snap changes to RECOM */
+    case OSQL_PHYS_SNAP_REQ:
+        return NET_OSQL_RECOM_REQ;
 
     case OSQL_SERIAL_REQ:
         return NET_OSQL_SERIAL_REQ;

@@ -2000,6 +2000,7 @@ tran_type *trans_start_serializable(struct ireq *, int trak, int epoch,
 tran_type *trans_start_snapisol(struct ireq *, int trak, int epoch, int file,
                                 int offset, int *error, int is_ha_retry);
 tran_type *trans_start_socksql(struct ireq *, int trak);
+tran_type *trans_start_phys_snapshot(struct ireq *, int trak);
 int trans_commit(struct ireq *iq, void *trans, char *source_host);
 int trans_commit_seqnum(struct ireq *iq, void *trans, db_seqnum_type *seqnum);
 int trans_commit_adaptive(struct ireq *iq, void *trans, char *source_host);

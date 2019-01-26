@@ -2123,6 +2123,7 @@ static int has_no_read_dirty_data(int tblnum)
 
     if (clnt->dbtran.mode != TRANLEVEL_SERIAL &&
         clnt->dbtran.mode != TRANLEVEL_SNAPISOL &&
+        clnt->dbtran.mode != TRANLEVEL_PHYS_SNAPSHOT &&
         clnt->dbtran.mode != TRANLEVEL_RECOM) {
         /* Other modes don't do transactional reads */
         return 1;
@@ -2927,6 +2928,7 @@ static int cursor_move_postop(BtCursor *pCur)
 
     if (gbl_locks_check_waiters && gbl_sql_release_locks_on_si_lockwait &&
         (clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
+         clnt->dbtran.mode == TRANLEVEL_PHYS_SNAPSHOT ||
          clnt->dbtran.mode == TRANLEVEL_SERIAL)) {
         extern int gbl_sql_random_release_interval;
         if (bdb_curtran_has_waiters(thedb->bdb_env, clnt->dbtran.cursor_tran)) {
@@ -4551,6 +4553,15 @@ int initialize_shadow_trans(struct sqlclntstate *clnt, struct sql_thread *thd)
         break;
     /* we handle communication with a blockprocess when all is over */
 
+    case TRANLEVEL_PHYS_SNAPSHOT:
+        clnt->dbtran.shadow_tran =
+            trans_start_phys_snapshot(&iq, clnt->bdb_osql_trak);
+        if (!clnt->dbtran.shadow_tran) {
+           logmsg(LOGMSG_ERROR, "%s:trans_start_phys_snapshot error\n", __func__);
+           return SQLITE_INTERNAL;
+        }
+        break;
+
     case TRANLEVEL_SOSQL:
         /* this is the first update of the transaction, open a
          * block processor on the master */
@@ -4847,6 +4858,25 @@ int sqlite3BtreeCommit(Btree *pBt)
 
         break;
 
+    case TRANLEVEL_PHYS_SNAPSHOT:
+
+        if (clnt->dbtran.shadow_tran) {
+            rc = phys_snap_commit(clnt, thd, clnt->tzname, 0);
+
+            if (!rc) {
+                irc = trans_commit_shadow(clnt->dbtran.shadow_tran, &bdberr);
+            } else {
+                irc = trans_abort_shadow((void **)&clnt->dbtran.shadow_tran,
+                                         &bdberr);
+            }
+            if (irc) {
+                logmsg(LOGMSG_ERROR, "%s: commit failed rc=%d bdberr=%d\n", __func__,
+                        irc, bdberr);
+            }
+            clnt->dbtran.shadow_tran = NULL;
+        }
+        break;
+
     case TRANLEVEL_SNAPISOL:
         if (clnt->dbtran.shadow_tran) {
             rc = snapisol_commit(clnt, thd, clnt->tzname);
@@ -5022,6 +5052,10 @@ int sqlite3BtreeRollback(Btree *pBt, int dummy, int writeOnlyDummy)
 
         break;
 
+    case TRANLEVEL_PHYS_SNAPSHOT:
+        if (clnt->dbtran.shadow_tran) {
+        }
+        break;
     case TRANLEVEL_SNAPISOL:
         if (clnt->dbtran.shadow_tran) {
             rc = snapisol_abort(clnt);

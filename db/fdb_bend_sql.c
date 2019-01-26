@@ -373,6 +373,7 @@ int fdb_svc_trans_commit(char *tid, enum transaction_level lvl,
 
     if (clnt->dbtran.mode == TRANLEVEL_RECOM ||
         clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
+        clnt->dbtran.mode == TRANLEVEL_PHYS_SNAPSHOT ||
         clnt->dbtran.mode == TRANLEVEL_SERIAL ||
         clnt->dbtran.mode == TRANLEVEL_SOSQL) {
         osql_shadtbl_begin_query(thedb->bdb_env, clnt);
@@ -430,6 +431,7 @@ int fdb_svc_trans_commit(char *tid, enum transaction_level lvl,
 
     if (clnt->dbtran.mode == TRANLEVEL_RECOM ||
         clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
+        clnt->dbtran.mode == TRANLEVEL_PHYS_SNAPSHOT ||
         clnt->dbtran.mode == TRANLEVEL_SERIAL ||
         clnt->dbtran.mode == TRANLEVEL_SOSQL) {
         osql_shadtbl_done_query(thedb->bdb_env, clnt);
@@ -599,6 +601,7 @@ _fdb_svc_cursor_start(BtCursor *pCur, struct sqlclntstate *clnt, char *tblname,
     /* close any shadow cursors */
     if (clnt->dbtran.mode == TRANLEVEL_RECOM ||
         clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
+        clnt->dbtran.mode == TRANLEVEL_PHYS_SNAPSHOT ||
         clnt->dbtran.mode == TRANLEVEL_SERIAL ||
         clnt->dbtran.mode == TRANLEVEL_SOSQL) {
         osql_shadtbl_begin_query(thedb->bdb_env, clnt);
@@ -664,6 +667,7 @@ static int _fdb_svc_cursor_end(BtCursor *pCur, struct sqlclntstate *clnt,
     /* close any shadow cursors */
     if (clnt->dbtran.mode == TRANLEVEL_RECOM ||
         clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
+        clnt->dbtran.mode == TRANLEVEL_PHYS_SNAPSHOT ||
         clnt->dbtran.mode == TRANLEVEL_SERIAL ||
         clnt->dbtran.mode == TRANLEVEL_SOSQL) {
         osql_shadtbl_done_query(thedb->bdb_env, clnt);

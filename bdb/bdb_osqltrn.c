@@ -268,6 +268,7 @@ bdb_osql_trn_t *bdb_osql_trn_register(bdb_state_type *bdb_state,
         file = 0;
 
     if ((shadow_tran->tranclass == TRANCLASS_SNAPISOL ||
+         shadow_tran->tranclass == TRANCLASS_PHYS_SNAPSHOT ||
          shadow_tran->tranclass == TRANCLASS_SERIALIZABLE)) {
         int behind = 0;
 
@@ -322,8 +323,21 @@ bdb_osql_trn_t *bdb_osql_trn_register(bdb_state_type *bdb_state,
             }
 
             /* Otherwise we'll do backfill */
-            backfill_required = 1;
+            backfill_required = (shadow_tran->tranclass !=
+                    TRANCLASS_PHYS_SNAPSHOT);
         }
+    }
+
+    if (shadow_tran->tranclass == TRANCLASS_PHYS_SNAPSHOT) {
+        if (file) {
+            shadow_tran->phys_snap_lsn.file = file;
+            shadow_tran->phys_snap_lsn.offset = offset;
+        }  else {
+            bdb_get_current_lsn(bdb_state,
+                    &shadow_tran->phys_snap_lsn.file,
+                    &shadow_tran->phys_snap_lsn.offset);
+        }
+        return 0;
     }
 
     Pthread_mutex_lock(&trn_repo_mtx);

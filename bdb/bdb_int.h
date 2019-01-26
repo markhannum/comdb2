@@ -120,7 +120,8 @@ typedef enum {
     /* TRANCLASS_QUERYISOLATION = 6, */
     TRANCLASS_LOGICAL_NOROWLOCKS = 7, /* used in fetch.c for table locks */
     TRANCLASS_SOSQL = 8,
-    TRANCLASS_SNAPISOL = 9
+    TRANCLASS_SNAPISOL = 9,
+    TRANCLASS_PHYS_SNAPSHOT = 10
 } tranclass_type;
 
 #define PAGE_KEY                                                               \
@@ -336,6 +337,7 @@ struct tran_tag {
     DB_LSN snapy_commit_lsn;
     uint32_t snapy_commit_generation;
 
+
     DB_LSN last_regop_lsn;
 
     /* LSN of the the physical commit/abort txn */
@@ -343,6 +345,8 @@ struct tran_tag {
 
     /* lsn when the tran obj was created */
     DB_LSN birth_lsn;
+
+    DB_LSN phys_snap_lsn;
 
     /* Birth lsn of oldest outstanding logical txn at start time */
     DB_LSN oldest_txn_at_start;
