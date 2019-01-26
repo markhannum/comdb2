@@ -6580,6 +6580,7 @@ restart:
 
 	logmsg(LOGMSG_INFO, "%s calling truncate with lsn [%d:%d]\n", __func__,
 			lsnp->file, lsnp->offset);
+    *trunclsnp = *lsnp;
 	ret = __db_apprec(dbenv, lsnp, trunclsnp, undo, DB_RECOVER_NOCKP);
 
 	/* Increase generation before releasing recovery lock */
