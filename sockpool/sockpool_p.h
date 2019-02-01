@@ -18,9 +18,9 @@
 #ifndef INCLUDED_SOCKPOOL_P_H
 #define INCLUDED_SOCKPOOL_P_H
 
-#define SOCKPOOL_SOCKET_NAME "/tmp/sockpool.socket"
+#define SOCKPOOL_SOCKET_NAME "/home/mponomar/tmp/sockpool.socket"
 
-enum { SOCKPOOL_DONATE = 0, SOCKPOOL_REQUEST = 1, SOCKPOOL_FORGET_PORT = 2 };
+enum { SOCKPOOL_DONATE = 0, SOCKPOOL_REQUEST = 1, SOCKPOOL_FORGET_PORT = 2, SOCKPOOL_RESOLVE = 3 };
 
 /* Clients should send one of these to the sql proxy after making a new
  * unix domain socket connection.  If the sqlproxy doesn't like what it gets
