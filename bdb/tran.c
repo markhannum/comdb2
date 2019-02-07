@@ -1154,9 +1154,6 @@ static tran_type *bdb_tran_begin_ll_int(bdb_state_type *bdb_state,
     case TRANCLASS_SNAPISOL:
     case TRANCLASS_SERIALIZABLE:
     case TRANCLASS_PHYS_SNAPSHOT:
-        /* THIS HAS TO BE DONE AT THE MOMENT OF REGISTRATION 
-           tran->startgenid = bdb_get_commit_genid(bdb_state); */ /*get_gblcontext(
-                                                                 bdb_state);*/
         break;
 
     case TRANCLASS_SOSQL:

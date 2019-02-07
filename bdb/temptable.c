@@ -1452,46 +1452,45 @@ static int temp_table_compare(DB *db, const DBT *dbt1, const DBT *dbt2)
 
 static int bdb_temp_table_find_hash(struct temp_cursor *cur, const void *key, int keylen)
 {
-        char *data = NULL;
-        cur->valid = 0;
-        if (!cur->tbl->temp_hash_tbl) {
-            return IX_EMPTY;
-        }
-        if (keylen != 0 && key != NULL) {
-            struct hashobj *o;
-            int should_free = 0;
+    char *data = NULL;
+    cur->valid = 0;
+    if (!cur->tbl->temp_hash_tbl) {
+        return IX_EMPTY;
+    }
+    if (keylen != 0 && key != NULL) {
+        struct hashobj *o;
+        int should_free = 0;
 
-            if (keylen + sizeof(int) < 64*1024)
-                o = alloca(keylen + sizeof(int));
-            else {
-                o = malloc(keylen + sizeof(int));
-                should_free = 1;
-            }
-            o->len = keylen;
-            memcpy(o->data, key, keylen);
+        if (keylen + sizeof(int) < 64*1024)
+            o = alloca(keylen + sizeof(int));
+        else {
+            o = malloc(keylen + sizeof(int));
+            should_free = 1;
+        }
+        o->len = keylen;
+        memcpy(o->data, key, keylen);
 
-            data = hash_find(cur->tbl->temp_hash_tbl, o);
-            if (should_free)
-                free(o);
-        }
-        if (!data) { /* find anything at all if possible */
-            data = hash_first(cur->tbl->temp_hash_tbl, &cur->hash_cur,
-                              &cur->hash_cur_buk);
-        }
-
-        if (data) {
-            cur->keylen = *(int *)data;
-            cur->key = data + sizeof(int);
-            cur->datalen = *(int *)(data + cur->keylen + sizeof(int));
-            ;
-            cur->data = data + cur->keylen + 2 * sizeof(int);
-            cur->valid = 1;
-        } else {
-            return IX_EMPTY;
-        }
-        return 0;
+        data = hash_find(cur->tbl->temp_hash_tbl, o);
+        if (should_free)
+            free(o);
+    }
+    if (!data) { /* find anything at all if possible */
+        data = hash_first(cur->tbl->temp_hash_tbl, &cur->hash_cur,
+                &cur->hash_cur_buk);
     }
 
+    if (data) {
+        cur->keylen = *(int *)data;
+        cur->key = data + sizeof(int);
+        cur->datalen = *(int *)(data + cur->keylen + sizeof(int));
+        ;
+        cur->data = data + cur->keylen + 2 * sizeof(int);
+        cur->valid = 1;
+    } else {
+        return IX_EMPTY;
+    }
+    return 0;
+}
 
 int bdb_temp_table_find(bdb_state_type *bdb_state, struct temp_cursor *cur,
                         const void *key, int keylen, void *unpacked,

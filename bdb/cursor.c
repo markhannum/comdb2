@@ -2446,6 +2446,44 @@ int bdb_insert_pglogs_int(hash_t *pglogs_hashtbl, unsigned char *fileid,
     return 0;
 }
 
+int bdb_retrieve_physpage(void *bdb_state, u_int8_t *fileid, db_pgno_t pg,
+        DB_LSN commit_lsn, void **rpage, int sz, int offset)
+{
+    int rc = 0, bdberr = 0;
+    struct logfile_pglogs_entry *l_entry;
+    void *page = NULL;
+
+    physpage_tmptbl_key rec;
+    Pthread_mutex_lock(&logfile_pglogs_repo_mutex);
+    if (logfile_pglogs_repo == NULL) {
+        Pthread_mutex_unlock(&logfile_pglogs_repo_mutex);
+        logmsg(LOGMSG_ERROR, "%s adding to pagelogs before repo is inited\n",
+                __func__);
+        return -1;
+    }
+    l_entry = retrieve_logfile_pglogs(bdb_state, commit_lsn.file, 1);
+    Pthread_mutex_lock(&l_entry->physpage_lk);
+    Pthread_mutex_unlock(&logfile_pglogs_repo_mutex);
+    memcpy(rec.fileid, fileid, DB_FILE_ID_LEN);
+    rec.pgno = pg;
+    rec.commit_lsn = commit_lsn;
+
+    rc = bdb_temp_table_find(bdb_state, l_entry->physpage_cur, &rec,
+            sizeof(physpage_tmptbl_key), page, &bdberr);
+
+    if (rc == 0 && !memcmp(fileid, rec.fileid, DB_FILE_ID_LEN) &&
+            rec.pgno == pg && (log_compare(&rec.commit_lsn,
+            &commit_lsn) >= 0)) {
+        *rpage = malloc(sz + offset);
+        bzero(*rpage, offset);
+        memcpy(*rpage + offset, page, sz);
+    }
+
+    Pthread_mutex_unlock(&l_entry->physpage_lk);
+
+    return rc;
+}
+
 int bdb_insert_physpage(void *bdb_state, int8_t *fileid, db_pgno_t pg,
         DB_LSN commit_lsn, void *page, size_t pgsz)
 {
@@ -8237,6 +8275,20 @@ static const char *curtypetostr(int type)
     case BDBC_BL:
         return "blob";
     }
+}
+
+__thread DB_LSN phys_snapshot_lsn;
+
+void bdb_set_physpage(int file, int offset)
+{
+    phys_snapshot_lsn.file = file;
+    phys_snapshot_lsn.offset = offset;
+}
+
+void bdb_clear_physpage(void)
+{
+    phys_snapshot_lsn.file = 0;
+    phys_snapshot_lsn.offset = 0;
 }
 
 /**

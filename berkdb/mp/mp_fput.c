@@ -133,6 +133,11 @@ __memp_fput_internal(dbmfp, pgaddr, flags, pgorder)
 
 	/* Convert a page address to a buffer header and hash bucket. */
 	bhp = (BH *)((u_int8_t *)pgaddr - SSZA(BH, buf));
+    if (F_ISSET(bhp, BH_PHYSSNAP)) {
+        /* Maybe cache these in the thread */
+        free(bhp);
+        return (0);
+    }
 
 	if ((flags & DB_MPOOL_DIRTY)&&dbenv->attr.check_zero_lsn_writes &&
 	    (dbenv->open_flags & DB_INIT_TXN)) {

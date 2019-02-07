@@ -46,6 +46,7 @@ typedef struct bdb_state_tag bdb_state_type;
 
 extern int gbl_prefault_udp;
 extern __thread int send_prefault_udp;
+extern __thread DB_LSN phys_snapshot_lsn;
 extern __thread DB *prefault_dbp;
 
 void udp_prefault_all(bdb_state_type * bdb_state, unsigned int fileid,
@@ -1144,6 +1145,9 @@ __memp_init_pgcompact_routines(void)
 
 int __slow_memp_fget_ns = 0;
 
+int bdb_retrieve_physpage(void *bdb_state, u_int8_t *fileid, db_pgno_t pg,
+        DB_LSN commit_lsn, void **page, int sz, int offset);
+
 /*
  * __memp_fget --
  *	Get a page from the file.
@@ -1159,6 +1163,8 @@ __memp_fget(dbmfp, pgnoaddr, flags, addrp)
 	void *addrp;
 {
 	int ret;
+    BH *bhp;
+    DB_LSN phys_snapshot_lsn = {0};
 	struct timespec s, rem;
 	int rc;
 	int did_io = 0;
@@ -1178,7 +1184,23 @@ __memp_fget(dbmfp, pgnoaddr, flags, addrp)
 		}
 	}
 
-	ret = __memp_fget_internal(dbmfp, pgnoaddr, flags, addrp, &did_io);
+    void *physpage = NULL;
+    if (!IS_ZERO_LSN(phys_snapshot_lsn) && (ret = bdb_retrieve_physpage(
+                    dbmfp->dbenv->app_private, dbmfp->fileid, *pgnoaddr,
+                    phys_snapshot_lsn, &physpage, dbmfp->mfp->stat.st_pagesize,
+                    SSZA(BH,buf)))) {
+        DB_ASSERT(physpage);
+        bhp = (BH *)((u_int8_t *)physpage);
+        bhp->ref = 1;
+        bhp->priority = UINT32_T_MAX;
+        bhp->pgno = *pgnoaddr;
+        bhp->mf_offset = 0;
+        addrp = bhp->buf;
+        F_SET(bhp, BH_PHYSSNAP);
+        did_io = 0;
+    } else {
+        ret = __memp_fget_internal(dbmfp, pgnoaddr, flags, addrp, &did_io);
+    }
 	if (ret || !did_io || !prefault_dbp || !prefault_dbp->log_filename)
 		goto out;
 

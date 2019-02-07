@@ -385,6 +385,9 @@ int copy_page_to_global(DB_ENV *dbenv, DB_MPOOLFILE *mpf, db_pgno_t pg,
                     commit_lsn, page, pgsz)) != 0)
         abort();
 
+    if ((ret = __memp_fput(mpf, page, 0)) != 0)
+        abort();
+
 out:
     return 0;
 }
