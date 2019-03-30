@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
+
+numcolumns=20
 reorder=${TESTSBUILDDIR}/reorder
 
 [[ $debug == "1" ]] && set -x
@@ -67,50 +69,6 @@ function core_all_nodes
     done
 }
 
-function create_table
-{
-    [[ $debug == "1" ]] && set -x
-    typeset func="create_table"
-    typeset tbl=${1:-t1}
-    typeset cmd="create table $tbl(a int, b int)"
-    write_prompt $func "executing $func"
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "$cmd"
-    write_prompt $func "$cmd"
-    typeset cmd="create index idx1 on $tbl(a)"
-    write_prompt $func "$cmd"
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "$cmd"
-    typeset cmd="create index idx2 on $tbl(b)"
-    write_prompt $func "$cmd"
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "$cmd"
-}
-
-function fill_table
-{
-    [[ $debug == "1" ]] && set -x
-    typeset func="fill_table"
-    write_prompt $func "executing $func"
-    typeset tbl=${1:-t1}
-    typeset recs=${2:-10000}
-    typeset step=${3:-10000}
-    typeset count=0
-
-    while [[ $recs -gt 0 ]]; do
-        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into t1 select random() % 20000,* from generate_series(1, $step)" >/dev/null
-        let recs=recs-step
-        let count=count+step
-        write_prompt $func "inserted $count records"
-    done
-}
-
-function setup_test
-{
-    [[ $debug == "1" ]] && set -x
-    typeset func="setup"
-    write_prompt $func "executing $func"
-    create_table
-    #fill_table
-}
-
 function deadlock_test
 {
     [[ $debug == "1" ]] && set -x
@@ -118,8 +76,9 @@ function deadlock_test
     typeset txnsize=${1:-2}
     typeset iters=${2:-1000}
     typeset thds=${3:-5}
+    #typeset cols=${4:-5}
     write_prompt $func "executing $func"
-    $reorder -d $DBNAME -t $thds -x $txnsize -i $iters
+    $reorder -d $DBNAME -t $thds -x $txnsize -i $iters -c $numcolumns
     r=$?
     if [[ $r != 0 ]]; then
         failexit deadlock_test $r
@@ -144,7 +103,6 @@ function run_test
     [[ $debug == "1" ]] && set -x
     typeset func="run_test"
     write_prompt $func "executing $func"
-    setup_test
     deadlock_test
     drop_table
 }
