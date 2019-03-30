@@ -1664,6 +1664,11 @@ REGISTER_TUNABLE("forbid_remote_admin",
                  TUNABLE_BOOLEAN, &gbl_forbid_remote_admin, 0, NULL, NULL, NULL,
                  NULL);
 
+REGISTER_TUNABLE("print_lockers_on_deadlock",
+                 "Dump the lock table when we get a deadlock.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_print_lockers_on_deadlock, 0, NULL, NULL, NULL,
+                 NULL);
+
 REGISTER_TUNABLE(
     "pbkdf2_iterations",
     "Number of iterations of PBKDF2 algorithm for password hashing.",

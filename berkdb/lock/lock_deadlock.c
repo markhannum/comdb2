@@ -492,6 +492,10 @@ __lock_detect(dbenv, atype, abortp)
 	return ret;
 }
 
+int __lock_dump_region __P((DB_ENV *, const char *, FILE *));
+
+int gbl_print_lockers_on_deadlock = 0;
+
 static int
 __lock_detect_int(dbenv, atype, abortp, can_retry)
 	DB_ENV *dbenv;
@@ -850,6 +854,12 @@ dokill:
 		if (found_tracked) {
 			__dd_print_tracked(idmap, *deadp, nlockers, killid);
 		}
+
+        if (gbl_print_lockers_on_deadlock) {
+            char parm[2] = {0};
+            parm[0] = 'l';
+            __lock_dump_region(dbenv, parm, stderr);
+        }
 
 		if (gbl_print_deadlock_cycles) {
 			__dd_print_deadlock_cycle(idmap, *deadp, nlockers, killid);

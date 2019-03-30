@@ -219,6 +219,7 @@ extern int gbl_logdelete_lock_trace;
 extern int gbl_flush_log_at_checkpoint;
 extern int gbl_online_recovery;
 extern int gbl_forbid_remote_admin;
+extern int gbl_print_lockers_on_deadlock;
 
 extern long long sampling_threshold;
 
