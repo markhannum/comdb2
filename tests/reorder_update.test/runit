@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
 
-numcolumns=5
-txnsize=10
+numcolumns=20
+maxrange=20000
+txnsize=20
 iters=1000
 thds=5
 update_preload=200000
@@ -78,7 +79,7 @@ function deadlock_test
     [[ $debug == "1" ]] && set -x
     typeset func="deadlock_test"
     write_prompt $func "executing $func"
-    $reorder -d $DBNAME -t $thds -x $txnsize -i $iters -c $numcolumns -u -p $update_preload
+    $reorder -d $DBNAME -t $thds -x $txnsize -i $iters -c $numcolumns -u -p $update_preload -r $maxrange
     r=$?
     if [[ $r != 0 ]]; then
         failexit deadlock_test $r

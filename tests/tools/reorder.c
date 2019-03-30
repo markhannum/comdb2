@@ -249,7 +249,7 @@ int main(int argc, char *argv[])
     pthread_t *thds = NULL;
     argv0 = argv[0];
     srand(time(NULL) * getpid());
-    while ((c = getopt(argc, argv, "d:t:x:i:c:up:")) != EOF) {
+    while ((c = getopt(argc, argv, "d:r:t:x:i:c:up:")) != EOF) {
         switch(c) {
             case 'd':
                 dbname = optarg;
