@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+numcolumns=5
+txnsize=10
+iters=1000
+thds=5
+update_preload=200000
+reorder=${TESTSBUILDDIR}/reorder
+
+[[ $debug == "1" ]] && set -x
+
+function write_prompt
+{
+    typeset func=$1
+    echo "[$func] $2"
+}
+
+getmaster() {
+    cdb2sql --tabs ${CDB2_OPTIONS} $DBNAME default '@send bdb cluster' | grep MASTER | cut -f1 -d":" | tr -d '[:space:]'
+}
+
+master=$(getmaster)
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="failexit"
+    typeset f=$1
+    cleanup
+    write_prompt $func "$f failed: $2"
+    exit -1
+}
+
+function print_locks
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="print_locks"
+    write_prompt $func "executing $func"
+    if [[ -z "$CLUSTER" ]]; then
+        write_prompt $func "Lock dump:"
+        $CDB2SQL_EXE -tabs -admin $CDB2_OPTIONS $DBNAME default "exec procedure sys.cmd.send(\"bdb lockinfo lockers\")"
+    else
+        for x in $CLUSTER; do
+            write_prompt $func "Lock dump for $x:"
+            $CDB2SQL_EXE -tabs -admin $CDB2_OPTIONS $DBNAME --host $x "exec procedure sys.cmd.send(\"bdb lockinfo lockers\")"
+            write_prompt $func "+"
+        done
+    fi
+}
+
+function core_all_nodes
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="core_all_nodes"
+    write_prompt $func "executing $func"
+    local node
+    print_locks
+    local pidfl=${TMPDIR}/${DBNAME}.pid
+    if [[ -z "$CLUSTER" ]] || [[ `echo $CLUSTER | grep $HOSTNAME ` ]]; then
+        if [[ -n "$CLUSTER" ]] ; then
+            pidfl=${TMPDIR}/${DBNAME}.$HOSTNAME.pid
+        fi
+        cat ${pidfl} | xargs kill -6 
+    fi
+
+    for node in ${CLUSTER} ; do
+        if [ $node == $HOSTNAME ] ; then
+            continue
+        fi
+        pidfl=${TMPDIR}/${DBNAME}.pid
+        ssh -o StrictHostKeyChecking=no $node "cat ${pidfl} | xargs kill -6 " </dev/null
+    done
+}
+
+function deadlock_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="deadlock_test"
+    write_prompt $func "executing $func"
+    $reorder -d $DBNAME -t $thds -x $txnsize -i $iters -c $numcolumns -u -p $update_preload
+    r=$?
+    if [[ $r != 0 ]]; then
+        failexit deadlock_test $r
+    fi
+
+    cdb2sql --tabs ${CDB2_OPTIONS} $DBNAME default --host $master "select * from comdb2_metrics where name = 'deadlocks'"
+}
+
+function drop_table
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="drop_table"
+    typeset tbl=${1:-t1}
+    typeset cmd="drop table $tbl"
+    write_prompt $func "executing $func"
+    write_prompt $func "$cmd"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "$cmd"
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    write_prompt $func "executing $func"
+    deadlock_test
+    drop_table
+}
+
+run_test
+echo "Success"
