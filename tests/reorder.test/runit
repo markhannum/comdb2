@@ -2,6 +2,9 @@
 bash -n "$0" | exit 1
 
 numcolumns=20
+txnsize=2
+iters=1000
+thds=5
 reorder=${TESTSBUILDDIR}/reorder
 
 [[ $debug == "1" ]] && set -x
@@ -73,10 +76,6 @@ function deadlock_test
 {
     [[ $debug == "1" ]] && set -x
     typeset func="deadlock_test"
-    typeset txnsize=${1:-2}
-    typeset iters=${2:-1000}
-    typeset thds=${3:-5}
-    #typeset cols=${4:-5}
     write_prompt $func "executing $func"
     $reorder -d $DBNAME -t $thds -x $txnsize -i $iters -c $numcolumns
     r=$?
