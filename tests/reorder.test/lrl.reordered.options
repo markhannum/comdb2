@@ -1,0 +1,7 @@
+print_lockers_on_deadlock on
+reorder_socksql_no_deadlock on
+reorder_idx_writes on
+
+#reorder_socksql_no_deadlock off
+#reorder_idx_writes off
+
