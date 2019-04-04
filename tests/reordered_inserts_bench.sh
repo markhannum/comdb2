@@ -21,7 +21,7 @@ function log_entry
     echo "$ts cols:$cols txnsz:$txnsz thds:$thds iters:$iters reorder-deadlock:$ro_deadlock reorder-time:$ro_time non-reorder-deadlock:$non_ro_deadlock non-reorder-time:$non_ro_time" >> $results
 }
 
-for y in 2 4 8 16 32 64 128 256 512 1024; do
+for y in 1 2 4 8 16 32 ; do
 
     export TXNSIZE=$y
 
