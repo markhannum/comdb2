@@ -315,6 +315,8 @@ enum BLOCK_OPS {
     NUM_BLOCKOP_OPCODES = 45
 };
 
+const char *osql_reqtype_str(int type); // used for printing string of type
+
 enum DEBUGREQ { DEBUG_METADB_PUT = 1 };
 
 enum RCODES {
@@ -1237,6 +1239,12 @@ struct osql_sess {
     int verify_retries; /* how many times we verify retried this one */
     blocksql_tran_t *tran;
     int is_tranddl;
+    bool is_prepare : 1;
+    char *coordinator;
+    char *coordstage;
+    char *coordhost;
+    int coordgen;
+    uuid_t txnid;
 };
 typedef struct osql_sess osql_sess_t;
 
@@ -1404,6 +1412,7 @@ struct ireq {
     bool sc_locked : 1;
     bool sc_should_abort : 1;
     bool sc_closed_files : 1;
+    bool twopc : 1;
 
     int written_row_count;
     int sc_running;

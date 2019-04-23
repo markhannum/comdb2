@@ -2294,6 +2294,15 @@ cmd ::= BULKIMPORT nm(A) DOT nm(B) nm(C) DOT nm(D). {
     comdb2bulkimport(pParse, &A, &B, &C, &D);
 }
 
+////////////////////////////// PREPARE TRANSACTION ///////////////////////////////
+
+cmd ::= PREPARE STRING(A) STRING(B) STRING(C) STRING(D) INTEGER(R). {
+    int tmp;
+    if (!readIntFromToken(&R, &tmp))
+        tmp = 0;
+    comdb2PrepareTransaction(pParse, &A, &B, &C, &D, tmp);
+}
+
 ////////////////////////////// CREATE PARTITION ///////////////////////////////
 
 cmd ::= createkw RANGE PARTITION ON nm(A) WHERE columnname(B) IN LP exprlist(C) RP. {

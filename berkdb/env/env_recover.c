@@ -852,7 +852,7 @@ full_recovery_check(DB_ENV *dbenv, DB_LSN *max_lsn)
 		if (IS_ZERO_LSN(first))
 			first = lsn;
 		if (type == DB___txn_regop || type == DB___txn_regop_gen ||
-			type == DB___txn_regop_rowlocks) {
+			type == DB___txn_regop_dist || type == DB___txn_regop_rowlocks) {
 			cpy = lsn;
 			ret =
 				__rep_collect_txn(dbenv, &cpy, &lc, &ignore, NULL);
@@ -2106,6 +2106,7 @@ __recover_logfile_pglogs(dbenv, fileid_tbl)
 	__txn_ckp_args *ckp_args = NULL;
 	__txn_regop_args *txn_args = NULL;
 	__txn_regop_gen_args *txn_gen_args = NULL;
+	__txn_regop_dist_args *txn_dist_args = NULL;
 	__txn_regop_rowlocks_args *txn_rl_args = NULL;
 	__bam_split_args *split_args = NULL;
 	__bam_rsplit_args *rsplit_args = NULL;
@@ -2155,6 +2156,37 @@ __recover_logfile_pglogs(dbenv, fileid_tbl)
 			}
 
 			break;
+		case DB___txn_regop_dist:
+
+			if ((ret =
+				__txn_regop_dist_read(dbenv, data.data,
+					&txn_dist_args)) != 0) {
+				GOTOERR;
+		 }
+		 bdb_push_pglogs_commit(dbenv->app_private, lsn, 
+			   txn_dist_args->generation, 0, 0);
+			free_ptr = txn_dist_args;
+
+			ret =
+				bdb_update_timestamp_lsn(dbenv->app_private,
+				txn_dist_args->timestamp, lsn,
+				txn_dist_args->context);
+			if (ret) {
+				GOTOERR;
+		 }
+		   ret = lock_list_parse_pglogs(dbenv, &txn_dist_args->locks, &lsn, 
+			   &keylist, &keycnt);
+			if (ret) {
+				not_newsi_log_format = 1;
+				break;
+			}
+			ret =
+				bdb_update_logfile_pglogs(dbenv->app_private,
+				keylist, keycnt, lsn, fileid_tbl);
+			if (ret) {
+				GOTOERR;
+		 }
+		 break;
 		case DB___txn_regop_gen:
 			if ((ret =
 				__txn_regop_gen_read(dbenv, data.data,

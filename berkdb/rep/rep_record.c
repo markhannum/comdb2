@@ -138,8 +138,8 @@ int64_t gbl_rep_trans_parallel = 0, gbl_rep_trans_serial =
 static inline int wait_for_running_transactions(DB_ENV *dbenv);
 
 #define	IS_SIMPLE(R)	((R) != DB___txn_regop && (R) != DB___txn_xa_regop && \
-	(R) != DB___txn_regop_rowlocks && (R) != DB___txn_regop_gen && (R) != \
-	DB___txn_ckp && (R) != DB___dbreg_register)
+	(R) != DB___txn_regop_rowlocks && (R) != DB___txn_regop_gen && \
+    (R) != DB___txn_regop_dist && (R) != DB___txn_ckp && (R) != DB___dbreg_register)
 
 int gbl_rep_process_msg_print_rc;
 
@@ -396,6 +396,7 @@ matchable_log_type(int rectype)
 	if (gbl_only_match_commit_records) {
 		ret = (rectype == DB___txn_regop ||
 			rectype == DB___txn_regop_gen ||
+			rectype == DB___txn_regop_dist ||
 			rectype == DB___txn_regop_rowlocks ||
 			(gbl_match_on_ckp && rectype == DB___txn_ckp));
 	} else {
@@ -2800,6 +2801,7 @@ static inline int is_commit(int rectype)
 		case DB___txn_regop_rowlocks:
 		case DB___txn_regop:
 		case DB___txn_regop_gen:
+		case DB___txn_regop_dist:
 			return 1;
 		default:
 			return 0;
@@ -3578,6 +3580,7 @@ gap_check:		max_lsn_dbtp = NULL;
 	case DB___txn_regop_rowlocks:
 	case DB___txn_regop:
 	case DB___txn_regop_gen:
+	case DB___txn_regop_dist:
 		if (gbl_dumptxn_at_commit)
 			dumptxn(dbenv, &rp->lsn);
 		if (!F_ISSET(rep, REP_F_LOGSONLY)) {
@@ -4441,6 +4444,7 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 	REP *rep;
 	__txn_regop_args *txn_args = NULL;
 	__txn_regop_gen_args *txn_gen_args = NULL;
+	__txn_regop_dist_args *txn_dist_args = NULL;
 	__txn_regop_rowlocks_args *txn_rl_args = NULL;
 	void *args = NULL;
 	int32_t timestamp = 0;
@@ -4575,6 +4579,54 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 		prev_lsn = txn_args->prev_lsn;
 		lock_dbt = &txn_args->locks;
 		(*commit_gen) = 0;
+	} else if (rectype == DB___txn_regop_dist) {
+		if ((ret =
+			__txn_regop_dist_read(dbenv, rec->data,
+				&txn_dist_args)) != 0) {
+			logmsg(LOGMSG_DEBUG, "%s failed at line %d\n", __func__, __LINE__);
+			return (ret);
+		}
+		if (txn_dist_args->opcode != TXN_COMMIT) {
+			__os_free(dbenv, txn_dist_args);
+			return (0);
+		}
+		args = txn_dist_args;
+		context = txn_dist_args->context;
+		txnid = txn_dist_args->txnid->txnid;
+		prev_lsn = txn_dist_args->prev_lsn;
+		lock_dbt = &txn_dist_args->locks;
+		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
+		(*commit_gen) = rep->committed_gen = txn_dist_args->generation;
+		assert(*commit_gen);
+		rep->committed_lsn = rctl->lsn;
+		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
+
+	} else if (rectype == DB___txn_regop_dist) {
+		/*
+		 * We're the end of a transaction.  Make sure this is
+		 * really a commit and not an abort!
+		 */
+		if ((ret =
+			__txn_regop_dist_read(dbenv, rec->data,
+				&txn_dist_args)) != 0) {
+			logmsg(LOGMSG_DEBUG, "%s failed at line %d\n", __func__, __LINE__);
+			return (ret);
+		}
+		if (txn_dist_args->opcode != TXN_COMMIT) {
+			__os_free(dbenv, txn_dist_args);
+			return (0);
+		}
+		args = txn_dist_args;
+		context = txn_dist_args->context;
+		txnid = txn_dist_args->txnid->txnid;
+		prev_lsn = txn_dist_args->prev_lsn;
+		lock_dbt = &txn_dist_args->locks;
+		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
+		(*commit_gen) = rep->committed_gen = txn_dist_args->generation;
+		assert(*commit_gen);
+		rep->committed_lsn = rctl->lsn;
+		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
+
 	} else if (rectype == DB___txn_regop_gen) {
 		/*
 		 * We're the end of a transaction.  Make sure this is
@@ -4899,6 +4951,8 @@ err1:
 		__os_free(dbenv, txn_args);
 	else if (rectype == DB___txn_regop_gen)
 		__os_free(dbenv, txn_gen_args);
+	else if (rectype == DB___txn_regop_dist)
+		__os_free(dbenv, txn_dist_args);
 	else if (rectype == DB___txn_regop_rowlocks)
 		__os_free(dbenv, txn_rl_args);
 	else
@@ -5130,6 +5184,7 @@ __rep_process_txn_concurrent_int(dbenv, rctl, rec, ltrans, ctrllsn, maxlsn,
 	LTDESC *lt = NULL;
 	__txn_regop_args *txn_args = NULL;
 	__txn_regop_gen_args *txn_gen_args = NULL;
+	__txn_regop_dist_args *txn_dist_args = NULL;
 	__txn_regop_rowlocks_args *txn_rl_args = NULL;
 	void *args = NULL;
 	__txn_xa_regop_args *prep_args = NULL;
@@ -5320,6 +5375,34 @@ bad_resize:	;
 
 		prev_lsn = txn_args->prev_lsn;
 		lock_dbt = &txn_args->locks;
+	} else if (rectype == DB___txn_regop_dist) {
+		/*
+		 * We're the end of a transaction.  Make sure this is
+		 * really a commit and not an abort!
+		 */
+		if ((ret =
+			__txn_regop_dist_read(dbenv, rec->data,
+				&txn_dist_args)) != 0)
+			return (ret);
+		if (txn_dist_args->opcode != TXN_COMMIT) {
+			__os_free(dbenv, txn_dist_args);
+			return (0);
+		}
+
+		args = txn_dist_args;
+		rp->context = txn_dist_args->context;
+
+		txnid = txn_dist_args->txnid->txnid;
+		rp->ltrans = NULL;
+
+		prev_lsn = txn_dist_args->prev_lsn;
+		lock_dbt = &txn_dist_args->locks;
+
+		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
+		(*commit_gen) = rep->committed_gen = txn_dist_args->generation;
+		rep->committed_lsn = rctl->lsn;
+		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
+
 	} else if (rectype == DB___txn_regop_gen) {
 		/*
 		 * We're the end of a transaction.  Make sure this is
@@ -5468,6 +5551,8 @@ bad_resize:	;
 		timestamp = txn_rl_args->timestamp;
 	else if (txn_gen_args)
 		timestamp = txn_gen_args->timestamp;
+    else if (txn_dist_args)
+		timestamp = txn_dist_args->timestamp;
 	else if (txn_args)
 		timestamp = txn_args->timestamp;
 
@@ -5659,9 +5744,11 @@ err:
 		__os_free(dbenv, txn_args);
 	if (rectype == DB___txn_regop_gen && txn_gen_args)
 		__os_free(dbenv, txn_gen_args);
-	else if (rectype == DB___txn_regop_rowlocks && txn_rl_args)
+	if (rectype == DB___txn_regop_dist && txn_dist_args)
+		__os_free(dbenv, txn_dist_args);
+	if (rectype == DB___txn_regop_rowlocks && txn_rl_args)
 		__os_free(dbenv, txn_rl_args);
-	else
+    if (rectype == DB___txn_xa_regop && prep_args)
 		__os_free(dbenv, prep_args);
 
 	if (data_dbt.data) {
@@ -6437,6 +6524,7 @@ __rep_dorecovery(dbenv, lsnp, trunclsnp, online, undid_schema_change)
 	REP *rep;
 	__txn_regop_args *txnrec;
 	__txn_regop_gen_args *txngenrec;
+	__txn_regop_dist_args *txndistrec;
 	__txn_regop_rowlocks_args *txnrlrec;
 
 	db_rep = dbenv->rep_handle;
@@ -6505,6 +6593,30 @@ restart:
 			}
 
 			__os_free(dbenv, txnrlrec);
+
+			if (ret == DB_LOCK_DEADLOCK) {
+				gbl_rep_trans_deadlocked++;
+				recovery_release_locks(dbenv, lockid);
+				lockid = DB_LOCK_INVALIDID;
+				goto restart;
+			}
+
+			if (ret)
+				goto err;
+		}
+
+		if (rectype == DB___txn_regop_dist) {
+			if ((ret =
+				__txn_regop_dist_read(dbenv, mylog.data,
+					&txndistrec)) != 0)
+				goto err;
+			if (txndistrec->opcode != TXN_ABORT) {
+				undo = 1;
+			}
+			if (online)
+				ret = recovery_getlocks(dbenv, lockid, &txndistrec->locks, lsn);
+
+			__os_free(dbenv, txndistrec);
 
 			if (ret == DB_LOCK_DEADLOCK) {
 				gbl_rep_trans_deadlocked++;
@@ -6661,6 +6773,7 @@ get_committed_lsns(dbenv, inlsns, n_lsns, epoch, file, offset)
 	int curlim = 0;
 	__txn_regop_args *txn_args;
 	__txn_regop_gen_args *txn_gen_args;
+	__txn_regop_dist_args *txn_dist_args;
 	__txn_regop_rowlocks_args *txn_rl_args;
 	int done = 0;
 	DB_LSN *lsns = NULL, *newlsns;
@@ -6836,6 +6949,86 @@ get_committed_lsns(dbenv, inlsns, n_lsns, epoch, file, offset)
 					__os_free(dbenv, txn_gen_args);
 				} break;
 
+			case DB___txn_regop_dist: {
+				if ((ret = __txn_regop_dist_read(dbenv, mylog.data,
+												&txn_dist_args)) != 0) {
+					if (gbl_extended_sql_debug_trace) {
+						fprintf(stderr, "td %u %s line %d lsn %d:%d"
+										"txn_regop_dist_read returns %d\n",
+								(uint32_t)pthread_self(), __func__, __LINE__,
+								lsn.file, lsn.offset, ret);
+					}
+					return (ret);
+				}
+
+				if (txn_dist_args->timestamp < epoch) {
+#if 0
+					fprintf(stderr,
+						"%s:%d stopped at epoch %u < %u\n",
+						__FILE__, __LINE__,
+						txn_dist_args->timestamp, epoch);
+#endif
+						if (gbl_extended_sql_debug_trace) {
+							logmsg(LOGMSG_USER, "td %lu %s line %d lsn %d:%d "
+												"break-loop because timestamp "
+												"(%ld) < epoch (%d)\n",
+								   pthread_self(), __func__, __LINE__,
+								   lsn.file, lsn.offset,
+								   txn_dist_args->timestamp, epoch);
+						}
+						__os_free(dbenv, txn_dist_args);
+						done = 1;
+						break;
+					}
+
+					if (txn_dist_args->opcode == TXN_COMMIT) {
+#if 0
+					ret = __db_txnlist_add(dbenv,
+						txninfo, txn_dist_args.txnid->txnid,
+						TXN_COMMIT, NULL);
+#endif
+					if (*n_lsns + 1 >= curlim) {
+						curlim =
+							(!curlim) ? 1000 : 2 *
+							curlim;
+						if (!(newlsns =
+							(DB_LSN *) realloc(lsns,
+								curlim *
+								sizeof(DB_LSN)))) {
+							logmsg(LOGMSG_ERROR, 
+								"%s:%d Too complex snapshot (realloc failure at trns %d)\n",
+								__FILE__, __LINE__,
+								*n_lsns);
+														ret = ENOMEM;
+														if (lsns) free(lsns);
+														lsns = NULL;
+														__os_free(dbenv,
+																  txn_dist_args);
+														goto err;
+												}
+												lsns = newlsns;
+										}
+
+										if (gbl_extended_sql_debug_trace) {
+											logmsg(
+												LOGMSG_USER,
+												"td %u %s line %d lsn %d:%d "
+												"adding prev-lsn %d:%d at "
+												"index %d\n",
+												(uint32_t)pthread_self(),
+												__func__, __LINE__, lsn.file,
+												lsn.offset,
+												txn_dist_args->prev_lsn.file,
+												txn_dist_args->prev_lsn.offset,
+												*n_lsns);
+										}
+
+										lsns[*n_lsns] = txn_dist_args->prev_lsn;
+										*n_lsns += 1;
+					}
+					__os_free(dbenv, txn_dist_args);
+				} break;
+
 				case DB___txn_regop: {
 					if ((ret = __txn_regop_read(dbenv, mylog.data,
 												&txn_args)) != 0) {
@@ -6963,6 +7156,7 @@ get_lsn_context_from_timestamp(dbenv, timestamp, ret_lsn, ret_context)
 
 	__txn_regop_args *txn_args = NULL;
 	__txn_regop_gen_args *txn_gen_args = NULL;
+	__txn_regop_dist_args *txn_dist_args = NULL;
 	__txn_regop_rowlocks_args *txn_rl_args = NULL;
 
 	ret_lsn->file = 0;
@@ -7028,6 +7222,7 @@ get_lsn_context_from_timestamp(dbenv, timestamp, ret_lsn, ret_context)
 			txn_args = NULL;
 		}
 
+
 		if (rectype == DB___txn_regop_gen) {
 			if ((rc =
 				__txn_regop_gen_read(dbenv, logdta.data,
@@ -7051,6 +7246,28 @@ get_lsn_context_from_timestamp(dbenv, timestamp, ret_lsn, ret_context)
 			txn_gen_args = NULL;
 		}
 
+        else if (rectype == DB___txn_regop_dist) {
+			if ((rc =
+				__txn_regop_dist_read(dbenv, logdta.data,
+					&txn_dist_args)) != 0)
+				goto err;
+			if (txn_dist_args->timestamp <= timestamp) {
+				*ret_lsn = lsn;
+				if (ret_context)
+					*ret_context = txn_dist_args->context;
+			}
+			if (txn_dist_args->timestamp > timestamp) {
+				if (logdta.data) {
+					__os_free(dbenv, logdta.data);
+					logdta.data = NULL;
+				}
+				__os_free(dbenv, txn_dist_args);
+				__log_c_close(logc);
+				return 0;
+			}
+			__os_free(dbenv, txn_dist_args);
+			txn_dist_args = NULL;
+		}
 
 		else if (rectype == DB___txn_regop_rowlocks) {
 			if ((rc =
@@ -7104,6 +7321,7 @@ get_context_from_lsn(dbenv, lsn, ret_context)
 
 	__txn_regop_args *txn_args = NULL;
 	__txn_regop_gen_args *txn_gen_args = NULL;
+	__txn_regop_dist_args *txn_dist_args = NULL;
 	__txn_regop_rowlocks_args *txn_rl_args = NULL;
 
 	*ret_context = 0;
@@ -7126,7 +7344,7 @@ get_context_from_lsn(dbenv, lsn, ret_context)
 
 	LOGCOPY_32(&rectype, logdta.data);
 	while (rectype != DB___txn_regop && rectype != DB___txn_regop_gen && 
-			rectype != DB___txn_regop_rowlocks) {
+			rectype != DB___txn_regop_dist && rectype != DB___txn_regop_rowlocks) {
 		if ((rc = logc->get(logc, &lsn, &logdta, DB_PREV)) != 0) {
 			logmsg(LOGMSG_ERROR, "%s:%d failed find log on prev, rc %d\n",
 					__func__, __LINE__, rc);
@@ -7141,7 +7359,7 @@ get_context_from_lsn(dbenv, lsn, ret_context)
 	}
 
 	assert(rectype == DB___txn_regop || rectype == DB___txn_regop_gen ||
-		rectype == DB___txn_regop_rowlocks);
+		rectype == DB___txn_regop_dist || rectype == DB___txn_regop_rowlocks);
 	if (rectype == DB___txn_regop) {
 		if ((rc = __txn_regop_read(dbenv, logdta.data, &txn_args)) != 0)
 			goto err;
@@ -7164,6 +7382,19 @@ get_context_from_lsn(dbenv, lsn, ret_context)
 			logdta.data = NULL;
 		}
 		__os_free(dbenv, txn_gen_args);
+		__log_c_close(logc);
+		return 0;
+	} else if (rectype == DB___txn_regop_dist) {
+		if ((rc =
+			__txn_regop_dist_read(dbenv, logdta.data,
+				&txn_dist_args)) != 0)
+			goto err;
+		*ret_context = txn_dist_args->context;
+		if (logdta.data) {
+			__os_free(dbenv, logdta.data);
+			logdta.data = NULL;
+		}
+		__os_free(dbenv, txn_dist_args);
 		__log_c_close(logc);
 		return 0;
 	} else if (rectype == DB___txn_regop_rowlocks) {

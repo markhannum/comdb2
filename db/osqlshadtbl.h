@@ -167,6 +167,12 @@ int osql_save_schemachange(struct sql_thread *thd,
  */
 int osql_save_bpfunc(struct sql_thread *thd, BpfuncArg *arg);
 
+/*
+ * Record names of participants
+ */
+int osql_save_rmt(struct sqlclntstate *clnt, const char *dbname,
+        const char *host, const char *tid);
+
 /**
  * Process shadow tables
  *

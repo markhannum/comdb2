@@ -136,6 +136,14 @@ int osql_send_bpfunc(osql_target_t *target, unsigned long long rqid,
                      uuid_t uuid, BpfuncArg *msg, int type);
 
 /**
+ * Send PARTICPANT information to coordinator (this) master
+ *
+ */
+int osql_send_participant(osql_target_t *target, unsigned long long rqid, uuid_t uuid,
+        const char *dbname, const char *host, uuid_t tid);
+
+
+/**
  * Send SERIAL op
  *
  */

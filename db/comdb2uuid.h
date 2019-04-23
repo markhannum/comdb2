@@ -22,6 +22,7 @@ typedef char uuidstr_t[37];
 
 void comdb2uuid(uuid_t u);
 char *comdb2uuidstr(uuid_t u, uuidstr_t);
+int comdb2struuid(uuidstr_t, uuid_t u);
 int comdb2uuidcmp(uuid_t u1, uuid_t u2);
 void comdb2uuidcpy(uuid_t dst, uuid_t src);
 void comdb2uuid_clear(uuid_t u);

@@ -85,4 +85,37 @@ typedef struct ___txn_regop_gen_args {
 	DBT	locks;
 } __txn_regop_gen_args;
 
+#define	DB___txn_prepare	17
+typedef struct ___txn_prepare_args {
+	u_int32_t type;
+	DB_TXN *txnid;
+	DB_LSN prev_lsn;
+	u_int32_t	opcode;
+	u_int32_t	generation;
+    u_int64_t   dtranid;
+	u_int64_t	timestamp;
+    DBT coordinator_name;
+    DBT coordinator_stage;
+	u_int32_t	coordinator_gen;
+    DBT locks;
+} __txn_prepare_args;
+
+#define	DB___txn_regop_dist	18
+typedef struct ___txn_regop_dist_args {
+	u_int32_t type;
+	DB_TXN *txnid;
+	DB_LSN prev_lsn;
+	u_int32_t	opcode;
+	u_int32_t	generation;
+    u_int64_t   dtranid;
+	u_int64_t	context;
+	u_int64_t	timestamp;
+    u_int32_t   lflags;
+    DBT coordinator_name;
+    DBT coordinator_stage;
+    u_int32_t   coordinator_gen;
+    u_int64_t   sequence;
+    DBT locks;
+} __txn_regop_dist_args;
+
 #endif

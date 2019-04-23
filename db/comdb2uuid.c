@@ -27,6 +27,12 @@ inline char *comdb2uuidstr(uuid_t u, char out[37])
     return out;
 }
 
+int comdb2struuid(char in[37], uuid_t u);
+inline int comdb2struuid(char in[37], uuid_t u)
+{
+    return uuid_parse(in, u);
+}
+
 void comdb2uuid_clear(uuid_t u) { uuid_clear(u); }
 
 int comdb2uuidcmp(uuid_t u1, uuid_t u2) { return uuid_compare(u1, u2); }

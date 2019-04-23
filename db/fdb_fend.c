@@ -47,6 +47,7 @@
 #include "fdb_access.h"
 #include "fdb_bend.h"
 #include "osqlsession.h"
+#include "osqlcomm.h"
 #include "util.h"
 #include "logmsg.h"
 
@@ -3946,6 +3947,62 @@ fdb_tran_t *fdb_trans_join(struct sqlclntstate *clnt, fdb_t *fdb, char *ptid)
     }
 
     return tran;
+}
+
+int fdb_send_remotes(struct sqlclntstate *clnt)
+{
+    fdb_distributed_tran_t *dtran = clnt->dbtran.dtran;
+    fdb_tran_t *tran;
+    osqlstate_t *osql = &clnt->osql;
+    int rc = 0;
+
+    if (!dtran)
+        return 0;
+
+    if (dtran->remoted == 1) {
+        /* this is on remote side, the structure is different, see
+         * fdb_bend_sql.c */
+        fdb_svc_trans_destroy(clnt);
+        return 0;
+    }
+
+    LISTC_FOR_EACH(&dtran->fdb_trans, tran, lnk)
+    {
+        if (!tran->isuuid) {
+            logmsg(LOGMSG_ERROR, "%s 2pc supported only for isuuid\n",
+                    __func__);
+            return -1;
+        } 
+        if ((rc = osql_send_participant(&osql->target, osql->rqid, osql->uuid,
+                tran->fdb->dbname, tran->host, tran->tiduuid)) != 0)
+            return rc;
+    }
+
+    return 0;
+}
+
+int fdb_save_remotes(struct sqlclntstate *clnt)
+{
+    fdb_distributed_tran_t *dtran = clnt->dbtran.dtran;
+    fdb_tran_t *tran;
+    int rc = 0;
+
+    if (!dtran)
+        return 0;
+
+    if (dtran->remoted == 1) {
+        /* this is on remote side, the structure is different, see
+         * fdb_bend_sql.c */
+        fdb_svc_trans_destroy(clnt);
+        return 0;
+    }
+
+    LISTC_FOR_EACH(&dtran->fdb_trans, tran, lnk)
+    {
+        rc += osql_save_rmt(clnt, tran->fdb->dbname, tran->host, tran->tid);
+    }
+
+    return rc ? -1 : 0;
 }
 
 int fdb_trans_commit(struct sqlclntstate *clnt)

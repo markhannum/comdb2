@@ -86,6 +86,8 @@ void comdb2enableGenid48(Parse*, int);
 void comdb2enableRowlocks(Parse*, int);
 void comdb2analyzeCoverage(Parse*, Token*, Token*, int val);
 void comdb2CreateRangePartition(Parse *pParse, Token*, Token*, ExprList*);
+void comdb2PrepareTransaction(Parse *pParse, Token *txnid, Token *coordinator,
+        Token *stage, Token *master, int generation);
 void comdb2getAnalyzeCoverage(Parse* pParse, Token *nm, Token *lnm);
 void comdb2analyzeThreshold(Parse*, Token*, Token*, int th);
 void comdb2getAnalyzeThreshold(Parse* pParse, Token *nm, Token *lnm);

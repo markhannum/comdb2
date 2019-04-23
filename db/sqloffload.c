@@ -190,6 +190,67 @@ void osql_cleanup(void)
     bdb_osql_destroy(&bdberr);
 }
 
+char *osql_breq2a(int op)
+{
+
+    switch (op) {
+    case OSQL_RPLINV:
+        return "INVALID";
+    case OSQL_DONE:
+        return "OSQL_DONE";
+    case OSQL_DONE_STATS:
+        return "OSQL_DONE_STATS";
+    case OSQL_DONE_SNAP:
+        return "OSQL_DONE_SNAP";
+    case OSQL_USEDB:
+        return "OSQL_USEDB";
+    case OSQL_DELREC:
+        return "OSQL_DELREC";
+    case OSQL_INSREC:
+        return "OSQL_INSREC";
+    case OSQL_QBLOB:
+        return "OSQL_QBLOB";
+    case OSQL_UPDREC:
+        return "OSQL_UPDREC";
+    case OSQL_XERR:
+        return "OSQL_XERR";
+    case OSQL_UPDCOLS:
+        return "OSQL_UPDCOLS";
+    case OSQL_SERIAL:
+        return "OSQL_SERIAL";
+    case OSQL_SELECTV:
+        return "OSQL_SELECTV";
+    case OSQL_DBGLOG:
+        return "OSQL_DBGLOG";
+    case OSQL_RECGENID:
+        return "OSQL_RECGENID";
+    case OSQL_UPDSTAT:
+        return "OSQL_UPDSTAT";
+    case OSQL_EXISTS:
+        return "OSQL_EXISTS";
+    case OSQL_DBQ_CONSUME:
+        return "OSQL_DBQ_CONSUME";
+    case OSQL_INSERT:
+        return "OSQL_INSERT";
+    case OSQL_DELETE:
+        return "OSQL_DELETE";
+    case OSQL_UPDATE:
+        return "OSQL_UPDATE";
+    case OSQL_SCHEMACHANGE:
+        return "OSQL_SCHEMACHANGE";
+    case OSQL_BPFUNC:
+        return "OSQL_BPFUNC";
+    case OSQL_DELIDX:
+        return "OSQL_DELIDX";
+    case OSQL_INSIDX:
+        return "OSQL_INSIDX";
+    case OSQL_PREPARE:
+        return "OSQL_PREPARE";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 void block2_sorese(struct ireq *iq, const char *sql, int sqlen, int block2_type)
 {
 
@@ -387,6 +448,8 @@ static int sorese_abort(struct sqlclntstate *clnt, int osqlreq_type)
     return 0;
 }
 
+extern int gbl_2pc;
+
 int recom_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
                  char *tzname, int is_distributed_tran)
 {
@@ -394,10 +457,18 @@ int recom_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
 
     /* temp hook for sql transactions */
     if (clnt->dbtran.dtran) {
-        rc = fdb_trans_commit(clnt);
-        if (rc) {
-            logmsg(LOGMSG_ERROR, "%s distributed failure rc=%d\n", __func__, rc);
-            return rc;
+        if (!clnt->twopc) {
+            rc = fdb_trans_commit(clnt);
+            if (rc) {
+                logmsg(LOGMSG_ERROR, "%s distributed failure rc=%d\n",
+                        __func__, rc);
+                return rc;
+            }
+        } else {
+            /* Generate osql stream to my master (which will be coordinator) 
+             * listing all of the participants and their rqids, etc- master 
+             * will send these a 'prepare'. */
+            rc = fdb_send_remotes(clnt);
         }
     }
 

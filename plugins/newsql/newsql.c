@@ -1496,6 +1496,14 @@ int process_set_commands(struct sqlclntstate *clnt, CDB2SQLQUERY *sql_query)
                     if (clnt->dbtran.mode == TRANLEVEL_INVALID)
                         rc = ii + 1;
                 }
+            } else if (strncasecmp(sqlstr, "2pc", 3) == 0) {
+                sqlstr += 3;
+                sqlstr = skipws(sqlstr);
+                if (strncasecmp(sqlstr, "on", 2) == 0) {
+                    clnt->twopc = 1;
+                } else {
+                    clnt->twopc = 0;
+                }
             } else if (strncasecmp(sqlstr, "timeout", 7) == 0) {
                 sqlstr += 7;
                 sqlstr = skipws(sqlstr);

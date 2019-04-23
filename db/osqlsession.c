@@ -158,6 +158,9 @@ static void _destroy_session(osql_sess_t **psess)
     if (sess->snap_info)
         free(sess->snap_info);
 
+    if (sess->coordinator)
+        free(sess->coordinator);
+
     Pthread_mutex_destroy(&sess->impl->mtx);
     free(sess);
 

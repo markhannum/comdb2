@@ -1,0 +1,251 @@
+DISTRIBUTED TRANSACTIONS MANIFESTO
+
+2PC
+
+Comdb2 distributed transactions will be based on simple two-phase commit. This
+is described on wiki: https://en.wikipedia.org/wiki/Two-phase_commit_protocol
+
+Recap: the COORDINATOR of a distributed transaction interacts with the
+PARTICIPANTS.  The coordinator tells each of the participants to PREPARE a given
+write schedule.  A participant prepares a transaction by attempting to execute
+this write schedule, and if successful, by writing a PREPARE record in it's log,
+and by responding to the coordinator that it has successfully prepared its write
+schedule.  If a participant fails to prepare, it conveys this failure to the
+coordinator, and the coordinator will abort the distributed transaction.  The
+coordinator may also abort if it fails to get a response from a participant for
+a prepare requests within a given timeframe.  After a participant writes a
+prepare record, it cannot release the locks that it has until the coordinator
+tells it whether the transaction should be committed or rolled back.
+
+If each of the participants successfully prepares it's write schedule, the
+coordinator will write it's own COMMIT record, and then will tell the
+participants to COMMIT.  This causes the participants to write a commit record
+and to release their locks.  If any participant fails to prepare, or if a
+timeout occurs, the coordinator will tell the participants to ABORT, causing the
+participants to write an abort record, and roll back their work, and release
+their locks.
+
+
+Comdb2
+
+To support distributed transactions, the database cluster that the client
+initially connects against will act as the COORDINATOR cluster.  We additionally
+require that durable LSNs are enabled, and that the coordinator and all of the
+participant databases execute at HASQL snapshot isolation or higher.  We allow
+distributed database access to occur as always with the exception that the
+COORDINATOR MASTER rather than the replicant will request that the participant
+replicant send the OSQL write schedule with a PREPARE (rather than COMMIT) to
+the participant master.  The COORDINATOR-master then waits for a period of time
+to allow all of the PARTICIPANT masters to respond with the result of the
+PREPARE requests.  If any PARTICIPANT master fails to PREPARE, or fails to
+respond before a timeout, the COORDINATOR master will abort the distributed
+transaction.
+
+Database clusters which act as coordinator must maintain a
+"distributed_transactions" table.  This table will be indexed by a unique
+distributed-transaction-id, and it will contain the fate of the distributed
+transaction, and the timestamp of when it was committed, and a single row for
+each participant of a distributed transaction.  The coordinator master indicates
+the success or failure of a distributed transaction by transactionally inserting
+a record into the distributed_transactions table for every participant, and
+setting the state of column to "committed".  The distributed transaction is
+committed if the coordinator is able to insert a "committed" record for every
+participant in a distributed transaction, and propogate the commit for this
+transaction to at least a majority of it's cluster nodes- that is, it's
+committed if the commit record for this transaction is written durably.  After
+the coordinator knows that a specific participant has applied this transaction,
+the state column will change to "resolved" for that row.  This may be done in a
+separate thread whose sole goal is to upgrade "committed" entries to "resolved"
+entires.  If a distributed transaction is "resolved" for all participants, then
+all of the records for that distributed-transaction-id may be removed entirely
+from the distributed_transaction's table- maybe done by the same thread, which
+will allow resolved transactions to persist for a period of time before
+deletion.
+
+The "majority-of-cluster" rule used to ensure that a coordinator has committed a
+distributed transaction will also be used for the participant's PREPARE log
+records, although failure to propogate a PREPARE to a majority of the cluster is
+an easier situation to handle.  If a participant fails to replicate a PREPARE to
+a majority of the cluster, the participant would simply abort this transaction
+and notify the coordinator that it failed to prepare.
+
+The "majority" rule fits in well with our current durable LSN / linearizable
+scheme as it provides us a straightforward way to prevent participants from
+erroneously assuming that a distributed transaction has committed.  Using this
+criteria, and having the participants record the coordinator's generation number
+solves a problem:
+
+Imagine that a coordinator has written a COMMIT record for a distributed
+transaction, and then crashes.  If the commit record was replicated to at least
+a majority of the nodes, the new master is guaranteed to have records in the
+distributed-transaction-table for this distributed transaction.  If the new
+master does not have the COMMIT record for this transaction, the cluster's
+generation number has increased (by virtue of a successful election).
+Participants of any orphaned transactions can query the coordinator's
+distributed_transactions table.  If the record corresponding to the outstanding
+transaction id is found, then the participant knows based on this record whether
+it should commit or roll-back the participating transaction.  If the record
+corresponding to the outstanding transaction id is not found, but the
+coordinator cluster's generation has changed, participants should write an ABORT
+record.  So participants need to continue polling the coordinator's
+distributed_transaction table until they find the results, or until the
+coordinator's cluster generation has changed.
+
+It should be obvious from this design that each participant's PREPARE record for
+a distributed transaction must be written before the COORDINATOR's COMMIT
+record, and that the COORDINATOR's COMMIT record must be written before the
+participant's COMMIT record.  Should the coordinator's database also be a
+participant (that is, if the coordinator has work that needs to be executed
+locally on behalf of the distributed transaction), then the coordinator will
+follow the exact same protocol as the other participants; the participant thread
+in this case might even execute in a different block-processor than the
+coordinator thread.  Like other participants, a coordinator-participant will
+wait for the coordinator to either commit or abort this transaction, and will
+subsequently write a commit record or an abort record as directed by the
+co-located coordinator.  Having this design allows the coordinator-participant
+to follow exactly the same protocol as the other participants, and it allows the
+distributed commit logic to be completely decoupled and very terse (BEGIN,
+INSERT-RECORD-FOR-EACH-PARTICIPANT, COMMIT).  Keeping these transactions small
+makes the coordinator less likely to become a bottleneck.  
+
+
+Participant Considerations
+
+The distributed transaction scheme must be robust enough to recover from an
+arbitrary machine crash at any point.  Handling coordinator crashes is described
+above: the success or failure of the distributed transaction is contingent upon
+whether the COORDINATOR is able to durably insert records into the distributed
+transaction table.  
+
+We now consider a PARTICIPANT which has been issued a PREPARE directive.  The
+PARTICIPANT master must attempt to execute it's OSQL write schedule, and then
+(if successful) must durably write a PREPARE log record.  This record will
+contain the name, stage, and generation number of the coordinator cluster, and a
+list of the locks required for this transaction.
+
+Specifically, we are interested in the case where a participant has successfully
+executed it's write schedule, has durably written a prepare record, has
+responded to the coordinator that it has prepared sucessfully, and then crashes
+before learning the outcome of the distributed transaction.  In this case, the
+participant cluster will elect a new master, and it will be the new master's
+responsibility to aquire the prepared transaction's locks, and to determine the
+fate of the transaction from the coordinator.  To facilitate this, each
+participant cluster node will maintain an in-memory table of
+UNRESOLVED-PREPARES.  For each unresoved prepare this table will contain the
+distributed transaction id, the distributed transaction coordinator's name,
+coordinator's stage, and coordinator's generation number at the time of prepare,
+and the LSN of the unresolved prepare record.
+
+Upon a "cold-start", the UNRESOLVED-PREPARE table will be built up by recovery.
+As an unresolved-prepare is an uncommitted transaction, normal recovery will
+suffice initially: any changes made on behalf of these transactions will be
+"rolled-back".  PREPARE records themselves are handled specially: if there is a
+corresponding COMMIT, then nothing need be done as this is a RESOLVED-PREPARE.
+PREPARE records which do not have a corresponding COMMIT will be rolled back,
+but will need an entry in the UNRESOLVED-PREPARE table.  After election
+completes (but before servicing any new write requests) the new participant
+master must aquire locks for all of the unresolved prepares, and execute their
+schedules up to the point of the prepare-record.  The participant master then
+polls each coordinator database to determine the fate of each unresolved
+prepare.
+
+For normal operations, each participant replicant will adjust the
+unresolved-prepare table from it's replication thread.  So while a participant
+replicant won't actually aquire locks or attempt to execute a schedule based on
+a prepare record, it will need to update its in-memory unresolved-prepare table
+and send a UDP ack back to the participant master.  If the participant master
+crashes, the new participant master will be able to use this in-memory
+unresolved-prepare table to acquire locks, execute, and resolve these
+transactions.
+
+An interesting (but tangental) point about replication: because the locks are
+maintained in the PREPARE record rather than the COMMIT record, replicants for
+participant databases will need to look at the previous log record (the PREPARE
+record) to find the necessary locks for the call to lock-get-list.  Everything
+else should work as normal.
+
+
+Walk Through
+
+A client connects to cluster "A", and begins a transaction.  It queries both
+local and remote tables (cluster "B"), and issues writes against both.  The
+client then issues a "COMMIT".
+
+The coordinator replicant sends a "DISTRIBUTED COMMIT" osql stream to the
+coordinator master.  This osql stream will contain a list of participating
+replicants.  It will be the coordinator master's responsibility to issue a
+PREPARE against these replicants.  As an optimization, PREPARES against the
+coordinator's cluster might be sent via the same OSQL stream as the distributed
+commit.
+
+The distributed commit protocol is quite simple: the coordinator waits for each
+participant to respond with the results of the "PREPARE".  If any of the
+participants fails to prepare a transaction, or doesn't respond before a
+timeout, the coordinator fails the distributed transaction, and records this
+failure by inserting a "ROLLBACK" record per participant in the distributed
+transaction table.  If all of the prepares are successful, the coordinator
+records the success of this transaction by inserting a "COMMIT" record per
+participant into the distributed transaction table.  For successes or failures
+that are durably committed, the coordinator actively notifies the participants.
+Otherwise, the coordinator does nothing, and the participants must poll against
+the coordinator cluster to find the result of the distributed transaction.
+There are only two possibilities at this point: the commit will become durable,
+at which point the record will be visible to participants, or a master which
+does not have this record will be elected, in which case the record will not be
+available but the coordinator generation will change.
+
+We had entertained the idea of having the coordinator REPLICANT rather than the
+coordinator MASTER issue the PREPARE against all of the participating database
+before sending a "DISTRIBUTED COMMIT" to the coordinator master.  Ultimately,
+this complicates things: consider the case where the participant replicant
+receives the PREPARE message, and the participant master then successfully
+prepares the transaction.  If the distributed commit is never received by the
+coordinator master (because of network failure, machine crash, etc), the
+participant will continue to hold onto locks and wait forever for the results of
+a distributed transaction which will never arrive on the coordinator master.
+Furthermore, if the coordinator replicant crashes (rather than coordinator
+master), the participant replicant will never observe a generation change.  This
+leaves the participant constantly polling the coordinator cluster for the
+results of a distributed transaction which will never arrive.
+
+Driving this from the coordinator master prevents this situation.  If the
+coordinator master crashes, it's guaranteed that the coordinator's generation
+number will change.  This means that any unresolved prepare requests against
+participants can safely abort after querying the coordinator cluster, not
+finding the result in the distributed-transaction table, and seeing that the
+generation is not the same as the coordinator's generation at prepare time.
+
+Given that a change in generation is sufficient to cause a participant to abort
+it's prepare, the coordinator cannot record success if the coordinator master
+determines that it's generation number is different from what was reported to
+the participants.  The strategy here is to query the master's generation number
+in the block processor after we've acquired the bdb-lock.  If the generation has
+changed, we abort this transaction without ever issuing any PREPAREs. 
+
+
+A NOTE ABOUT CONSISTENCY 
+
+You'll note that for normal (non-distributed) transactions, if a replicant is
+unable to apply an update in time, that replicant becomes INCOHERENT, and is not
+allowed to handle any requests.  In contrast, for the distributed transaction
+scheme as described here, the coordinator makes a "best-effort" to notify the
+participants.  If this fails, the participants will fall back on their polling
+logic to determine the fate of the transaction.  This means that we lose
+atomicity with respect to the participating databases: a task querying the
+participant databases may see the results of a distributed commit transaction
+happily committed in one participant, but not committed in another.
+Participants in a distributed transaction are therefore "eventually consistent"
+with respect to that transaction.  
+
+There's a straightforward solution to this: we require that clients which care
+about consistency access some working set of databases always use the same
+coordinator.  Recall that the COORDINATOR's distributed transaction table
+distinguishes between COMMITTED and RESOLVED transactions.  A new transaction
+should carry with it a list of committed distributed transaction ids that are
+not yet RESOLVED.  This list of COMMITTED but not RESOLVED transactions will be
+sent to all of the participant databases as they are accessed during the course
+of the SQL phase of the distributed transaction.  If the distributed transaction
+accesses a participant which has one of these committed-but-unresolved
+transactions in the UNRESOLVED-PREPARE table on a particular participant, the
+distributed transaction should either return an error, or should immediately
+block until that prepared transaction is resolved on the participant.

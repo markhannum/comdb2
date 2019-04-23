@@ -2067,4 +2067,14 @@ REGISTER_TUNABLE("sockbplog_sockpool",
 REGISTER_TUNABLE("replicant_retry_on_not_durable", "Replicant retries non-durable writes.  (Default: on)",
                  TUNABLE_BOOLEAN, &gbl_replicant_retry_on_not_durable, 0, NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("2pc",
+                 "Use 2-phased commit for distributed writes.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_2pc, 0, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("participant_timeoutms",
+                 "How long a coordinator will wait for participant acks.  "
+                 "(Default: 1000)",
+                 TUNABLE_INTEGER, &gbl_participant_timeout, 0, NULL, NULL,
+                 NULL, NULL);
+
 #endif /* _DB_TUNABLES_H */

@@ -166,6 +166,7 @@ struct __lc_cache;	typedef struct __lc_cache LC_CACHE;
 struct __lsn_collection; typedef struct __lsn_collection LSN_COLLECTION;
 
 struct __ltrans_descriptor; typedef struct __ltrans_descriptor LTDESC;
+struct __prepared_transaction; typedef struct __prepared_transaction PREPTXN;
 struct __rowlock_list; typedef struct __rowlock_list RLLIST;
 struct __recovery_processor;
 struct __recovery_list;
@@ -279,6 +280,8 @@ struct __db_trigger_subscription;
 #define DB_TXN_DONT_GET_REPO_MTX   0x0080000 /* Get the repo mutex on this commit */
 #define DB_TXN_SCHEMA_LOCK         0x0100000 /* Get the schema-lock */
 #define DB_TXN_LOGICAL_GEN         0x0200000 /* Contains generation info (txn_regop_rl) */
+#define DB_TXN_PARTICIPANT         0x0400000 /* Commit for a prepared transaction */
+#define DB_TXN_COORDINATOR         0x0800000 /* Coordinator commit for distributed txn */
 /*
  * Flags private to DB_ENV->set_encrypt.
  */
@@ -1053,6 +1056,9 @@ struct __db_txn {
 	int	  (*discard) __P((DB_TXN *, u_int32_t));
 	u_int32_t (*id) __P((DB_TXN *));
 	int	  (*prepare) __P((DB_TXN *, u_int8_t *));
+    int   (*comdb2_prepare) __P((DB_TXN *, u_int64_t dtranid, char
+                *coordinator_name, char *coordinator_stage,
+                u_int32_t coordinator_generation));
 	int	  (*set_timeout) __P((DB_TXN *, db_timeout_t, u_int32_t));
 
 #define	TXN_CHILDCOMMIT	0x001		/* Transaction that has committed. */
@@ -2510,6 +2516,12 @@ struct __db_env {
 	pthread_mutex_t ltrans_inactive_lk;
 	pthread_mutex_t ltrans_active_lk;
 
+    /* Prepared transactions */
+    hash_t *preptxn_hash;
+    LISTC_T(PREPTXN) preptxn;
+    pthread_mutex_t preptxnhash_lk;
+    pthread_mutex_t preptxn_lk;
+
 	/* Parallel recovery.  These are only valid on replicants. */
 	DB_LSN prev_commit_lsn;
 	int num_recovery_processor_threads;
@@ -2913,6 +2925,17 @@ struct track_stack_info {
 	int ret;
 };
 #endif
+
+struct __prepared_transaction {
+	u_int64_t dtranid;
+    char *coordinator_name;
+    char *coordinator_stage;
+    u_int32_t coordinator_generation;
+    u_int64_t timestamp;
+    DBT locks;
+    DB_LSN prepared_lsn;
+	LINKC_T(PREPTXN) lnk;
+};
 
 /* Map logical tranids to locker_ids */
 struct __ltrans_descriptor {

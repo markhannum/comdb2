@@ -989,18 +989,23 @@ int osql_sock_commit(struct sqlclntstate *clnt, int type)
     /* is it distributed? */
     if (clnt->dbtran.mode == TRANLEVEL_SOSQL && clnt->dbtran.dtran)
     {
-        rc = fdb_trans_commit(clnt);
-        if (rc) {
-            logmsg(LOGMSG_ERROR, "%s distributed failure rc=%d\n", __func__, rc);
+        if (!clnt->twopc) {
+            rc = fdb_trans_commit(clnt);
+            if (rc) {
+                logmsg(LOGMSG_ERROR, "%s distributed failure rc=%d\n", __func__, rc);
 
-            rc2 = osql_sock_abort(clnt, type);
+                rc2 = osql_sock_abort(clnt, type);
 
-            if (rc2) {
-                logmsg(LOGMSG_ERROR, "%s osql_sock_abort failed with rc=%d\n",
-                        __func__, rc2);
+                if (rc2) {
+                    logmsg(LOGMSG_ERROR, "%s osql_sock_abort failed with rc=%d\n",
+                            __func__, rc2);
+                }
+
+                return SQLITE_ABORT;
             }
-
-            return SQLITE_ABORT;
+        } else {
+            /* Send */
+            rc = fdb_send_remotes(clnt);
         }
     }
 

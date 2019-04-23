@@ -640,6 +640,7 @@ __txn_begin_int_int(txn, retries, we_start_at_this_lsn, flags)
 	txn->discard = __txn_discard_pp;
 	txn->id = __txn_id;
 	txn->prepare = __txn_prepare;
+    txn->comdb2_prepare = __txn_comdb2_prepare;
 	txn->set_timeout = __txn_set_timeout;
 
 	if (!recovery)
@@ -967,7 +968,7 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 	int32_t timestamp;
 	uint32_t gen;
 	u_int64_t context = 0;
-	int ret, t_ret, elect_highest_committed_gen;
+	int ret, t_ret, elect_highest_committed_gen, is_prepared, is_coordinator;
 
 	dbenv = txnp->mgrp->dbenv;
 
@@ -988,7 +989,8 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 		"DB_TXN->commit", flags,
 		DB_TXN_LOGICAL_BEGIN | DB_TXN_LOGICAL_COMMIT | DB_TXN_NOSYNC |
 		DB_TXN_SYNC | DB_TXN_REP_ACK | DB_TXN_DONT_GET_REPO_MTX |
-		DB_TXN_SCHEMA_LOCK | DB_TXN_LOGICAL_GEN) != 0)
+		DB_TXN_SCHEMA_LOCK | DB_TXN_LOGICAL_GEN | DB_TXN_PARTICIPANT |
+        DB_TXN_COORDINATOR) != 0)
 		flags = DB_TXN_SYNC;
 	if (__db_fcchk(dbenv,
 		"DB_TXN->commit", flags, DB_TXN_NOSYNC, DB_TXN_SYNC) != 0)
@@ -1008,6 +1010,9 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 		F_CLR(txnp, TXN_NOSYNC);
 		F_SET(txnp, TXN_SYNC);
 	}
+
+    is_prepared = LF_ISSET(DB_TXN_PARTICIPANT);
+    is_coordinator = LF_ISSET(DB_TXN_COORDINATOR);
 
 	/*
 	 * This was written to run on replicants, thus the rep_* calls
@@ -1657,6 +1662,81 @@ __txn_discard(txnp, flags)
 		Pthread_setspecific(txn_key, NULL);
 
 	return (0);
+}
+
+/*
+ * __txn_comdb2_prepare --
+ *  Write a prepare record from the master.  Update the prepared-transactions
+ *  table.
+ *
+ * PUBLIC: int __txn_comdb2_prepare __P((DB_TXN *, u_int64_t dtranid,
+ *              const char *coordinator_name, const char *coordinator_stage,
+ *              u_int32_t coordinator_generation));
+ *
+ */
+int
+__txn_comdb2_prepare(txnp, dtranid, coordinator_name, coordinator_stage,
+        coordinator_generation)
+	DB_TXN *txnp;
+    u_int64_t dtranid;
+    char *coordinator_name;
+    char *coordinator_stage;
+    u_int32_t coordinator_generation;
+{
+	DB_LSN lsn_out;
+    DBT cname;
+    DBT cstage;
+	DBT list_dbt;
+	int32_t timestamp;
+    uint32_t gen;
+    int ret;
+	DB_REP *db_rep;
+	REP *rep;
+	DB_LOCKREQ request;
+	int elect_highest_committed_gen;
+    timestamp = (int32_t)time(NULL);
+
+	DB_ENV *dbenv;
+	dbenv = txnp->mgrp->dbenv;
+	db_rep = dbenv->rep_handle;
+	rep = db_rep->region;
+    elect_highest_committed_gen = dbenv->attr.elect_highest_committed_gen;
+
+    memset(&request, 0, sizeof(request));
+    memset(&cname, 0, sizeof(cname));
+    memset(&cstage, 0, sizeof(cstage));
+    memset(&list_dbt, 0, sizeof(list_dbt));
+    cname.data = coordinator_name;
+    cname.size = strlen(coordinator_name) + 1;
+    cstage.data = coordinator_stage;
+    cstage.size = strlen(coordinator_stage) + 1;
+    if (LOCKING_ON(dbenv)) {
+        request.op = DB_LOCK_PUT_READ;
+        if (IS_REP_MASTER(dbenv) &&
+                !IS_ZERO_LSN(txnp->last_lsn)) {
+            request.obj = &list_dbt;
+        }
+        ret = __lock_vec(dbenv,
+                txnp->txnid, 0, &request, 1, NULL);
+
+        assert(ret == 0);
+    }
+
+    if (elect_highest_committed_gen) {
+        MUTEX_LOCK(dbenv,
+                db_rep->rep_mutexp);
+        gen = rep->gen;
+        MUTEX_UNLOCK(dbenv,
+                db_rep->rep_mutexp);
+    } else
+        gen = 0;
+
+
+    ret = __txn_prepare_log(dbenv, txnp, &lsn_out, 0, TXN_COMMIT, gen,
+            dtranid, timestamp, &cname, &cstage, coordinator_generation, request.obj);
+    assert(ret == 0);
+
+    return 0;
 }
 
 /*

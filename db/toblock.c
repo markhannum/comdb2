@@ -104,6 +104,7 @@ extern void delay_if_sc_resuming(struct ireq *iq);
 extern unsigned int gbl_delayed_skip;
 
 int gbl_osql_snap_info_hashcheck = 1;
+int gbl_participant_timeout = 1000;
 
 #if 0
 #define GOTOBACKOUT                                                            \

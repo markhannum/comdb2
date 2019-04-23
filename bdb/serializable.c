@@ -347,6 +347,7 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
     u_int32_t rectype = 0;
     __txn_regop_args *argp = NULL;
     __txn_regop_gen_args *arggenp = NULL;
+    __txn_regop_dist_args *argdistp = NULL;
     __txn_regop_rowlocks_args *argrlp = NULL;
     llog_ltran_commit_args *commit = NULL;
 
@@ -482,6 +483,26 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                 if (rectype == DB_llog_ltran_commit) {
                     break;
                 }
+
+            } else if (rectype == DB___txn_regop_dist) {
+                rc = __txn_regop_dist_read(bdb_state->dbenv, logdta.data,
+                                          &argdistp);
+                prevlsn = argdistp->prev_lsn;
+                free(logdta.data);
+                logdta.data = NULL;
+                rc = prevcur->get(prevcur, &prevlsn, &logdta, DB_SET);
+                if (!rc)
+                    LOGCOPY_32(&rectype, logdta.data);
+                else {
+                    fprintf(stderr, "Unable to get last_logical_lsn, rc %d\n",
+                            rc);
+                    fprintf(stderr, "@ file: %d, offset %d\n", seriallsn.file,
+                            seriallsn.offset);
+                    goto done;
+                }
+                if (rectype == DB_llog_ltran_commit) {
+                    break;
+                }
             } else if (rectype == DB___txn_regop_rowlocks) {
                 rc = __txn_regop_rowlocks_read(bdb_state->dbenv, logdta.data,
                                                &argrlp);
@@ -546,6 +567,10 @@ done:
     if (arggenp) {
         free(arggenp);
         arggenp = NULL;
+    }
+    if (argdistp) {
+        free(argdistp);
+        argdistp = NULL;
     }
     if (argrlp) {
         free(argrlp);

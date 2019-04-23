@@ -183,6 +183,9 @@ typedef struct osqlstate {
     struct temp_cursor *bpfunc_cur; /* bpfunc cursor */
     int bpfunc_seq;
 
+    struct temp_table *rmt_tbl; /* Store information about the remote sessions */
+    struct temp_cursor *rmt_cur;
+
     struct errstat xerr; /* extended error */
 
     /* performance */
@@ -888,6 +891,7 @@ struct sqlclntstate {
     char* origin_host;
     int8_t sent_data_to_client;
     int8_t is_asof_snapshot;
+    int8_t twopc;
     LINKC_T(struct sqlclntstate) lnk;
     int last_sent_row_sec; /* used to delay releasing locks when bdb_lock is
                               desired */

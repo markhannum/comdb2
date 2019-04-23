@@ -136,17 +136,18 @@ __log_put_pp(dbenv, lsnp, udbt, flags)
 int gbl_commit_delay_trace = 0;
 
 static inline int is_commit_record(int rectype) {
-    switch(rectype) {
-        /* regop regop_gen regop_rowlocks */
-        case (DB___txn_regop): 
-        case (DB___txn_regop_gen):
-        case (DB___txn_regop_rowlocks):
-            return 1;
-            break;
-        default:
-            return 0;
-            break;
-    }
+	switch(rectype) {
+		/* regop regop_gen regop_rowlocks */
+		case (DB___txn_regop): 
+		case (DB___txn_regop_gen):
+		case (DB___txn_regop_dist):
+		case (DB___txn_regop_rowlocks):
+			return 1;
+			break;
+		default:
+			return 0;
+			break;
+	}
 }
  
 static int
@@ -708,7 +709,7 @@ __log_put_next(dbenv, lsn, context, dbt, udbt, hdr, old_lsnp, off_context, key, 
 		int pushlog = 1;
 
 		assert(rectype == DB___txn_regop || rectype == DB___txn_regop_gen ||
-				rectype == DB___txn_regop_rowlocks);
+				rectype == DB___txn_regop_dist || rectype == DB___txn_regop_rowlocks);
 
 		if (rectype == DB___txn_regop_rowlocks)
 		{
@@ -723,6 +724,12 @@ __log_put_next(dbenv, lsn, context, dbt, udbt, hdr, old_lsnp, off_context, key, 
 			/* rectype(4)+txn_num(4)+db_lsn(8)+opcode(4)+GENERATION(4) */
 			LOGCOPY_32( &generation, &pp[ 4 + 4 + 8 + 4] );
 		}
+        if (rectype == DB___txn_regop_dist)
+        {
+			/* rectype(4)+txn_num(4)+db_lsn(8)+opcode(4)+GENERATION(4)+dtranid(8)*/
+			LOGCOPY_32( &generation, &pp[ 4 + 4 + 8 + 4 + 8] );
+        }
+
 
 		bdb_push_pglogs_commit(dbenv->app_private, *lsn, generation, *ltranid, pushlog);
 

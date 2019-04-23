@@ -50,7 +50,9 @@ XMACRO_OSQL_RPL_TYPES( OSQL_DELIDX,            24, "OSQL_DELIDX" ) /* for indexe
 XMACRO_OSQL_RPL_TYPES( OSQL_INSIDX,            25, "OSQL_INSIDX" ) /* for indexes on expressions */                          \
 XMACRO_OSQL_RPL_TYPES( OSQL_STARTGEN,          27, "OSQL_STARTGEN" )                                                         \
 XMACRO_OSQL_RPL_TYPES( OSQL_DONE_WITH_EFFECTS, 28, "OSQL_DONE_WITH_EFFECTS" )                                                \
-XMACRO_OSQL_RPL_TYPES( MAX_OSQL_TYPES,         29, "OSQL_MAX")
+XMACRO_OSQL_RPL_TYPES( OSQL_PARTICIPANT,       29, "OSQL_PARTICIPANT" )                                                      \
+XMACRO_OSQL_RPL_TYPES( OSQL_PREPARE,           30, "OSQL_PREPARE" )                                                          \
+XMACRO_OSQL_RPL_TYPES( MAX_OSQL_TYPES,         31, "OSQL_MAX")
 
 // clang-format on
 

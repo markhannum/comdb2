@@ -2196,6 +2196,70 @@ void comdb2getAnalyzeCoverage(Parse* pParse, Token *nm, Token *lnm)
                             (vdbeFuncArgFree)  &free, &stp);
 }
 
+struct preparetran
+{
+    char coordinator[MAX_DBNAME_LENGTH];
+    char stage[MAXSTAGENAMELEN];
+    char machine[MAXHOSTNAMELEN];
+    int generation;
+    uuid_t txn;
+};
+
+static int comdb2ProcPrepareTransaction(OpFunc *f)
+{
+    return 0;
+}
+
+void comdb2PrepareTransaction(Parse *pParse, Token *pTxn, Token *pCoord,
+        Token *pStage, Token *pMach, int pGen)
+{
+    struct preparetran *p;
+    uuidstr_t uuidstr;
+
+    if (comdb2IsPrepareOnly(pParse))
+        return;
+
+#ifndef SQLITE_OMIT_AUTHORIZATION
+    {
+        if( sqlite3AuthCheck(pParse, SQLITE_GET_TUNABLE, 0, 0, 0) ){
+            setError(pParse, SQLITE_AUTH, COMDB2_NOT_AUTHORIZED_ERRMSG);
+            return;
+        }
+    }
+#endif
+    Vdbe *v = sqlite3GetVdbe(pParse);
+    p = (struct preparetran *)malloc(sizeof(*p));
+    if (comdb2TokenToStr(pCoord, p->coordinator, sizeof(p->coordinator))) {
+        setError(pParse, SQLITE_MISUSE, "Coordinator name is too long");
+        return;
+    }
+
+    if (comdb2TokenToStr(pCoord, p->stage, sizeof(p->stage))) {
+        setError(pParse, SQLITE_MISUSE, "Stage name is too long");
+        return;
+    }
+
+    if (comdb2TokenToStr(pMach, p->machine, sizeof(p->machine))) {
+        setError(pParse, SQLITE_MISUSE, "Machine name is too long");
+        return;
+    }
+
+    if (comdb2TokenToStr(pTxn, uuidstr, sizeof(uuidstr))) {
+        setError(pParse, SQLITE_MISUSE, "Txnid is too long");
+        return;
+    }
+
+    if (comdb2struuid(uuidstr, p->txn)) {
+        setError(pParse, SQLITE_MISUSE, "Invalid txnid");
+        return;
+    }
+    const char* colname[] = {"prepare"};
+    const int coltype = OPFUNC_STRING_TYPE;
+    OpFuncSetup stp = {1, colname, &coltype, 256};
+    comdb2prepareOpFunc(v, pParse, 1, p, &comdb2ProcPrepareTransaction,
+                        (vdbeFuncArgFree) &free, &stp);
+}
+
 void comdb2CreateRangePartition(Parse *pParse, Token *nm, Token *col,
         ExprList* limits)
 {

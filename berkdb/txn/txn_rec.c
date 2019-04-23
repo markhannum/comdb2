@@ -59,6 +59,50 @@ static const char revid[] = "$Id: txn_rec.c,v 11.54 2003/10/31 23:26:11 ubell Ex
 
 int set_commit_context(unsigned long long context, uint32_t *generation,
 		void *plsn, void *args, unsigned int rectype);
+
+
+/*
+ * PUBLIC: int __txn_prepare_recover
+ * PUBLIC:    __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
+ *
+ * These records are only ever written for commits.  Normally, we redo any
+ * committed transaction, however if we are doing recovery to a timestamp, then
+ * we may treat transactions that commited after the timestamp as aborted.
+ */
+
+int
+__txn_prepare_recover(dbenv, dbtp, lsnp, op, info)
+	DB_ENV *dbenv;
+	DBT *dbtp;
+	DB_LSN *lsnp;
+	db_recops op;
+	void *info;
+{
+	DB_REP *db_rep;
+	REP *rep;
+	DB_TXNHEAD *headp;
+	__txn_prepare_args *argp;
+	int ret;
+
+    /* TODO */
+    return 1;
+
+/*
+#ifdef DEBUG_RECOVER
+	(void)__txn_prepare_print(dbenv, dbtp, lsnp, op, info);
+#endif
+
+	db_rep = dbenv->rep_handle;
+	rep = db_rep->region;
+
+	if ((ret = __txn_prepare_read(dbenv, dbtp->data, &argp)) != 0)
+		return (ret);
+
+*/
+
+}
+
+
 /*
  * PUBLIC: int __txn_regop_gen_recover
  * PUBLIC:    __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));

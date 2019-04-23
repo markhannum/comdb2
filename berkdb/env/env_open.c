@@ -363,6 +363,7 @@ __dbenv_open(dbenv, db_home, flags, mode)
 
 	/* Init this part before txn's */
 	if (LF_ISSET(DB_INIT_REP)) {
+        /* ltrans structures */
 		dbenv->ltrans_hash = hash_init(sizeof(u_int64_t));
 		Pthread_mutex_init(&dbenv->ltrans_hash_lk, NULL);
 		listc_init(&dbenv->active_ltrans,
@@ -372,7 +373,15 @@ __dbenv_open(dbenv, db_home, flags, mode)
 		Pthread_mutex_init(&dbenv->ltrans_inactive_lk, NULL);
 		Pthread_mutex_init(&dbenv->ltrans_active_lk, NULL);
 		Pthread_mutex_init(&dbenv->locked_lsn_lk, NULL);
+
+        /* prepared structures */
+        dbenv->preptxn_hash = hash_init(sizeof(u_int64_t));
+        Pthread_mutex_init(&dbenv->preptxnhash_lk, NULL);
+        listc_init(&dbenv->preptxn, offsetof(struct __prepared_transaction,
+                    lnk));
+        Pthread_mutex_init(&dbenv->preptxn_lk, NULL);
 	}
+
 	dbenv->mintruncate_state = MINTRUNCATE_START;
 	ZERO_LSN(dbenv->mintruncate_first);
 	ZERO_LSN(dbenv->last_mintruncate_dbreg_start);
@@ -459,6 +468,7 @@ __dbenv_open(dbenv, db_home, flags, mode)
 				DB_LOGC *logc;
 				__txn_regop_args *regop;
 				__txn_regop_gen_args *regopgen;
+				__txn_regop_dist_args *regopdist;
 				__txn_regop_rowlocks_args *regoprowlocks;
 				u_int32_t rectype;
 				int32_t timestamp=0;
@@ -500,6 +510,20 @@ __dbenv_open(dbenv, db_home, flags, mode)
 								goto foundlsn;
 							}
 							break;
+						case (DB___txn_regop_dist):
+							if ((ret = __txn_regop_dist_read(dbenv, data.data, 
+											&regopdist))!=0)
+								goto err;
+							timestamp = regopdist->timestamp;
+							__os_free(dbenv, regopdist);
+							
+							if (timestamp <= gbl_recovery_timestamp) {
+								maxlsn.file = lsn.file;
+								maxlsn.offset = lsn.offset;
+								goto foundlsn;
+							}
+							break;
+
 						case (DB___txn_regop_rowlocks):
 							if ((ret = __txn_regop_rowlocks_read(dbenv, 
 											data.data, &regoprowlocks)) != 0)

@@ -1021,7 +1021,8 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 	LOGCOPY_32(&rectype, rec.data);
 
 	while (ret == 0 && rectype != DB___txn_regop_gen && rectype !=
-			DB___txn_regop_rowlocks && rectype != DB___txn_regop) {
+            DB___txn_regop_dist && rectype != DB___txn_regop_rowlocks
+            && rectype != DB___txn_regop) {
 		if ((ret = __log_c_get(logc, &curlsn, &rec, DB_PREV)) == 0)
 			LOGCOPY_32(&rectype, rec.data);
 	}
@@ -1038,7 +1039,19 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen);
 		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 		__os_free(dbenv, txn_gen_args);
-	} else if (rectype == DB___txn_regop_rowlocks) {
+	} else if (rectype == DB___txn_regop_dist) {
+    	__txn_regop_dist_args *txn_dist_args = NULL;
+		if ((ret = __txn_regop_dist_read(dbenv, rec.data,
+						&txn_dist_args)) != 0)
+			goto err;
+		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
+		rep->committed_lsn = *lsn = curlsn;
+		rep->committed_gen = *gen = txn_dist_args->generation;
+		if (rep->gen < rep->committed_gen)
+			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen);
+		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
+		__os_free(dbenv, txn_dist_args);
+    } else if (rectype == DB___txn_regop_rowlocks) {
 		__txn_regop_rowlocks_args *txn_rl_args = NULL;
 		if ((ret = __txn_regop_rowlocks_read(dbenv, rec.data,
 						&txn_rl_args)) != 0)

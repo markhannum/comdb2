@@ -277,6 +277,7 @@ static Keyword aKeywordTable[] = {
   { "PLAN",             "TK_PLAN",         EXPLAIN                },
   { "PRAGMA",           "TK_PRAGMA",       PRAGMA                 },
   { "PRECEDING",        "TK_PRECEDING",    WINDOWFUNC             },
+  { "PREPARE",          "TK_PREPARE",      ALWAYS                 },
   { "PRIMARY",          "TK_PRIMARY",      ALWAYS                 },
   { "QUERY",            "TK_QUERY",        EXPLAIN                },
   { "RAISE",            "TK_RAISE",        TRIGGER                },

@@ -149,3 +149,32 @@ TIME	timestamp	u_int64_t		llx
 DBT	locks		DBT		s
 END
 
+
+/*
+ * Prepare record for the participant of a distributed transaction
+ */
+BEGIN prepare               17
+ARG	opcode		u_int32_t	lu
+ARG generation  u_int32_t   u
+ARG dtranid   genid_t llx
+TIME	timestamp	u_int64_t		llx
+DBT coordinator_name	DBT     s
+DBT coordinator_stage	DBT     s
+ARG coordinator_gen u_int32_t   u
+DBT	locks		DBT		s
+END
+
+BEGIN regop_dist             18
+ARG	opcode		u_int32_t	lu
+ARG generation  u_int32_t   u
+ARG dtranid   genid_t llx
+ARG context   genid_t llx
+TIME	timestamp	u_int64_t		llx
+ARG lflags      u_int32_t   u
+DBT coordinator_name	DBT     s
+DBT coordinator_stage	DBT     s
+ARG coordinator_gen u_int32_t
+POINTER	coodinator_commit_lsn	DB_LSN *	lu
+DBT	locks		DBT		s
+END
+

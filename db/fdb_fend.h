@@ -322,6 +322,8 @@ fdb_tran_t *fdb_trans_begin_or_join(struct sqlclntstate *clnt, fdb_t *fdb,
                                     char *ptid, int use_ssl);
 fdb_tran_t *fdb_trans_join(struct sqlclntstate *clnt, fdb_t *fdb, char *ptid);
 int fdb_trans_commit(struct sqlclntstate *clnt);
+int fdb_send_remotes(struct sqlclntstate *clnt);
+int fdb_save_remotes(struct sqlclntstate *clnt);
 int fdb_trans_rollback(struct sqlclntstate *clnt);
 char *fdb_trans_id(fdb_tran_t *trans);
 

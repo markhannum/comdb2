@@ -426,6 +426,7 @@ int gbl_selectv_rangechk = 0; /* disable selectv range check by default */
 
 int gbl_sql_tranlevel_preserved = SQL_TDEF_SOCK;
 int gbl_sql_tranlevel_default = SQL_TDEF_SOCK;
+int gbl_2pc = 0;
 int gbl_exit_alarm_sec = 300;
 int gbl_test_blkseq_replay_code = 0;
 int gbl_dump_blkseq = 0;

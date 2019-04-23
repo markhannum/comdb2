@@ -115,7 +115,12 @@ static int osql_create_verify_temptbl(bdb_state_type *bdb_state,
                                       struct sqlclntstate *clnt, int *bdberr);
 static int osql_destroy_verify_temptbl(bdb_state_type *bdb_state,
                                        struct sqlclntstate *clnt);
-
+static int osql_create_rmt_temptbl(bdb_state_type *bdb_state,
+                                            struct sqlclntstate *clnt,
+                                            int *bdberr);
+static int osql_destroy_rmt_temptbl(bdb_state_type *bdb_state,
+                                            struct sqlclntstate *clnt,
+                                            int *bdberr);
 static int osql_create_schemachange_temptbl(bdb_state_type *bdb_state,
                                             struct sqlclntstate *clnt,
                                             int *bdberr);
@@ -1582,6 +1587,11 @@ int osql_shadtbl_cleartbls(struct sqlclntstate *clnt)
         osql->bpfunc_seq = 0;
     }
 
+    if (osql->rmt_tbl) {
+        truncate_tablecursor(thedb->bdb_env, &osql->rmt_cur,
+                             osql->rmt_tbl, &bdberr);
+    }
+
     /* close the temporary bdb structures first */
     LISTC_FOR_EACH(&osql->shadtbls, tbl, linkv)
     {
@@ -2429,6 +2439,9 @@ int osql_shadtbl_begin_query(bdb_state_type *bdb_env, struct sqlclntstate *clnt)
     if (reopen_shadtbl_cursors(bdb_env, osql, osql->bpfunc_tbl,
                                &osql->bpfunc_cur))
         return -1;
+    if (reopen_shadtbl_cursors(bdb_env, osql, osql->rmt_tbl,
+                               &osql->rmt_cur))
+        return -1;
 
     /* close the temporary bdb structures first */
     LISTC_FOR_EACH(&osql->shadtbls, tbl, linkv)
@@ -2493,6 +2506,7 @@ int osql_shadtbl_done_query(bdb_state_type *bdb_env, struct sqlclntstate *clnt)
     close_shadtbl_cursors(bdb_env, osql, osql->verify_tbl, &osql->verify_cur);
     close_shadtbl_cursors(bdb_env, osql, osql->sc_tbl, &osql->sc_cur);
     close_shadtbl_cursors(bdb_env, osql, osql->bpfunc_tbl, &osql->bpfunc_cur);
+    close_shadtbl_cursors(bdb_env, osql, osql->rmt_tbl, &osql->rmt_cur);
 
     /* close the temporary bdb structures first */
     LISTC_FOR_EACH(&osql->shadtbls, tbl, linkv)
@@ -3060,6 +3074,13 @@ int osql_save_bpfunc(struct sql_thread *thd, BpfuncArg *arg)
     return 0;
 }
 
+int osql_save_rmt(struct sqlclntstate *clnt, const char *dbname,
+        const char *host, const char *tid)
+{
+    return 0;
+}
+
+
 static int process_local_shadtbl_bpfunc(struct sqlclntstate *clnt, int *bdberr)
 {
     osqlstate_t *osql = &clnt->osql;
@@ -3219,6 +3240,22 @@ static int osql_destroy_verify_temptbl(bdb_state_type *bdb_state,
                                 &osql->verify_cur);
 }
 
+static int osql_create_rmt_temptbl(bdb_state_type *bdb_state,
+                                            struct sqlclntstate *clnt,
+                                            int *bdberr)
+{
+    osqlstate_t *osql = &clnt->osql;
+    return osql_create_temptbl(bdb_state, &osql->rmt_tbl, &osql->rmt_cur, bdberr);
+}
+
+static int osql_destroy_rmt_temptbl(bdb_state_type *bdb_state,
+                                            struct sqlclntstate *clnt,
+                                            int *bdberr)
+{
+    osqlstate_t *osql = &clnt->osql;
+    return osql_destroy_temptbl(bdb_state, &osql->rmt_tbl, &osql->rmt_cur);
+}
+
 static int osql_create_schemachange_temptbl(bdb_state_type *bdb_state,
                                             struct sqlclntstate *clnt,
                                             int *bdberr)
@@ -3257,7 +3294,7 @@ static int osql_destroy_bpfunc_temptbl(bdb_state_type *bdb_state,
 int osql_shadtbl_empty(struct sqlclntstate *clnt)
 {
     return listc_empty(&clnt->osql.shadtbls) && !clnt->osql.verify_tbl &&
-           !clnt->osql.sc_tbl && !clnt->osql.bpfunc_tbl;
+           !clnt->osql.sc_tbl && !clnt->osql.bpfunc_tbl && !clnt->osql.rmt_tbl;
 }
 
 int osql_shadtbl_usedb_only(struct sqlclntstate *clnt)
@@ -3286,7 +3323,7 @@ int osql_shadtbl_usedb_only(struct sqlclntstate *clnt)
             return 0;
     }
 
-    if (!osql->verify_tbl && !osql->sc_tbl && !osql->bpfunc_tbl)
+    if (!osql->verify_tbl && !osql->sc_tbl && !osql->bpfunc_tbl && !osql->rmt_tbl)
         return 1;
 
     if (osql->verify_tbl) {
@@ -3306,6 +3343,13 @@ int osql_shadtbl_usedb_only(struct sqlclntstate *clnt)
     if (osql->bpfunc_tbl) {
         assert(osql->bpfunc_cur);
         rc = bdb_temp_table_first(thedb->bdb_env, osql->bpfunc_cur, &bdberr);
+        if (rc != IX_EMPTY)
+            return 0;
+    }
+
+    if (osql->rmt_tbl) {
+        assert(osql->rmt_cur);
+        rc = bdb_temp_table_first(thedb->bdb_env, osql->rmt_cur, &bdberr);
         if (rc != IX_EMPTY)
             return 0;
     }

@@ -97,6 +97,9 @@ const char *osql_reqtype_str(int type)
     return OSQL_RPL_TYPE_TO_STR(type);
 }
 
+static void osql_extract_prepare(osql_sess_t *sess, void *rpl, int rpllen,
+        int is_uuid);
+
 typedef struct osql_blknds {
     char *nds[MAX_CLUSTER];        /* list of nodes to blackout in offloading */
     time_t times[MAX_CLUSTER];     /* time of blacking out */
@@ -1118,9 +1121,107 @@ const uint8_t *osqlcomm_query_effects_get(struct query_effects *effects,
                     p_buf, p_buf_end);
     p_buf = buf_get(&(effects->num_inserted), sizeof(effects->num_inserted),
                     p_buf, p_buf_end);
-
     return p_buf;
 }
+
+typedef struct osql_prepare {
+    int coordinator_len;
+    int stage_len;
+    int host_len;
+    int generation;
+    uuid_t txnid;
+    int nops;
+    char strings[];
+} osql_prepare_t;
+
+int osql_prepare_len(const char *coordinator, const char *stage,
+                     const char *host)
+{
+    return (offsetof(osql_prepare_t, strings) + strlen(coordinator) +
+            strlen(stage) + strlen(host) + 3);
+}
+
+int osql_packed_prepare_len(const uint8_t *p_buf, const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || (sizeof(int) + sizeof(int)) > (p_buf_end - p_buf))
+        return -1;
+
+    int coordinator_len = 0, stage_len = 0, host_len = 0;
+    p_buf = buf_get(&coordinator_len, sizeof(coordinator_len), p_buf, p_buf_end);
+    p_buf = buf_get(&stage_len, sizeof(stage_len), p_buf, p_buf_end);
+    p_buf = buf_get(&host_len, sizeof(host_len), p_buf, p_buf_end);
+    return (offsetof(osql_prepare_t, strings) + coordinator_len + host_len +
+            stage_len + 3);
+}
+
+static uint8_t *osqlcomm_prepare_type_put(const char *coordinator,
+                                          const char *stage,
+                                          const char *coord_host,
+                                          int generation, uuid_t txnid,
+                                          int nops, uint8_t *p_buf,
+                                          const uint8_t *p_buf_end)
+{
+    int len = osql_prepare_len(coordinator, stage, coord_host);
+    if (p_buf_end < p_buf || len > (p_buf_end - p_buf))
+        return NULL;
+    int coordinator_len = strlen(coordinator);
+    int stage_len = strlen(stage);
+    int host_len = strlen(coord_host);
+    p_buf = buf_put(&coordinator_len, sizeof(int), p_buf, p_buf_end);
+    p_buf = buf_put(&stage_len, sizeof(int), p_buf, p_buf_end);
+    p_buf = buf_put(&host_len, sizeof(int), p_buf, p_buf_end);
+    p_buf = buf_put(&generation, sizeof(int), p_buf, p_buf_end);
+    p_buf = buf_no_net_put(txnid, sizeof(*txnid), p_buf, p_buf_end);
+    p_buf = buf_put(&nops, sizeof(int), p_buf, p_buf_end);
+    p_buf = buf_no_net_put(coordinator, coordinator_len + 1, p_buf, p_buf_end);
+    p_buf = buf_no_net_put(stage, stage_len + 1, p_buf, p_buf_end);
+    p_buf = buf_no_net_put(coord_host, host_len + 1, p_buf, p_buf_end);
+    return p_buf;
+}
+
+static const uint8_t *osqlcomm_prepare_type_get(char **coordinator,
+                                                char **coordstage,
+                                                char **coordhost,
+                                                int *generation,
+                                                uuid_t txnid,
+                                                int *nops,
+                                                const uint8_t *p_buf,
+                                                const uint8_t *p_buf_end)
+{
+    int len = osql_packed_prepare_len(p_buf, p_buf_end);
+    int coordinator_len = 0, stage_len = 0, host_len = 0;
+    if (p_buf_end < p_buf || len > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = buf_get(&coordinator_len, sizeof(coordinator_len), p_buf,
+                    p_buf_end);
+    p_buf = buf_get(&stage_len, sizeof(stage_len), p_buf, p_buf_end);
+    p_buf = buf_get(&host_len, sizeof(host_len), p_buf, p_buf_end);
+    p_buf = buf_get(generation, sizeof(*generation), p_buf, p_buf_end);
+    p_buf = buf_no_net_get(txnid, sizeof(*txnid), p_buf, p_buf_end);
+    p_buf = buf_get(nops, sizeof(nops), p_buf, p_buf_end);
+
+    (*coordinator) = (char *)calloc(
+            coordinator_len + stage_len + host_len + 3, 1);
+    memcpy((*coordinator), p_buf, coordinator_len + 1);
+    p_buf += (coordinator_len + 1);
+
+    (*coordstage) = &((*coordinator)[coordinator_len + 1]);
+    memcpy((*coordstage), p_buf, stage_len + 1);
+    p_buf += (stage_len + 1);
+
+    (*coordhost) = &((*coordinator)[coordinator_len + stage_len + 2]);
+    memcpy((*coordhost), p_buf, host_len + 1);
+    p_buf += (host_len + 1);
+    return p_buf;
+}
+
+/* Reference format */
+typedef struct osql_prepare_rpl {
+    osql_rpl_t hd;
+    snap_uid_t snap_info;
+    osql_prepare_t dt;
+} osql_prepare_rpl_t;
 
 typedef struct osql_done {
     int rc;
@@ -2813,6 +2914,140 @@ osqlcomm_recgenid_uuid_rpl_type_get(osql_recgenid_uuid_rpl_t *p_recgenid,
     return p_buf;
 }
 
+typedef struct osql_participant {
+    int dbname_len;
+    int host_len;
+    uuid_t tiduuid;
+    char dbname_host[];
+} osql_participant_t;
+
+int osql_participant_len(const char *dbname, const char *host)
+{
+    return (offsetof(osql_participant_t, dbname_host) + strlen(dbname) +
+            strlen(host) + 2);
+}
+
+int osql_packed_participant_len(const uint8_t *p_buf, const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || (sizeof(int) + sizeof(int)) > (p_buf_end - p_buf))
+        return -1;
+
+    int dbname_len = 0, host_len = 0;
+    p_buf = buf_get(&dbname_len, sizeof(dbname_len), p_buf, p_buf_end);
+    p_buf = buf_get(&host_len, sizeof(host_len), p_buf, p_buf_end);
+    return (offsetof(osql_participant_t, dbname_host) + dbname_len + host_len +
+            2);
+}
+
+static uint8_t *osqlcomm_participant_type_put(const char *dbname,
+                                              const char *host, uuid_t tiduuid,
+                                              uint8_t *p_buf,
+                                              const uint8_t *p_buf_end)
+{
+    int len = osql_participant_len(dbname, host);
+
+    if (p_buf_end < p_buf || len > (p_buf_end - p_buf))
+        return NULL;
+    int dbname_len = strlen(dbname), host_len = strlen(host);
+    p_buf = buf_put(&dbname_len, sizeof(((osql_participant_t *)0)->dbname_len),
+                p_buf, p_buf_end);
+    p_buf = buf_put(&host_len, sizeof(((osql_participant_t *)0)->host_len),
+                p_buf, p_buf_end);
+    p_buf = buf_no_net_put(&tiduuid, sizeof(((osql_participant_t *)0)->tiduuid),
+                p_buf, p_buf_end);
+    p_buf = buf_no_net_put(dbname, dbname_len + 1, p_buf, p_buf_end);
+    p_buf = buf_no_net_put(host, host_len + 1, p_buf, p_buf_end);
+
+    return p_buf;
+}
+
+static const uint8_t *osqlcomm_participant_type_get(osql_participant_t *p_participant,
+                                                 const uint8_t *p_buf,
+                                                 const uint8_t *p_buf_end)
+{
+    int len = osql_packed_participant_len(p_buf, p_buf_end);
+
+    if (p_buf_end < p_buf || len > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = buf_get(&p_participant->dbname_len, sizeof(p_participant->dbname_len),
+            p_buf, p_buf_end);
+    p_buf = buf_get(&p_participant->host_len, sizeof(p_participant->host_len),
+            p_buf, p_buf_end);
+    p_buf = buf_no_net_get(&p_participant->tiduuid, sizeof(p_participant->tiduuid),
+            p_buf, p_buf_end);
+    p_buf = buf_no_net_get(&p_participant->dbname_host[0], p_participant->dbname_len +
+            p_participant->host_len + 2, p_buf, p_buf_end);
+
+    return p_buf;
+}
+
+typedef struct osql_participant_rpl {
+    osql_rpl_t hd;
+    osql_participant_t dt;
+} osql_participant_rpl_t;
+
+static uint8_t *
+osqlcomm_participant_rpl_type_put(const osql_rpl_t *hd, const char *dbname,
+                                  const char *host, uuid_t tiduuid,
+                                  uint8_t *p_buf, const uint8_t *p_buf_end)
+{
+    int len = osql_participant_len(dbname, host) + OSQLCOMM_RPL_TYPE_LEN;
+    if (p_buf_end < p_buf || (p_buf_end - p_buf) < len)
+        return NULL;
+    p_buf = osqlcomm_rpl_type_put(hd, p_buf, p_buf_end);
+    p_buf = osqlcomm_participant_type_put(dbname, host, tiduuid, p_buf, p_buf_end);
+    return p_buf;
+}
+
+/* This wont work .. */
+static const uint8_t *
+osqlcomm_participant_rpl_type_get(osql_participant_rpl_t *p_participant,
+                                       const uint8_t *p_buf,
+                                       const uint8_t *p_buf_end)
+{
+    return NULL;
+}
+
+typedef struct osql_participant_uuid_rpl {
+    osql_uuid_rpl_t hd;
+    osql_participant_t dt;
+} osql_participant_uuid_rpl_t;
+
+static uint8_t *
+osqlcomm_participant_uuid_rpl_type_put(const osql_uuid_rpl_t *hd, const char *dbname,
+                                       const char *host, uuid_t tiduuid,
+                                       uint8_t *p_buf, const uint8_t *p_buf_end)
+{
+    int len = osql_participant_len(dbname, host) + OSQLCOMM_UUID_RPL_TYPE_LEN;
+    if (p_buf_end < p_buf || (p_buf_end - p_buf) < len)
+        return NULL;
+    p_buf = osqlcomm_uuid_rpl_type_put(hd, p_buf, p_buf_end);
+    p_buf = osqlcomm_participant_type_put(dbname, host, tiduuid, p_buf,
+            p_buf_end);
+    return p_buf;
+}
+
+/* wont work */
+static const uint8_t *
+osqlcomm_participant_uuid_rpl_type_get(osql_participant_uuid_rpl_t *p_participant,
+                                       const uint8_t *p_buf,
+                                       const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || (p_buf_end - p_buf) < OSQLCOMM_UUID_RPL_TYPE_LEN) 
+        return NULL;
+
+    p_buf = osqlcomm_uuid_rpl_type_get(&(p_participant->hd), p_buf, p_buf_end);
+    int len = osql_packed_participant_len(p_buf, p_buf_end);
+
+    if (p_buf_end - p_buf < len)
+        return NULL;
+
+    p_buf = osqlcomm_participant_type_get(&(p_participant->dt), p_buf,
+            p_buf_end);
+    return p_buf;
+}
+
 static inline int osql_nettype_is_uuid(int type)
 {
     return type >= NET_OSQL_UUID_REQUEST_MIN &&
@@ -3223,7 +3458,11 @@ int osql_comm_is_done(osql_sess_t *sess, int type, char *rpl, int rpllen,
     case OSQL_STARTGEN:
         break;
     case OSQL_DONE_SNAP:
-        osql_extract_snap_info(sess, rpl, rpllen, is_uuid);
+    case OSQL_PREPARE:
+        if (type == OSQL_DONE_SNAP)
+            osql_extract_snap_info(sess, rpl, rpllen, is_uuid);
+        if (type == OSQL_PREPARE)
+            osql_extract_prepare(sess, rpl, rpllen, is_uuid);
         /* fall-through */
     case OSQL_DONE:
         if (xerr)
@@ -4375,6 +4614,60 @@ int osql_send_serial(osql_target_t *target, unsigned long long rqid,
             p_buf = serial_readset_put(arr, cr_sz, p_buf, p_buf_end);
         }
     }
+
+    return target->send(target, type, buf, b_sz, 1, NULL, 0);
+}
+
+int osql_send_prepare(osql_target_t *target, unsigned long long rqid, uuid_t uuid,
+                      int nops, struct errstat *xerr, int type,
+                      snap_uid_t *snap_info, const char *coordinator,
+                      const char *coordstage, const char *coordhost,
+                      uuid_t txnid, int generation)
+{
+    osql_prepare_rpl_t *rpl_ok = NULL;
+    osql_done_xerr_t rpl_xerr = {0};
+    int b_sz;
+    uint8_t *buf;
+    uint8_t *p_buf;
+    uint8_t *p_buf_end;
+    int rc = xerr->errval;
+
+    if (check_master(target))
+        return OSQL_SEND_ERROR_WRONGMASTER;
+
+    if (rc != SQLITE_OK) {
+        b_sz = sizeof(rpl_xerr);
+    } else {
+        b_sz = offsetof(osql_prepare_rpl_t, dt) +
+               osql_prepare_len(coordinator, coordstage, coordhost) +
+               sizeof(snap_uid_t);
+    }
+
+    if (b_sz > 2048) {
+        buf = malloc(b_sz);
+        rpl_ok = malloc(b_sz);
+    } else {
+        buf = alloca(b_sz);
+        rpl_ok = alloca(b_sz);
+    }
+    memset(rpl_ok, 0, b_sz);
+
+    p_buf = buf;
+    p_buf_end = (p_buf + b_sz);
+
+    rpl_ok->hd.type = OSQL_PREPARE;
+    rpl_ok->hd.sid = rqid;
+
+    if (gbl_enable_osql_logging) {
+        logmsg(LOGMSG_DEBUG, "[%llu] send prepare %s %d %d\n", rqid,
+               osql_reqtype_str(rpl_ok->hd.type), rc, nops);
+    }
+
+    p_buf = osqlcomm_rpl_type_put(&rpl_ok->hd, p_buf, p_buf_end);
+    p_buf = (uint8_t *)snap_uid_put(snap_info, p_buf, p_buf_end);
+    p_buf = osqlcomm_prepare_type_put(coordinator, coordstage, coordhost,
+                                      generation, txnid, nops, p_buf,
+                                      p_buf_end);
 
     return target->send(target, type, buf, b_sz, 1, NULL, 0);
 }
@@ -5984,13 +6277,22 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
              osql_reqtype_str(type), type);
 #endif
 
+    osql_done_t dt = {0};
     switch (type) {
     case OSQL_DONE:
     case OSQL_DONE_SNAP: {
         p_buf_end = p_buf + sizeof(osql_done_t);
-        osql_done_t dt = {0};
+    case OSQL_PREPARE:
+    case OSQL_DONE_STATS:
 
-        p_buf = osqlcomm_done_type_get(&dt, p_buf, p_buf_end);
+        if (type == OSQL_PREPARE) {
+            dt.rc = 0;
+            dt.nops = iq->sorese->nops;
+        }
+        else {
+            p_buf_end = p_buf + sizeof(osql_done_t);
+            p_buf = osqlcomm_done_type_get(&dt, p_buf, p_buf_end);
+        }
 
         if (gbl_enable_osql_logging) {
             uuidstr_t us;
@@ -7433,6 +7735,51 @@ freemem:
     return rc;
 }
 
+int osql_send_participant(osql_target_t *target, unsigned long long rqid,
+        uuid_t uuid, const char *dbname, const char *host,
+        uuid_t tid)
+{
+    int type = NET_OSQL_SOCK_RPL;
+    size_t dbname_len = strlen(dbname), host_len = strlen(host);
+    size_t len = offsetof(osql_participant_t, dbname_host) + dbname_len +
+        host_len + 2;
+    size_t osql_rpl_size =
+        ((rqid == OSQL_RQID_USE_UUID) ? OSQLCOMM_UUID_RPL_TYPE_LEN
+                                     : OSQLCOMM_RPL_TYPE_LEN) + len;
+    uint8_t *p_buf = alloca(osql_rpl_size);
+    uint8_t *p_buf_end = p_buf + osql_rpl_size;
+
+    if (check_master(target))
+        return OSQL_SEND_ERROR_WRONGMASTER;
+
+    if (rqid == OSQL_RQID_USE_UUID) {
+        osql_uuid_rpl_t hd_uuid = {0};
+        hd_uuid.type = OSQL_PARTICIPANT;
+        comdb2uuidcpy(hd_uuid.uuid, uuid);
+        if (!(osqlcomm_participant_uuid_rpl_type_put(&hd_uuid, dbname, host, tid,
+                        p_buf, p_buf_end))) {
+            logmsg(LOGMSG_ERROR, "%s:%s returns NULL\n", __func__,
+                    "osqlcomm_participant_uuid_rpl_type_put");
+            return -1;
+        }
+        type = osql_net_type_to_net_uuid_type(NET_OSQL_SOCK_RPL);
+    } else {
+        osql_rpl_t hd = {0};
+
+        hd.type = OSQL_PARTICIPANT;
+        hd.sid = rqid;
+
+        if (!(osqlcomm_participant_rpl_type_put(&hd, dbname, host, tid, p_buf,
+                        p_buf_end))) {
+            logmsg(LOGMSG_ERROR, "%s:%s returns NULL\n", __func__,
+                    "osqlcomm_participant_rpl_type_put");
+            return -1;
+        }
+    }
+
+    return target->send(target, type, p_buf, osql_rpl_size, 0, NULL, 0);
+}
+
 /* test osql stream sending a dummy uuid OSQL_DONE request */
 int osql_send_test(void)
 {
@@ -7454,7 +7801,7 @@ int osql_send_test(void)
 }
 
 static void osql_extract_snap_info(osql_sess_t *sess, void *rpl, int rpllen,
-                                   int is_uuid)
+        int is_uuid)
 {
 
     // TODO (NC) : check this
@@ -7670,3 +8017,22 @@ error:
            (left_timeoutms) ? "failed" : "timeout", part);
     return ERR_NOMASTER;
 }
+
+static void osql_extract_prepare(osql_sess_t *sess, void *rpl,
+        int rpllen, int is_uuid)
+{
+    snap_uid_t *snap_info = calloc(1, sizeof(snap_uid_t));
+    const uint8_t *p_buf = rpl;
+    const uint8_t *p_buf_end = (uint8_t *)rpl + rpllen;
+    p_buf += (is_uuid ? sizeof(osql_uuid_rpl_t) : sizeof(osql_rpl_t));
+    if ((p_buf = snap_uid_get(snap_info, p_buf, p_buf_end)) == NULL)
+        abort();
+    sess->snap_info = snap_info;
+
+    if ((p_buf = osqlcomm_prepare_type_get(&sess->coordinator,
+                    &sess->coordstage, &sess->coordhost, &sess->coordgen,
+                    sess->txnid, &sess->nops, p_buf, p_buf_end)) == NULL)
+        abort();
+    sess->is_prepare = true;
+}
+
