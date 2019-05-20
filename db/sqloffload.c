@@ -264,6 +264,34 @@ void block2_sorese(struct ireq *iq, const char *sql, int sqlen, int block2_type)
 
 extern int gbl_early_verify;
 extern int gbl_osql_send_startgen;
+int gbl_replicant_constraint_check = 1;
+
+int replicant_constraint_check(struct sqlclntstate *clnt,
+        struct convert_failure *fail_reason )
+{
+    osqlstate_t *osql = &clnt->osql;
+    shad_tbl_t *tbl = NULL;
+    int rc = 0;
+    *nops = 0;
+
+    LISTC_FOR_EACH(&osql->shadtbls, tbl, linkv)
+    {
+        // tbl->tablename ; tbl->tableversion;
+
+        rc = process_local_shadtbl_cnstr(clnt, tbl, bdberr, *nops);
+        if (rc == SQLITE_TOOBIG) {
+            *nops += tbl->nops;
+            return rc;
+        }
+        if (rc)
+            return -1;
+
+
+
+
+    }
+}
+
 
 /**
  *
@@ -280,6 +308,11 @@ static int rese_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
     int bdberr = 0;
     int rc = 0;
     int usedb_only = 0;
+    char *table;
+    int ix;
+    struct convert_failure fail_reason;
+    int64_t cannot_check_constraints = clnt->log_effects.num_updated +
+        clnt->log_effects.num_deleted;
 
     if (gbl_early_verify && !clnt->early_retry && gbl_osql_send_startgen &&
         clnt->start_gen) {
@@ -307,6 +340,16 @@ static int rese_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
     if (osql_shadtbl_empty(clnt)) {
         sql_debug_logf(clnt, __func__, __LINE__, "empty-shadtbl, returning\n");
         return 0;
+    }
+
+    if (gbl_replicant_constraint_check && !cannot_check_constraints &&
+            (replicant_constraint_check(clnt, &convert_failure) != 0)) {
+        char err[64];
+        snprintf(err, sizeof(err), "Constraints error table %s ix %d\n", table, ix);
+        sql_debug_logf(clnt, __func__, __LINE__, "returning CONSTRAINTS error\n");
+        clnt->osql.xerr.errval = ERR_CONSTR;
+        errstat_cat_str(&(clnt->osql.xerr), err);
+        goto goback;
     }
 
     usedb_only = osql_shadtbl_usedb_only(clnt);

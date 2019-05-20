@@ -1950,6 +1950,58 @@ static int process_local_shadtbl_index(struct sqlclntstate *clnt,
     return 0;
 }
 
+
+static int process_local_shadtbl_constraints(struct sqlclntstate *clnt, shad_tbl_t *tbl,
+        int *bdberr)
+{
+    osqlstate_t *osql = &clnt->osql;
+
+    char key[MAXKEYLEN];
+    char ondisk_tag[MAXTAGLEN];
+    char mangled_key[MAXKEYLEN];
+    struct ireq iq;
+
+    int rc = 0;
+    iq = init_fake_ireq(thedb, &iq);
+    iq.usedb = tbl->db;
+
+    rc = bdb_temp_table_first(tbl->env->bdb_env, tbl->add_cur, bdberr);
+    if (rc == IX_EMPTY)
+        return 0;
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "%s: bdb_temp_table_first failed rc=%d bdberr=%d\n",
+                __func__, rc, *bdberr);
+        return SQLITE_INTERNAL;
+    }
+
+    void *od_dta = (void *)malloc(20 * 1024 + 8);
+
+    while (rc == 0) {
+        char *data = bdb_temp_table_data(tbl->add_cur);
+        int ldata = bdb_temp_table_datasize(tbl->add_cur);
+
+        unsigned long long key;
+        key = *(unsigned long long *)bdb_temp_table_key(tbl->add_cur);
+
+        if (!is_genid_synthetic(key))
+            goto next;
+
+        for (int idx = 0; idx < tbl->db->nix; idx++) {
+            int ixkeylen = getkeysize(idx);
+            char *od_dta_tail = NULL;
+            int od_tail_len = 0;
+            assert(ixkeylen > 0);
+            snprintf(ondisk_tag, MAXTAGLEN, ".ONDISK_IX_%d", idx);
+
+            rc = create_key_from_ondisk(tbl->db, idx, &od_dta_tail, &od_tail_len, 
+                    mangled_key, ".ONDISK", od_dta, ondisk_size, ondisk_tag, key,
+                    NULL, tzname);
+            /* TODO */
+        }
+        temp_table_next;
+    }
+}
+
 static int process_local_shadtbl_add(struct sqlclntstate *clnt, shad_tbl_t *tbl,
                                      int *bdberr, int crt_nops)
 {
