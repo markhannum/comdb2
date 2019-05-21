@@ -87,6 +87,10 @@ static int process_local_shadtbl_qblob(struct sqlclntstate *clnt,
 static int process_local_shadtbl_index(struct sqlclntstate *clnt,
                                        shad_tbl_t *tbl, int *bdberr,
                                        unsigned long long seq, int is_delete);
+static int process_local_shadtbl_constraints(struct sqlclntstate *clnt,
+                                       shad_tbl_t *tbl,
+                                       struct convert_failure *fail_reason,
+                                       int *bdberr);
 static int process_local_shadtbl_add(struct sqlclntstate *clnt, shad_tbl_t *tbl,
                                      int *bdberr, int crt_nops);
 static int process_local_shadtbl_upd(struct sqlclntstate *clnt, shad_tbl_t *tbl,
@@ -1481,6 +1485,27 @@ void *osql_get_shadow_bydb(struct sqlclntstate *clnt, struct dbtable *db)
     return ret;
 }
 
+int replicant_constraint_check(struct sqlclntstate *clnt,
+        struct convert_failure *fail_reason, int *bdberr)
+{
+    osqlstate_t *osql = &clnt->osql;
+    int rc = 0;
+    shad_tbl_t *tbl = NULL;
+
+    if (osql_shadtbl_empty(clnt)) {
+        return -2;
+    }
+
+    LISTC_FOR_EACH(&osql->shadtbls, tbl, linkv)
+    {
+        rc = process_local_shadtbl_constraints(clnt, tbl, fail_reason, bdberr);
+        if (rc)
+            return -1;
+    }
+
+    return 0;
+}
+
 /**
  * Scan the shadow tables for the current transaction
  * and send to the master the ops
@@ -1950,18 +1975,28 @@ static int process_local_shadtbl_index(struct sqlclntstate *clnt,
     return 0;
 }
 
-
 static int process_local_shadtbl_constraints(struct sqlclntstate *clnt, shad_tbl_t *tbl,
-        int *bdberr)
+        struct convert_failure *fail_reason, int *bdberr)
 {
     osqlstate_t *osql = &clnt->osql;
 
     char key[MAXKEYLEN];
-    char ondisk_tag[MAXTAGLEN];
-    char mangled_key[MAXKEYLEN];
+    char ix_tag[MAXTAGLEN];
     struct ireq iq;
-
     int rc = 0;
+    int found_unique = 0;
+
+    /* This is a no-op if there are no dup indicies */
+    for (int ixnum = 0; ixnum < tbl->db->nix; ixnum++) {
+        if (tbl->db->ix_dupes[ixnum] == 0) {
+            found_unique = 1;
+            break;
+        }
+    }
+
+    if (!found_unique)
+        return;
+
     iq = init_fake_ireq(thedb, &iq);
     iq.usedb = tbl->db;
 
@@ -1979,26 +2014,38 @@ static int process_local_shadtbl_constraints(struct sqlclntstate *clnt, shad_tbl
     while (rc == 0) {
         char *data = bdb_temp_table_data(tbl->add_cur);
         int ldata = bdb_temp_table_datasize(tbl->add_cur);
-
+        unsigned long long dk = -1ULL;
         unsigned long long key;
         key = *(unsigned long long *)bdb_temp_table_key(tbl->add_cur);
 
         if (!is_genid_synthetic(key))
             goto next;
 
+        if (gbl_partial_indexes && tbl->ix_partial)
+            dk = get_ins_keys(clnt, tbl, key);
+
         for (int idx = 0; idx < tbl->db->nix; idx++) {
-            int ixkeylen = getkeysize(idx);
+            int ixkeylen; 
             char *od_dta_tail = NULL;
             int od_tail_len = 0;
-            assert(ixkeylen > 0);
-            snprintf(ondisk_tag, MAXTAGLEN, ".ONDISK_IX_%d", idx);
 
-            rc = create_key_from_ondisk(tbl->db, idx, &od_dta_tail, &od_tail_len, 
-                    mangled_key, ".ONDISK", od_dta, ondisk_size, ondisk_tag, key,
-                    NULL, tzname);
+            if (tbl->db->ix_dupes[idx])
+                goto next;
+
+            if (gbl_partial_indexes && tbl->ix_partial && !(dk & (1ULL << idx)))
+                goto next;
+
+            ixkeylen = getkeysize(tbl, idx);
+            assert(ixkeylen > 0);
+            snprintf(ix_tag, MAXTAGLEN, ".ONDISK_IX_%d", idx);
+
+            rc = create_key_from_ondisk(tbl->db, idx, NULL, NULL, 
+                    NULL, ".ONDISK", data, ldata, ix_tag, OUTBUF,
+                    fail_reason, NULL);
             /* TODO */
         }
-        temp_table_next;
+    next:
+        rc = bdb_temp_table_next(tbl->env->bdb_env, tbl->add_cur, bdberr);
     }
 }
 

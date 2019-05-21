@@ -266,33 +266,6 @@ extern int gbl_early_verify;
 extern int gbl_osql_send_startgen;
 int gbl_replicant_constraint_check = 1;
 
-int replicant_constraint_check(struct sqlclntstate *clnt,
-        struct convert_failure *fail_reason )
-{
-    osqlstate_t *osql = &clnt->osql;
-    shad_tbl_t *tbl = NULL;
-    int rc = 0;
-    *nops = 0;
-
-    LISTC_FOR_EACH(&osql->shadtbls, tbl, linkv)
-    {
-        // tbl->tablename ; tbl->tableversion;
-
-        rc = process_local_shadtbl_cnstr(clnt, tbl, bdberr, *nops);
-        if (rc == SQLITE_TOOBIG) {
-            *nops += tbl->nops;
-            return rc;
-        }
-        if (rc)
-            return -1;
-
-
-
-
-    }
-}
-
-
 /**
  *
  * All is set by now, since we need to be able to receive rows

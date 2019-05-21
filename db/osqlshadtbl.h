@@ -175,6 +175,13 @@ int osql_shadtbl_process(struct sqlclntstate *clnt, int *nops, int *bdberr,
                          int restarting);
 
 /**
+ * Verify constraints on a replicant
+ *
+ */
+int replicant_constraint_check(struct sqlclntstate *clnt,
+        struct convert_failure *fail_reason, int *bdberr);
+
+/**
  *  Check of a shadow table transaction has cached selectv records
  *
  */
