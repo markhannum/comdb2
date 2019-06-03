@@ -2721,6 +2721,133 @@ static const uint8_t *osqlcomm_dbglog_type_get(osql_dbglog_t *p_dbglog,
     return p_buf;
 }
 
+typedef struct osql_recgenid_flags {
+    unsigned long long genid;
+    unsigned char flags;
+    char pad[7];
+} osql_recgenid_flags_t;
+
+enum { OSQLCOMM_RECGENID_FLAGS_TYPE_LEN = 16 };
+
+BB_COMPILE_TIME_ASSERT(osqlcomm_recgenid_flags_type_len,
+                       sizeof(osql_recgenid_flags_t) == OSQLCOMM_RECGENID_FLAGS_TYPE_LEN);
+
+
+static uint8_t *osqlcomm_recgenid_flags_type_put(const osql_recgenid_flags_t *p_recgenid,
+                                           uint8_t *p_buf,
+                                           const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || OSQLCOMM_RECGENID_FLAGS_TYPE_LEN > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = buf_no_net_put(&(p_recgenid->genid), sizeof(p_recgenid->genid),
+                           p_buf, p_buf_end);
+
+    p_buf = buf_put(&(p_recgenid->flags), sizeof(p_recgenid->flags),
+                           p_buf, p_buf_end);
+
+    return p_buf;
+}
+
+static const uint8_t *osqlcomm_recgenid_flags_type_get(osql_recgenid_flags_t *p_recgenid,
+                                                 const uint8_t *p_buf,
+                                                 const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || OSQLCOMM_RECGENID_FLAGS_TYPE_LEN > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = buf_no_net_get(&(p_recgenid->genid), sizeof(p_recgenid->genid),
+                           p_buf, p_buf_end);
+
+    p_buf = buf_get(&(p_recgenid->flags), sizeof(p_recgenid->flags),
+                           p_buf, p_buf_end);
+
+    return p_buf;
+}
+
+typedef struct osql_recgenid_flags_rpl {
+    osql_rpl_t hd;
+    osql_recgenid_flags_t dt;
+} osql_recgenid_flags_rpl_t;
+
+enum {
+    OSQLCOMM_RECGENID_FLAGS_RPL_TYPE_LEN =
+        OSQLCOMM_RPL_TYPE_LEN + OSQLCOMM_RECGENID_FLAGS_TYPE_LEN
+};
+
+BB_COMPILE_TIME_ASSERT(osqlcomm_recgenid_flags_rpl_type_len,
+                       sizeof(osql_recgenid_flags_rpl_t) ==
+                           OSQLCOMM_RECGENID_FLAGS_RPL_TYPE_LEN);
+
+
+static uint8_t *
+osqlcomm_recgenid_flags_rpl_type_put(const osql_recgenid_flags_rpl_t *p_recgenid,
+                               uint8_t *p_buf, const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf ||
+        OSQLCOMM_RECGENID_FLAGS_RPL_TYPE_LEN > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = osqlcomm_rpl_type_put(&(p_recgenid->hd), p_buf, p_buf_end);
+    p_buf = osqlcomm_recgenid_flags_type_put(&(p_recgenid->dt), p_buf, p_buf_end);
+
+    return p_buf;
+}
+
+static const uint8_t *
+osqlcomm_recgenid_flags_rpl_type_get(osql_recgenid_flags_rpl_t *p_recgenid,
+                               const uint8_t *p_buf, const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf ||
+        OSQLCOMM_RECGENID_FLAGS_RPL_TYPE_LEN > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = osqlcomm_rpl_type_get(&(p_recgenid->hd), p_buf, p_buf_end);
+    p_buf = osqlcomm_recgenid_flags_type_get(&(p_recgenid->dt), p_buf, p_buf_end);
+
+    return p_buf;
+}
+
+typedef struct osql_recgenid_flags_uuid_rpl {
+    osql_uuid_rpl_t hd;
+    osql_recgenid_flags_t dt;
+} osql_recgenid_flags_uuid_rpl_t;
+
+enum {
+    OSQLCOMM_RECGENID_FLAGS_UUID_RPL_TYPE_LEN =
+        OSQLCOMM_UUID_RPL_TYPE_LEN + OSQLCOMM_RECGENID_FLAGS_TYPE_LEN
+};
+
+
+static uint8_t *
+osqlcomm_recgenid_flags_uuid_rpl_type_put(const osql_recgenid_flags_uuid_rpl_t *p_recgenid,
+                                    uint8_t *p_buf, const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf ||
+        OSQLCOMM_RECGENID_FLAGS_UUID_RPL_TYPE_LEN > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = osqlcomm_uuid_rpl_type_put(&(p_recgenid->hd), p_buf, p_buf_end);
+    p_buf = osqlcomm_recgenid_flags_type_put(&(p_recgenid->dt), p_buf, p_buf_end);
+
+    return p_buf;
+}
+
+static const uint8_t *
+osqlcomm_recgenid_flags_uuid_rpl_type_get(osql_recgenid_flags_uuid_rpl_t *p_recgenid,
+                                    const uint8_t *p_buf,
+                                    const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf ||
+        OSQLCOMM_RECGENID_FLAGS_UUID_RPL_TYPE_LEN > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = osqlcomm_uuid_rpl_type_get(&(p_recgenid->hd), p_buf, p_buf_end);
+    p_buf = osqlcomm_recgenid_flags_type_get(&(p_recgenid->dt), p_buf, p_buf_end);
+
+    return p_buf;
+}
+
 typedef struct osql_recgenid {
     unsigned long long genid;
 } osql_recgenid_t;
