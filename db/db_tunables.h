@@ -1726,4 +1726,11 @@ REGISTER_TUNABLE("serialize_reads_like_writes",
                  TUNABLE_BOOLEAN, &gbl_serialize_reads_like_writes, 0, NULL,
                  NULL, NULL, NULL);
 
+REGISTER_TUNABLE("snapshot_serial_verify_retry",
+                 "Automatic retries on verify errors for clients that haven't "
+                 "read results.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_snapshot_serial_verify_retry, 0, NULL,
+                 NULL, NULL, NULL);
+
+
 #endif /* _DB_TUNABLES_H */
