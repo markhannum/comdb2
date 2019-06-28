@@ -1284,6 +1284,17 @@ static int retrieve_snapshot_info(char *sql, char *tzname)
     return 0;
 }
 
+static inline void set_asof_snapshot(struct sqlclntstate *clnt, int val,
+        const char *func, int line)
+{
+    clnt->is_asof_snapshot = val;
+}
+
+static inline int get_asof_snapshot(struct sqlclntstate *clnt)
+{
+    return clnt->is_asof_snapshot;
+}
+
 static int snapshot_as_of(struct sqlclntstate *clnt)
 {
     int epoch = 0;
@@ -1298,7 +1309,7 @@ static int snapshot_as_of(struct sqlclntstate *clnt)
         return -1;
     } else {
         clnt->snapshot = epoch;
-        clnt->is_asof_snapshot = 1;
+        set_asof_snapshot(clnt, (epoch != 0), __func__, __LINE__);
     }
     return 0;
 }
@@ -1321,7 +1332,7 @@ static void sql_update_usertran_state(struct sqlclntstate *clnt)
     if (!clnt->in_client_trans) {
         clnt->start_gen = bdb_get_rep_gen(thedb->bdb_env);
         set_sent_data_to_client(clnt, 0, __func__, __LINE__);
-        clnt->is_asof_snapshot = 0;
+        set_asof_snapshot(clnt, 0, __func__, __LINE__);
     }
 
     if (!sql)
@@ -1331,7 +1342,7 @@ static void sql_update_usertran_state(struct sqlclntstate *clnt)
        for socksql, recom, snapisol and serial */
     if (!strncasecmp(clnt->sql, "begin", 5)) {
         clnt->snapshot = 0;
-        clnt->is_asof_snapshot = 0;
+        set_asof_snapshot(clnt, 0, __func__, __LINE__);
 
         /*fprintf(stderr, "got begin\n");*/
         if (clnt->ctrl_sqlengine != SQLENG_NORMAL_PROCESS) {
@@ -1512,11 +1523,6 @@ static char *sqlenginestate_tostr(int state)
 
 int gbl_snapshot_serial_verify_retry = 1;
 
-static int is_snapshot_asof(struct sqlclntstate *clnt)
-{
-    return clnt->is_asof_snapshot;
-}
-
 inline int replicant_can_retry(struct sqlclntstate *clnt)
 {
     if (clnt->verifyretry_off)
@@ -1524,7 +1530,7 @@ inline int replicant_can_retry(struct sqlclntstate *clnt)
 
     if ((clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
         clnt->dbtran.mode == TRANLEVEL_SERIAL) &&
-        !is_snapshot_asof(clnt) && gbl_snapshot_serial_verify_retry)
+        !get_asof_snapshot(clnt) && gbl_snapshot_serial_verify_retry)
         return !clnt->sent_data_to_client;
 
     return clnt->dbtran.mode != TRANLEVEL_SNAPISOL &&
@@ -1541,7 +1547,7 @@ static inline int replicant_can_retry_rc(struct sqlclntstate *clnt, int rc)
 
     /* Any isolation level can retry if nothing has been read */
     if ((rc == CDB2ERR_NOTSERIAL || rc == CDB2ERR_VERIFY_ERROR) &&
-        !clnt->sent_data_to_client && !is_snapshot_asof(clnt) &&
+        !clnt->sent_data_to_client && !get_asof_snapshot(clnt) &&
         gbl_snapshot_serial_verify_retry)
         return 1;
 
@@ -5133,6 +5139,7 @@ void reset_clnt(struct sqlclntstate *clnt, SBUF2 *sb, int initial)
     clnt->statement_query_effects = 0;
     clnt->wrong_db = 0;
     set_sent_data_to_client(clnt, 0, __func__, __LINE__);
+    set_asof_snapshot(clnt, 0, __func__, __LINE__);
 }
 
 void reset_clnt_flags(struct sqlclntstate *clnt)
