@@ -1732,5 +1732,4 @@ REGISTER_TUNABLE("snapshot_serial_verify_retry",
                  TUNABLE_BOOLEAN, &gbl_snapshot_serial_verify_retry, 0, NULL,
                  NULL, NULL, NULL);
 
-
 #endif /* _DB_TUNABLES_H */
