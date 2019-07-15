@@ -629,6 +629,15 @@ int add_record(struct ireq *iq, void *trans, const uint8_t *p_buf_tag_name,
     }
 
 err:
+    if (flags & RECFLAGS_CLEANUP_ON_FAILURE) {
+        int opfail = 0, ixfail;
+        for (size_t blobno = 0; blobno < maxblobs; blobno++) {
+            blob_del(iq, trans, *rrn, *genid, blobno);
+        }
+        del_record_indices(iq, trans, &opfail, &ixfail, *rrn, *genid, od_dta, ins_keys,
+                flags, blobs, ondisktag);
+        dat_del(iq, trans, *rrn, *genid);
+    }
     if (iq->debug)
         reqpopprefixes(iq, prefixes);
     if (dynschema)
@@ -1841,7 +1850,7 @@ int upd_new_record(struct ireq *iq, void *trans, unsigned long long oldgenid,
                    unsigned long long del_keys, int nd_len, const int *updCols,
                    blob_buffer_t *blobs, int deferredAdd,
                    blob_buffer_t *del_idx_blobs, blob_buffer_t *add_idx_blobs,
-                   int verify_retry)
+                   int verify_retry, int flags)
 {
     int retrc = 0;
     int prefixes = 0;
@@ -2156,6 +2165,20 @@ int upd_new_record(struct ireq *iq, void *trans, unsigned long long oldgenid,
                                    oldgenid, verify_retry, deferredAdd);
 
 err:
+    if (retrc != 0 && (flags & RECFLAGS_CLEANUP_ON_FAILURE)) {
+        int opfail = 0, ixfail, rrn=2;
+
+        for (blobn = 0; blobn < iq->usedb->numblobs; blobn++) {
+            blob_del(iq, trans, rrn, oldgenid, blobn);
+            blob_del(iq, trans, rrn, newgenid, blobn);
+        }
+        del_record_indices(iq, trans, &opfail, &ixfail, rrn, oldgenid,
+                               old_dta, del_keys, flags, del_idx_blobs, ".NEW..ONDISK");
+        del_record_indices(iq, trans, &opfail, &ixfail, rrn, newgenid,
+                               new_dta, del_keys, flags, del_idx_blobs, ".NEW..ONDISK");
+        dat_del(iq, trans, 2, oldgenid);
+        dat_del(iq, trans, 2, newgenid);
+    }
     if (sc_old)
         free(sc_old);
     if (sc_new)

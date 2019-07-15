@@ -2697,7 +2697,8 @@ enum {
                               RECFLAGS_NO_CONSTRAINTS | RECFLAGS_NO_BLOBS |
                               1 << 9,
     RECFLAGS_DONT_LOCK_TBL = 1 << 10,
-    RECFLAGS_MAX = 1 << 11
+    RECFLAGS_CLEANUP_ON_FAILURE = 1 << 11,
+    RECFLAGS_MAX = 1 << 12
 };
 
 /* flag codes */
@@ -2765,7 +2766,7 @@ int upd_new_record(struct ireq *iq, void *trans, unsigned long long oldgenid,
                    unsigned long long del_keys, int nd_len, const int *updCols,
                    blob_buffer_t *blobs, int deferredAdd,
                    blob_buffer_t *del_idx_blobs, blob_buffer_t *add_idx_blobs,
-                   int verify_retry);
+                   int verify_retry, int flags);
 
 int upd_new_record_add2indices(struct ireq *iq, void *trans,
                                unsigned long long newgenid, const void *new_dta,

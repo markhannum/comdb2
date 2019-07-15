@@ -2024,6 +2024,20 @@ static void clear_blob_hash(hash_t *h)
     hash_clear(h);
 }
 
+static int free_redo_genid_struct(void *obj, void *arg)
+{
+    free(obj);
+    return 0;
+}
+
+static void clear_redo_genid_hash(hash_t *h)
+{
+    if (!h)
+        return;
+    hash_for(h, free_redo_genid_struct, NULL);
+    hash_clear(h);
+}
+
 static int unpack_blob_record(struct convert_record_data *data, void *blb_buf,
                               int dtalen, blob_status_t *blb, int blbix)
 {
@@ -2335,6 +2349,28 @@ static int unpack_and_upgrade_ondisk_record(struct convert_record_data *data,
     return 0;
 }
 
+static inline void save_redo_genid(struct convert_record_data *data, unsigned long long genid)
+{
+    struct redo_genids *fnd;
+    assert((fnd = hash_find(data->redo_genid_hash, &genid)) == NULL);
+    fnd = calloc(sizeof(*fnd), 1);
+    fnd->genid = genid;
+    bdb_get_commit_genid(thedb->bdb_env, &fnd->maxlsn);
+    hash_add(data->redo_genid_hash, fnd);
+    listc_abl(&data->redo_genid_list, fnd);
+}
+
+static inline int consume_redo_genid(struct convert_record_data *data, unsigned long long genid)
+{
+    struct redo_genids *fnd;
+    if ((fnd = hash_find(data->redo_genid_hash, &genid)) == NULL)
+        return 0;
+    hash_del(data->redo_genid_hash, fnd);
+    listc_rfl(&data->redo_genid_list, fnd);
+    free(fnd);
+    return 1;
+}
+
 static int live_sc_redo_add(struct convert_record_data *data, DB_LOGC *logc,
                             bdb_osql_log_rec_t *rec, DBT *logdta)
 {
@@ -2444,7 +2480,7 @@ static int live_sc_redo_add(struct convert_record_data *data, DB_LOGC *logc,
 
     int addflags = RECFLAGS_NO_TRIGGERS | RECFLAGS_NO_CONSTRAINTS |
                    RECFLAGS_NEW_SCHEMA | RECFLAGS_ADD_FROM_SC_LOGICAL |
-                   RECFLAGS_KEEP_GENID;
+                   RECFLAGS_KEEP_GENID | RECFLAGS_CLEANUP_ON_FAILURE;
 
     if (data->to->plan && gbl_use_plan)
         addflags |= RECFLAGS_NO_BLOBS;
@@ -2476,15 +2512,15 @@ static int live_sc_redo_add(struct convert_record_data *data, DB_LOGC *logc,
             rc = 0;
             goto done;
         }
+        if (rc == IX_DUP) {
+            // save genid and current lsn to data structure
+            save_redo_genid(data, ngenid);
+            rc = 0;
+            goto done;
+        }
         if (rc) {
             if (data->s->iq) {
-                if (rc == IX_DUP)
-                    reqerrstr(data->s->iq, ERR_SC,
-                              "add key constraint duplicate key '%s' on table "
-                              "'%s' index %d",
-                              get_keynm_from_db_idx(data->to, ixfailnum),
-                              data->to->tablename, ixfailnum);
-                else
+                if (rc)
                     reqerrstr(data->s->iq, ERR_SC,
                               "unable to add record rc = %d", rc);
             }
@@ -2612,6 +2648,9 @@ static int live_sc_redo_delete(struct convert_record_data *data, DB_LOGC *logc,
     data->iq.usedb = data->to;
     rc = del_new_record(&data->iq, data->trans, genid, -1ULL, data->odh.recptr,
                         data->freeblb, 0);
+    if (consume_redo_genid(data, genid)) {
+        assert(rc == ERR_VERIFY);
+    }
     if (rc == ERR_VERIFY) {
         /* not an error if we dont find it */
         rc = 0;
@@ -2773,7 +2812,44 @@ static int live_sc_redo_update(struct convert_record_data *data, DB_LOGC *logc,
 
     data->iq.usedb = data->to;
 
-    if (!data->s->sc_convert_done[rec->dtastripe] &&
+    if (consume_redo_genid(data, oldgenid)) {
+        char *tagname = ".NEW..ONDISK";
+        uint8_t *p_tagname_buf = (uint8_t *)tagname;
+        uint8_t *p_tagname_buf_end = p_tagname_buf + 12;
+        uint8_t *p_buf_data = data->rec->recbuf;
+        uint8_t *p_buf_data_end = p_buf_data + data->rec->bufsize;
+        int opfailcode, ixfailnum, nrrn = 2;
+        int addflags = RECFLAGS_NO_TRIGGERS | RECFLAGS_NO_CONSTRAINTS |
+            RECFLAGS_NEW_SCHEMA | RECFLAGS_ADD_FROM_SC_LOGICAL |
+            RECFLAGS_KEEP_GENID | RECFLAGS_CLEANUP_ON_FAILURE;
+
+        if (data->to->plan && gbl_use_plan)
+            addflags |= RECFLAGS_NO_BLOBS;
+
+        rc = del_new_record(&data->iq, data->trans, oldgenid, -1ULL,
+                            data->oldodh.recptr, data->freeblb, 0);
+        assert(rc == ERR_VERIFY);
+        unsigned long long dirty_keys = -1ULL;
+        if (gbl_partial_indexes && data->to->ix_partial) {
+            dirty_keys = verify_indexes(data->to, p_buf_data, data->wrblb, MAXBLOBS, 1);
+        }
+        rc = add_record(&data->iq, data->trans, p_tagname_buf, p_tagname_buf_end,
+                p_buf_data, p_buf_data_end, NULL, data->wrblb, MAXBLOBS,
+                &opfailcode, &ixfailnum, &nrrn, &genid, dirty_keys, BLOCK2_ADDKL, 0, addflags, 0);
+        if (rc) {
+            if (data->s->iq) {
+                if (rc)
+                    reqerrstr(data->s->iq, ERR_SC,
+                              "unable to add record rc = %d", rc);
+            }
+            logmsg(LOGMSG_ERROR, "%s:%d failed to add new record rc=%d %s\n",
+                   __func__, __LINE__, rc,
+                   errstat_get_str(&(data->iq.errstat)));
+            goto done;
+        }
+
+    }
+    else if (!data->s->sc_convert_done[rec->dtastripe] &&
         is_genid_right_of_stripe_pointer(data->to->handle, genid,
                                          data->sc_genids)) {
         /* if the newgenid is to the right of the sc cursor, we only need to
@@ -2785,7 +2861,7 @@ static int live_sc_redo_update(struct convert_record_data *data, DB_LOGC *logc,
         rc = upd_new_record(&data->iq, data->trans, oldgenid,
                             data->oldodh.recptr, genid, data->odh.recptr, -1ULL,
                             -1ULL, updlen, updCols, data->wrblb, 0,
-                            data->freeblb, data->wrblb, 0);
+                            data->freeblb, data->wrblb, 0, 0);
         if (rc == ERR_VERIFY) {
             /* either the oldgenid is not found or the newgenid already exists
              * -- try delete the oldgenid again.
@@ -2799,6 +2875,12 @@ static int live_sc_redo_update(struct convert_record_data *data, DB_LOGC *logc,
         /* not an error if we dont find it */
         rc = 0;
     }
+    if (rc == IX_DUP) {
+        // save genid and current lsn to data structure
+        save_redo_genid(data, genid);
+        rc = 0;
+    }
+
 
 done:
 #ifdef LOGICAL_LIVESC_DEBUG
@@ -2860,10 +2942,9 @@ static int live_sc_redo_logical_rec(struct convert_record_data *data,
     switch (rec->type) {
     case DB_llog_undo_add_dta:
     case DB_llog_undo_add_dta_lk:
-        if (bdb_inplace_cmp_genids(data->to->handle, rec->genid,
-                                   data->sc_genids[rec->dtastripe]) == 0) {
-            /* small optimization to skip last record that was done by the
-             * convert thread */
+        if (!data->s->sc_convert_done[rec->dtastripe] ||
+                bdb_inplace_cmp_genids(data->to->handle, rec->genid,
+                    data->sc_genids[rec->dtastripe]) <= 0) {
             return 0;
         }
         rc = live_sc_redo_add(data, logc, rec, logdta);
@@ -3179,10 +3260,14 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
      * to malloc & free every single time */
     data->rec = allocate_db_record(data->to->tablename, ".NEW..ONDISK");
     data->iq.usedb = data->to;
+    listc_init(&data->redo_genid_list, offsetof(struct redo_genids, linkv));
     data->blob_hash = hash_init_o(offsetof(struct blob_recs, genid),
                                   sizeof(unsigned long long));
-    if (!data->blob_hash) {
-        logmsg(LOGMSG_ERROR, "%s: failed to init blob hash\n", __func__);
+    data->redo_genid_hash = hash_init_o(offsetof(struct redo_genids, genid),
+                                  sizeof(unsigned long long));
+                                    
+    if (!data->blob_hash || !data->redo_genid_hash) {
+        logmsg(LOGMSG_ERROR, "%s: failed to init sc hashes\n", __func__);
         s->iq->sc_should_abort = 1;
         goto cleanup;
     }
@@ -3399,6 +3484,11 @@ cleanup:
 
     if (data->blob_hash)
         hash_free(data->blob_hash);
+
+    if (data->redo_genid_hash) {
+        clear_redo_genid_hash(data->redo_genid_hash);
+        hash_free(data->redo_genid_hash);
+    }
 
     sc_printf(s,
               "[%s] logical redo thread exiting, log cursor at [%u:%u], redid "

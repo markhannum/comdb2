@@ -825,7 +825,7 @@ done:
 /* Form and delete all keys. */
 int del_record_indices(struct ireq *iq, void *trans, int *opfailcode,
                        int *ixfailnum, int rrn, unsigned long long genid,
-                       void *od_dta, unsigned long long del_keys, int flags,
+                       const void *od_dta, unsigned long long del_keys, int flags,
                        blob_buffer_t *del_idx_blobs, const char *ondisktag)
 {
     int rc = 0;
@@ -920,6 +920,9 @@ int del_record_indices(struct ireq *iq, void *trans, int *opfailcode,
                 reqprintf(iq, "ix_delk IX %d KEY ", ixnum);
                 reqdumphex(iq, key, getkeysize(iq->usedb, ixnum));
                 reqmoref(iq, " RC %d", rc);
+            }
+            if (rc == IX_NOTFND && (flags & RECFLAGS_CLEANUP_ON_FAILURE)) {
+                rc = 0;
             }
             if (rc != 0) {
                 if (rc == IX_NOTFND) {

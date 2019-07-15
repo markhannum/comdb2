@@ -22,6 +22,12 @@
 
 extern int gbl_logical_live_sc;
 
+struct redo_genids {
+    unsigned long long genid;
+    DB_LSN maxlsn;
+    LINKC_T(struct logical_livesc_redo_genid) linkv;
+};
+
 struct common_members {
     int64_t ndeadlocks;
     int64_t nlockwaits;
@@ -77,6 +83,8 @@ struct convert_record_data {
                            converting the records */
     unsigned long long cv_genid; /* the genid of the record that we get
                                     constraint violation on */
+    hash_t *redo_genid_hash;
+    LISTC_T (struct redo_genids) redo_genid_list;
 };
 
 int convert_all_records(struct dbtable *from, struct dbtable *to,
