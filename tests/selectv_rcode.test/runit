@@ -147,7 +147,7 @@ function run_isolated_test
 
 truncate
 populate
-run_tests
-#run_isolated_test
+#run_tests
+run_isolated_test
 echo "Success"
 exit 0

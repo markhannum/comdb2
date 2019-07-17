@@ -5080,6 +5080,11 @@ backout:
             reqerrstr(iq, ERR_NOTSERIAL, "transaction is not serializable");
         }
 
+        if (!iq->selectv_arr) {
+            logmsg(LOGMSG_USER, "%s line %d no selectv_arr range?\n", __func__,
+                    __LINE__);
+        }
+
         if (iq->selectv_arr &&
             bdb_osql_serial_check(thedb->bdb_env, iq->selectv_arr,
                                   &(iq->selectv_arr->file),
@@ -5094,7 +5099,10 @@ backout:
 
             rc = ERR_CONSTR;
             reqerrstr(iq, COMDB2_CSTRT_RC_INVL_REC, "selectv constraints");
-        } 
+        } else if (iq->selectv_arr) {
+            logmsg(LOGMSG_USER, "Got verify error but no selectv_constraints errors?\n");
+            abort();
+        }
     }
 
     /* starting writes, no more reads */
@@ -5200,6 +5208,7 @@ backout:
             if (is_block2sqlmode_blocksql) {
                 err.errcode = OP_FAILED_VERIFY;
                 rc = ERR_VERIFY;
+                check_serializability = 1;
             } else {
                 err.errcode = ERR_UNCOMMITABLE_TXN;
                 rc = ERR_UNCOMMITABLE_TXN;
