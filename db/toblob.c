@@ -679,6 +679,8 @@ int toblobask(struct ireq *iq)
                     for (cblob = 0; cblob < blb.numcblobs; cblob++)
                         if (blb.blobptrs[cblob])
                             free(blb.blobptrs[cblob]);
+                    iq->verify_err_func = __func__;
+                    iq->verify_err_line = __LINE__;
                     rc = ERR_VERIFY;
                 } else {
                     /* Huzzah!  Cache the blob data and fall through into

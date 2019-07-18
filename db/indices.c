@@ -242,6 +242,8 @@ int add_record_indices(struct ireq *iq, void *trans, blob_buffer_t *blobs,
             rc = ix_find_by_key_tran(iq, key, ixkeylen, ixnum, NULL, &fndrrn,
                                      &fndgenid, NULL, NULL, 0, trans);
             if (rc == IX_FND && fndgenid == vgenid) {
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 return ERR_VERIFY;
             } else if (rc == RC_INTERNAL_RETRY) {
                 return RC_INTERNAL_RETRY;
@@ -262,6 +264,8 @@ int add_record_indices(struct ireq *iq, void *trans, blob_buffer_t *blobs,
 
         if (vgenid && rc == IX_DUP) {
             if (iq->usedb->ix_dupes[ixnum] || isnullk) {
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 return ERR_VERIFY;
             }
         }
@@ -710,6 +714,8 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
                                      ixnum, NULL, &fndrrn, &fndgenid, NULL,
                                      NULL, 0, trans);
             if (rc == IX_FND && fndgenid == vgenid) {
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 return ERR_VERIFY;
             } else if (rc == RC_INTERNAL_RETRY) {
                 return RC_INTERNAL_RETRY;
@@ -729,6 +735,8 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
 
         if (vgenid && rc == IX_DUP) {
             if (iq->usedb->ix_dupes[ixnum] || isnullk) {
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 return ERR_VERIFY;
             }
         }
@@ -812,8 +820,11 @@ int upd_new_record_indices(
         if (rc == IX_NOTFND) {
             if (verify_retry)
                 rc = RC_INTERNAL_RETRY;
-            else
+            else {
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 rc = ERR_VERIFY;
+            }
         }
 
         if (rc != 0) {
@@ -901,8 +912,11 @@ int del_new_record_indices(struct ireq *iq, void *trans,
         if (rc == IX_NOTFND) {
             if (verify_retry)
                 rc = RC_INTERNAL_RETRY;
-            else
+            else {
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 rc = ERR_VERIFY;
+            }
         }
 
         if (rc != 0) {

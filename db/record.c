@@ -420,6 +420,9 @@ int add_record(struct ireq *iq, void *trans, const uint8_t *p_buf_tag_name,
             int bdberr;
             rc = ix_check_genid(iq, trans, vgenid, &bdberr);
             if (rc && bdberr == IX_FND) {
+
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 retrc = ERR_VERIFY;
                 ERR;
             }
@@ -592,6 +595,9 @@ int add_record(struct ireq *iq, void *trans, const uint8_t *p_buf_tag_name,
         } else {
             flipon = 1;
             *opfailcode = OP_FAILED_VERIFY;
+
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             retrc = ERR_VERIFY;
             ERR;
         }
@@ -926,6 +932,8 @@ int upd_record(struct ireq *iq, void *trans, void *primkey, int rrn,
         }
         if (rc == 0 && rrn != fndrrn) {
             *opfailcode = OP_FAILED_VERIFY;
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             retrc = ERR_VERIFY;
             goto err;
         }
@@ -975,8 +983,11 @@ int upd_record(struct ireq *iq, void *trans, void *primkey, int rrn,
             logmsg(LOGMSG_DEBUG, "%s line %d find old record failed with "
                     "internal_retry\n", __func__, __LINE__);
             retrc = rc;
-        } else
+        } else {
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             retrc = ERR_VERIFY;
+        }
         goto err;
     }
 
@@ -1474,6 +1485,8 @@ int upd_record(struct ireq *iq, void *trans, void *primkey, int rrn,
             gbl_maxretries = 2;
             flipon = 1;
             *opfailcode = OP_FAILED_VERIFY;
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             retrc = ERR_VERIFY;
             ERR;
         }
@@ -1607,6 +1620,8 @@ int del_record(struct ireq *iq, void *trans, void *primkey, int rrn,
                       rrn, fndrrn, fndgenid, od_len, fndlen, rc);
         if (rc == 0 && rrn != fndrrn) {
             *opfailcode = OP_FAILED_VERIFY;
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             retrc = ERR_VERIFY;
             goto err;
         }
@@ -1630,8 +1645,11 @@ int del_record(struct ireq *iq, void *trans, void *primkey, int rrn,
         *opfailcode = OP_FAILED_VERIFY;
         if (rc == RC_INTERNAL_RETRY)
             retrc = rc;
-        else
+        else {
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             retrc = ERR_VERIFY;
+        }
         goto err;
     }
 
@@ -1875,6 +1893,8 @@ int upd_new_record(struct ireq *iq, void *trans, unsigned long long oldgenid,
             int bdberr;
             rc = ix_check_update_genid(iq, trans, newgenid, &bdberr);
             if (rc == 1) {
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 retrc = ERR_VERIFY;
                 goto err;
             }

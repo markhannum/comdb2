@@ -1109,8 +1109,12 @@ int dat_upv_auxdb(int auxdb, struct ireq *iq, void *trans, int vptr, void *vdta,
     switch (bdberr) {
     case BDBERR_RRN_NOTFOUND: /* rrn deleted considered verify error, since
                                  client provides rrn directly */
+        iq->verify_err_func = __func__;
+        iq->verify_err_line = __LINE__;
         return ERR_VERIFY;
     case BDBERR_DTA_MISMATCH:
+        iq->verify_err_func = __func__;
+        iq->verify_err_line = __LINE__;
         return ERR_VERIFY;
     case BDBERR_DEADLOCK:
         return RC_INTERNAL_RETRY;
@@ -1144,8 +1148,12 @@ int blob_upv_auxdb(int auxdb, struct ireq *iq, void *trans, int vptr,
     switch (bdberr) {
     case BDBERR_RRN_NOTFOUND: /* rrn deleted considered verify error, since
                                  client provides rrn directly */
+        iq->verify_err_func = __func__;
+        iq->verify_err_line = __LINE__;
         return ERR_VERIFY;
     case BDBERR_DTA_MISMATCH:
+        iq->verify_err_func = __func__;
+        iq->verify_err_line = __LINE__;
         return ERR_VERIFY;
     case BDBERR_DEADLOCK:
         return RC_INTERNAL_RETRY;
@@ -1333,6 +1341,8 @@ int dat_del_auxdb(int auxdb, struct ireq *iq, void *trans, int rrn,
     case BDBERR_READONLY:
         return ERR_NOMASTER;
     case BDBERR_DELNOTFOUND:
+        iq->verify_err_func = __func__;
+        iq->verify_err_line = __LINE__;
         return ERR_VERIFY;
     /*fall through to default*/
     default:
@@ -2121,6 +2131,8 @@ retry:
                    retries);
             return ERR_INTERNAL;
         } else if (bdberr == BDBERR_DTA_MISMATCH) {
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             return ERR_VERIFY;
         } else if (bdberr == BDBERR_FETCH_DTA)
             return IX_NOTFND; /* not found or rrn/genid mismatch */
@@ -2169,6 +2181,8 @@ int ix_find_auxdb_blobs_by_rrn_and_genid_tran(int auxdb, struct ireq *iq,
             return RC_INTERNAL_RETRY;
 
         case BDBERR_DTA_MISMATCH:
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             return ERR_VERIFY;
 
         case BDBERR_FETCH_DTA:

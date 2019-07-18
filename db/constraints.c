@@ -1195,6 +1195,8 @@ int delayed_key_adds(struct ireq *iq, block_state_t *blkstate, void *trans,
                 if ((flags & OSQL_FORCE_VERIFY) != 0) {
                     *errout = OP_FAILED_VERIFY;
                     rc = ERR_VERIFY;
+                    iq->verify_err_func = __func__;
+                    iq->verify_err_line = __LINE__;
                 } else {
                     reqerrstr(iq, COMDB2_CSTRT_RC_DUP,
                               "add key constraint duplicate key '%s' on table "

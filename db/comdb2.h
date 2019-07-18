@@ -1429,6 +1429,8 @@ struct ireq {
 
     int written_row_count;
     /* REVIEW COMMENTS AT BEGINING OF STRUCT BEFORE ADDING NEW VARIABLES */
+    const char *verify_err_func;
+    int verify_err_line;
 };
 
 /* comdb array struct */

@@ -5101,6 +5101,8 @@ backout:
             reqerrstr(iq, COMDB2_CSTRT_RC_INVL_REC, "selectv constraints");
         } else if (iq->selectv_arr) {
             logmsg(LOGMSG_USER, "Got verify error but no selectv_constraints errors?\n");
+            logmsg(LOGMSG_USER, "Verify error set in %s line %d\n", iq->verify_err_func,
+                    iq->verify_err_line);
             abort();
         }
     }
@@ -5208,6 +5210,8 @@ backout:
             if (is_block2sqlmode_blocksql) {
                 err.errcode = OP_FAILED_VERIFY;
                 rc = ERR_VERIFY;
+                iq->verify_err_func = __func__;
+                iq->verify_err_line = __LINE__;
                 check_serializability = 1;
             } else {
                 err.errcode = ERR_UNCOMMITABLE_TXN;

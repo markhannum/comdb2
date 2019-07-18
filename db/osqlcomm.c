@@ -7105,6 +7105,8 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
                 int upsert_idx = dt.upsert_flags >> 8;
                 if ((dt.upsert_flags & OSQL_FORCE_VERIFY) != 0) {
                     err->errcode = OP_FAILED_VERIFY;
+                    iq->verify_err_func = __func__;
+                    iq->verify_err_line = __LINE__;
                     rc = ERR_VERIFY;
                 } else if ((rc == IX_DUP) &&
                            ((dt.upsert_flags & OSQL_IGNORE_FAILURE) != 0) &&
@@ -7159,10 +7161,12 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
                             dt.start_gen, cur_gen);
             }
             uuidstr_t us;
-            logmsg(LOGMSG_DEBUG,
+            logmsg(LOGMSG_INFO,
                    "[%llx %s] Startgen check failed, start_gen "
                    "%u, cur_gen %u\n",
                    id, comdb2uuidstr(uuid, us), dt.start_gen, cur_gen);
+            iq->verify_err_func = __func__;
+            iq->verify_err_line = __LINE__;
             return ERR_VERIFY;
         }
     } break;
