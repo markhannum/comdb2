@@ -14,6 +14,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <poll.h>
 
 #include <cdb2api.h>
 
@@ -33,6 +34,7 @@ int selectv_updaters = 10;
 int updaters = 10;
 int selectvers = 10;
 int isolation = SOCKSQL;
+int reproduce_selectv_bug = 1;
 int time_is_up = 0;
 
 void usage(FILE *f)
@@ -46,6 +48,8 @@ void usage(FILE *f)
     fprintf(f, "    -u <cnt>                     - number of updaters\n");
     fprintf(f, "    -V <cnt>                     - number of selectv-ers\n");
     fprintf(f, "    -t <test-time>               - let test run for this many seconds\n");
+    fprintf(f, "    -L                           - poll to reproduce selectv bug\n");
+    fprintf(f, "    -l                           - disable poll to reproduce selectv bug\n");
     fprintf(f, "    -h                           - this menu\n");
 }
 
@@ -158,6 +162,15 @@ int selectv_update_query(cdb2_hndl_tp *db)
     if ((rc = cdb2_run_statement(db, "begin")) != CDB2_OK) {
         fprintf(stderr, "line %d error running begin, %d\n", __LINE__, rc);
         exit(1);
+    }
+    if (reproduce_selectv_bug && isolation == SNAPSHOT) {
+        if ((rc = cdb2_run_statement(db, "select * from jobinstance limit 1")) != CDB2_OK) {
+            fprintf(stderr, "line %d error running select, %s\n", __LINE__, cdb2_errstr(db));
+            exit(1);
+        }
+        while ((rc = cdb2_next_record(db)) == CDB2_OK)
+            ;
+        poll(NULL, 0, (rand() % 50) + 50);
     }
     if ((rc = cdb2_run_statement(db, "selectv i.rqstid,instid,began from jobinstance "
             "i left join dbgopts d on d.rqstid=i.rqstid where state=1 and began "

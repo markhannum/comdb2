@@ -774,7 +774,7 @@ tran_type *bdb_tran_begin_logical_int(bdb_state_type *bdb_state,
 extern int gbl_extended_sql_debug_trace;
 
 int bdb_tran_get_start_file_offset(bdb_state_type *bdb_state, tran_type *tran,
-                                   int *file, int *offset)
+                                   uint32_t *file, uint32_t *offset)
 {
     if (gbl_new_snapisol_asof) {
         if (tran && tran->asof_lsn.file) {

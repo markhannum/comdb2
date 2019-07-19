@@ -4339,7 +4339,12 @@ void get_current_lsn(struct sqlclntstate *clnt)
     struct dbtable *db =
         &thedb->static_table; /* this is not used but required */
     if (db) {
-        bdb_get_current_lsn(db->handle, &(clnt->file), &(clnt->offset));
+        if (clnt->dbtran.shadow_tran) {
+            bdb_tran_get_start_file_offset(thedb->bdb_env, clnt->dbtran.shadow_tran,
+                    &(clnt->file), &(clnt->offset));
+        } else {
+            bdb_get_current_lsn(db->handle, &(clnt->file), &(clnt->offset));
+        }
     } else {
         logmsg(LOGMSG_ERROR, "get_current_lsn: ireq has no bdb handle\n");
         abort();
