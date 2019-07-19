@@ -7356,7 +7356,7 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         uint8_t *p_buf_end = p_buf + sizeof(osql_serial_t);
         osql_serial_t dt = {0};
         CurRangeArr *arr = malloc(sizeof(CurRangeArr));
-        currangearr_init(arr);
+        currangearr_init(arr, NULL);
 
         p_buf = (uint8_t *)osqlcomm_serial_type_get(&dt, p_buf, p_buf_end);
         arr->file = dt.file;
@@ -8233,7 +8233,7 @@ int osql_log_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         uint8_t *p_buf_end = p_buf + sizeof(osql_serial_t);
         osql_serial_t dt = {0};
         CurRangeArr *arr = malloc(sizeof(CurRangeArr));
-        currangearr_init(arr);
+        currangearr_init(arr, NULL);
 
         p_buf = (uint8_t *)osqlcomm_serial_type_get(&dt, p_buf, p_buf_end);
         arr->file = dt.file;
@@ -8255,7 +8255,7 @@ int osql_log_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         uint8_t *p_buf_end = p_buf + sizeof(osql_serial_t);
         osql_serial_t dt = {0};
         CurRangeArr *arr = malloc(sizeof(CurRangeArr));
-        currangearr_init(arr);
+        currangearr_init(arr, NULL);
 
         p_buf = (uint8_t *)osqlcomm_serial_type_get(&dt, p_buf, p_buf_end);
         arr->file = dt.file;

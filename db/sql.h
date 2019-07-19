@@ -273,7 +273,7 @@ typedef struct sqlclntstate_fdb {
 
 CurRange *currange_new();
 #define CURRANGEARR_INIT_CAP 2
-void currangearr_init(CurRangeArr *arr);
+void currangearr_init(CurRangeArr *arr, struct sqlclntstate *clnt);
 void currangearr_append(CurRangeArr *arr, CurRange *r);
 CurRange *currangearr_get(CurRangeArr *arr, int n);
 void currangearr_double_if_full(CurRangeArr *arr);

@@ -215,7 +215,7 @@ static int fill_snapinfo(struct sqlclntstate *clnt, int *file, int *offset)
 
     if (*file == 0) {
         bdb_tran_get_start_file_offset(thedb->bdb_env, clnt->dbtran.shadow_tran,
-                                       file, offset);
+                                       (uint32_t *)file, (uint32_t *)offset);
         sql_debug_logf(clnt, __func__, __LINE__,
                        "start_file_offset snapinfo "
                        "is [%d][%d], sqlengine-state is %d\n",

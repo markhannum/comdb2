@@ -180,12 +180,17 @@ CurRange *currange_new()
     return rc;
 }
 
-void currangearr_init(CurRangeArr *arr)
+void currangearr_init(CurRangeArr *arr, struct sqlclntstate *clnt)
 {
     arr->size = 0;
     arr->cap = CURRANGEARR_INIT_CAP;
-    arr->file = 0;
-    arr->offset = 0;
+    if (clnt && clnt->dbtran.shadow_tran) {
+        bdb_tran_get_start_file_offset(thedb->bdb_env,
+                clnt->dbtran.shadow_tran, &arr->file, &arr->offset);
+    } else {
+        arr->file = 0;
+        arr->offset = 0;
+    }
     arr->hash = NULL;
     arr->ranges = malloc(sizeof(CurRange *) * arr->cap);
 }
@@ -3520,7 +3525,7 @@ int sqlite3BtreeLast(BtCursor *pCur, int *pRes)
                     (pCur->is_recording) ? &(clnt->selectv_arr) : &(clnt->arr);
                 if (!*append_to) {
                     *append_to = malloc(sizeof(CurRangeArr));
-                    currangearr_init(*append_to);
+                    currangearr_init(*append_to, clnt);
                 }
                 currangearr_append(*append_to, pCur->range);
             } else {
@@ -3781,7 +3786,7 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes)
                     (pCur->is_recording) ? &(clnt->selectv_arr) : &(clnt->arr);
                 if (!*append_to) {
                     *append_to = malloc(sizeof(CurRangeArr));
-                    currangearr_init(*append_to);
+                    currangearr_init(*append_to, clnt);
                 }
                 currangearr_append(*append_to, pCur->range);
             } else {
@@ -4565,11 +4570,11 @@ int sqlite3BtreeBeginTrans(Vdbe *vdbe, Btree *pBt, int wrflag, int *pSchemaVersi
 
     if (clnt->dbtran.mode == TRANLEVEL_SERIAL) {
         clnt->arr = malloc(sizeof(CurRangeArr));
-        currangearr_init(clnt->arr);
+        currangearr_init(clnt->arr, clnt);
     }
     if (gbl_selectv_rangechk) {
         clnt->selectv_arr = malloc(sizeof(CurRangeArr));
-        currangearr_init(clnt->selectv_arr);
+        currangearr_init(clnt->selectv_arr, clnt);
     }
 
     get_current_lsn(clnt);
@@ -6130,7 +6135,7 @@ int sqlite3BtreeCloseCursor(BtCursor *pCur)
                     (pCur->is_recording) ? &(clnt->selectv_arr) : &(clnt->arr);
                 if (!*append_to) {
                     *append_to = malloc(sizeof(CurRangeArr));
-                    currangearr_init(*append_to);
+                    currangearr_init(*append_to, clnt);
                 }
                 currangearr_append(*append_to, pCur->range);
             } else {
@@ -9508,7 +9513,7 @@ static int ddguard_bdb_cursor_find(struct sql_thread *thd, BtCursor *pCur,
                     (pCur->is_recording) ? &(clnt->selectv_arr) : &(clnt->arr);
                 if (!*append_to) {
                     *append_to = malloc(sizeof(CurRangeArr));
-                    currangearr_init(*append_to);
+                    currangearr_init(*append_to, clnt);
                 }
                 currangearr_append(*append_to, pCur->range);
             } else {
@@ -9714,7 +9719,7 @@ static int ddguard_bdb_cursor_find_last_dup(struct sql_thread *thd,
                     (pCur->is_recording) ? &(clnt->selectv_arr) : &(clnt->arr);
                 if (!*append_to) {
                     *append_to = malloc(sizeof(CurRangeArr));
-                    currangearr_init(*append_to);
+                    currangearr_init(*append_to, clnt);
                 }
                 currangearr_append(*append_to, pCur->range);
             } else {
