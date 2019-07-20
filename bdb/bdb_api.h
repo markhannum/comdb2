@@ -1924,6 +1924,10 @@ int bdb_osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                           unsigned int *file, unsigned int *offset,
                           int regop_only);
 
+int bdb_osql_serial_check_range(bdb_state_type *bdb_state, void *ranges,
+                          unsigned int file, unsigned int offset,
+                          unsigned int stopfile, unsigned int stopoffset);
+
 int llmeta_set_tablename_alias(void *ptran, const char *tablename_alias,
                                const char *url, char **errstr);
 char *llmeta_get_tablename_alias(const char *tablename_alias, char **errstr);

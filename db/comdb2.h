@@ -1122,6 +1122,8 @@ typedef struct {
     int cap;
     unsigned int file;
     unsigned int offset;
+    unsigned int orig_file;
+    unsigned int orig_offset;
     hash_t *hash;
     CurRange **ranges;
 } CurRangeArr;

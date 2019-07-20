@@ -5100,10 +5100,19 @@ backout:
             rc = ERR_CONSTR;
             reqerrstr(iq, COMDB2_CSTRT_RC_INVL_REC, "selectv constraints");
         } else if (iq->selectv_arr) {
+            int ckrc = bdb_osql_serial_check_range(thedb->bdb_env, iq->selectv_arr,
+                    iq->selectv_arr->orig_file, iq->selectv_arr->orig_offset,
+                    iq->selectv_arr->file, iq->selectv_arr->offset);
             logmsg(LOGMSG_USER, "Got verify error but no selectv_constraints errors?\n");
             logmsg(LOGMSG_USER, "Verify error set in %s line %d\n", iq->verify_err_func,
                     iq->verify_err_line);
+            logmsg(LOGMSG_USER, "Did later check from [%u][%u] to [%u][%u] and got %d?\n",
+                    iq->selectv_arr->orig_file, iq->selectv_arr->orig_offset,
+                    iq->selectv_arr->file, iq->selectv_arr->offset, ckrc);
             currangearr_print(iq->selectv_arr);
+            fflush(stdout);
+            fflush(stderr);
+            abort();
         }
     }
 

@@ -883,6 +883,8 @@ typedef struct osql_serial {
     int arr_size;
     unsigned int file;
     unsigned int offset;
+    unsigned int orig_file;
+    unsigned int orig_offset;
 } osql_serial_t;
 
 typedef struct osql_del_uuid_rpl {
@@ -915,7 +917,8 @@ static uint8_t *osqlcomm_del_uuid_rpl_type_put(osql_del_uuid_rpl_t *p_del_rpl,
     return p_buf;
 }
 
-enum { OSQLCOMM_SERIAL_TYPE_LEN = 4 + 4 + 4 + 4 };
+//enum { OSQLCOMM_SERIAL_TYPE_LEN = 4 + 4 + 4 + 4 };
+enum { OSQLCOMM_SERIAL_TYPE_LEN = 4 + 4 + 4 + 4 + 4 + 4};
 
 BB_COMPILE_TIME_ASSERT(osqlcomm_serial_type_len,
                        sizeof(osql_serial_t) == OSQLCOMM_SERIAL_TYPE_LEN);
@@ -935,9 +938,14 @@ static uint8_t *osqlcomm_serial_type_put(const osql_serial_t *p_osql_serial,
                     p_buf_end);
     p_buf = buf_put(&(p_osql_serial->offset), sizeof(p_osql_serial->offset),
                     p_buf, p_buf_end);
+    p_buf = buf_put(&(p_osql_serial->orig_file), sizeof(p_osql_serial->orig_file), p_buf,
+                    p_buf_end);
+    p_buf = buf_put(&(p_osql_serial->orig_offset), sizeof(p_osql_serial->orig_offset),
+                    p_buf, p_buf_end);
 
     return p_buf;
 }
+
 static const uint8_t *osqlcomm_serial_type_get(osql_serial_t *p_osql_serial,
                                                const uint8_t *p_buf,
                                                const uint8_t *p_buf_end)
@@ -952,6 +960,10 @@ static const uint8_t *osqlcomm_serial_type_get(osql_serial_t *p_osql_serial,
     p_buf = buf_get(&(p_osql_serial->file), sizeof(p_osql_serial->file), p_buf,
                     p_buf_end);
     p_buf = buf_get(&(p_osql_serial->offset), sizeof(p_osql_serial->offset),
+                    p_buf, p_buf_end);
+    p_buf = buf_get(&(p_osql_serial->orig_file), sizeof(p_osql_serial->orig_file), p_buf,
+                    p_buf_end);
+    p_buf = buf_get(&(p_osql_serial->orig_offset), sizeof(p_osql_serial->orig_offset),
                     p_buf, p_buf_end);
 
     return p_buf;
@@ -4543,12 +4555,9 @@ int osql_send_serial(char *tohost, unsigned long long rqid, uuid_t uuid,
         serial_rpl.dt.buf_size = cr_sz;
         serial_rpl.dt.arr_size = (arr) ? arr->size : 0;
         serial_rpl.dt.file = file;
-
         serial_rpl.dt.offset = offset;
-        serial_rpl.dt.buf_size = cr_sz;
-        serial_rpl.dt.arr_size = (arr) ? arr->size : 0;
-        serial_rpl.dt.file = file;
-        serial_rpl.dt.offset = offset;
+        serial_rpl.dt.orig_file = (arr) ? arr->orig_file : 0;
+        serial_rpl.dt.orig_offset = (arr) ? arr->orig_offset : 0;
 
         if (logsb) {
             uuidstr_t us;

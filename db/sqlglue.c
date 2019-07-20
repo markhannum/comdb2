@@ -430,6 +430,7 @@ void currangearr_print(CurRangeArr *arr)
     if (arr) {
         logmsg(LOGMSG_USER, "!!! SIZE: %d !!!\n", arr->size);
         logmsg(LOGMSG_USER, "!!! LSN: [%d][%d] !!!\n", arr->file, arr->offset);
+        logmsg(LOGMSG_USER, "!!! ORIG-LSN: [%d][%d] !!!\n", arr->orig_file, arr->orig_offset);
         for (i = 0; i < arr->size; i++) {
             cr = arr->ranges[i];
             logmsg(LOGMSG_USER, "------------------------\n");
@@ -4349,12 +4350,12 @@ void get_current_lsn(struct sqlclntstate *clnt)
         abort();
     }
     if (clnt->arr) {
-        clnt->arr->file = clnt->file;
-        clnt->arr->offset = clnt->offset;
+        clnt->arr->orig_file = clnt->arr->file = clnt->file;
+        clnt->arr->orig_offset = clnt->arr->offset = clnt->offset;
     }
     if (clnt->selectv_arr) {
-        clnt->selectv_arr->file = clnt->file;
-        clnt->selectv_arr->offset = clnt->offset;
+        clnt->selectv_arr->orig_file = clnt->selectv_arr->file = clnt->file;
+        clnt->selectv_arr->orig_offset = clnt->selectv_arr->offset = clnt->offset;
     }
 }
 

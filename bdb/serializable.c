@@ -333,6 +333,7 @@ int serial_check_this_txn(bdb_state_type *bdb_state, DB_LSN lsn, void *ranges)
 */
 static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                              unsigned int *file, unsigned int *offset,
+                             unsigned int stopfile, unsigned int stopoffset,
                              int (*check_this_txn)(bdb_state_type *bdb_state,
                                                    DB_LSN lsn, void *ranges),
                              int regop_only)
@@ -375,6 +376,11 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
     if (!regop_only) {
         *file = curlsn.file;
         *offset = curlsn.offset;
+    }
+
+    if (curlsn.file > stopfile || curlsn.offset > stopoffset) {
+        curlsn.file = stopfile;
+        curlsn.offset = stopoffset;
     }
 
     rc = 0;
@@ -560,6 +566,8 @@ done:
     return rc;
 }
 
+#include <limits.h>
+
 int bdb_osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                           unsigned int *file, unsigned int *offset,
                           int regop_only)
@@ -567,5 +575,19 @@ int bdb_osql_serial_check(bdb_state_type *bdb_state, void *ranges,
     if (!ranges)
         return 0;
     return osql_serial_check(bdb_state, ranges, file, offset,
-                             serial_check_this_txn, regop_only);
+                             UINT_MAX, UINT_MAX, serial_check_this_txn,
+                             regop_only);
 }
+
+
+int bdb_osql_serial_check_range(bdb_state_type *bdb_state, void *ranges,
+                          unsigned int file, unsigned int offset,
+                          unsigned int stopfile, unsigned int stopoffset)
+{
+    if (!ranges)
+        return 0;
+    return osql_serial_check(bdb_state, ranges, &file, &offset, stopfile,
+            stopoffset, serial_check_this_txn, 0);
+}
+
+

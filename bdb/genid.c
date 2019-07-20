@@ -390,7 +390,11 @@ static inline void set_commit_genid_lsn_gen(bdb_state_type *bdb_state,
         return;
     }
     commit_genid = genid;
-    if (lsn) commit_lsn = *lsn;
+    if (lsn) {
+        commit_lsn = *lsn;
+        if (commit_lsn.file == -1 || commit_lsn.offset == -1)
+            abort();
+    }
     if (generation) commit_generation = *generation;
 
     set_gblcontext_int(bdb_state, genid);
@@ -1022,6 +1026,9 @@ unsigned long long bdb_get_commit_genid_generation( bdb_state_type *bdb_state, v
     ret = commit_genid;
     if (plsn)
         *(DB_LSN *)plsn = commit_lsn;
+
+    if (commit_lsn.offset == -1)
+        abort();
 
    if (generation)
        *generation = commit_generation;
