@@ -5103,7 +5103,7 @@ backout:
             logmsg(LOGMSG_USER, "Got verify error but no selectv_constraints errors?\n");
             logmsg(LOGMSG_USER, "Verify error set in %s line %d\n", iq->verify_err_func,
                     iq->verify_err_line);
-            abort();
+            currangearr_print(iq->selectv_arr);
         }
     }
 

@@ -415,6 +415,18 @@ static int rese_commit(struct sqlclntstate *clnt, struct sql_thread *thd,
 
 goback:
 
+    if (clnt->osql.xerr.errval == ERR_VERIFY) {
+        logmsg(LOGMSG_ERROR, "Got verify error (we shouldn't)\n");
+        logmsg(LOGMSG_ERROR, "selectv_arr start lsn is %d:%d\n", clnt->file, clnt->offset);
+        if (clnt->dbtran.shadow_tran) {
+            uint32_t file, offset;
+            bdb_tran_get_start_file_offset(thedb->bdb_env,
+                    clnt->dbtran.shadow_tran, &file, &offset);
+            logmsg(LOGMSG_ERROR, "snappy_commit_lsn is %d:%d\n", file, offset);
+        }
+        abort();
+    }
+
     /* if this is read committed and we just got a verify error,
        don't close the shadow tables since this will get retried */
     if (clnt->osql.xerr.errval == ERR_VERIFY &&
