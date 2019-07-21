@@ -1048,6 +1048,8 @@ void bdb_set_commit_lsn_gen(bdb_state_type *bdb_state, const void *inlsn, uint32
     DB_LSN *lsn = (DB_LSN *)inlsn;
     Pthread_mutex_lock(&(bdb_state->gblcontext_lock));
     commit_lsn = *lsn;
+    if (commit_lsn.file == -1 || commit_lsn.offset == -1)
+        abort();
     commit_generation = gen;
     Pthread_mutex_unlock(&(bdb_state->gblcontext_lock));
 }

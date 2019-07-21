@@ -354,6 +354,9 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
     seriallsn.file = *file;
     seriallsn.offset = *offset;
 
+    if (*file == UINT_MAX || *offset == *UINT_MAX)
+        abort();
+
     bzero(&logdta, sizeof(DBT));
     logdta.flags = DB_DBT_REALLOC;
 
