@@ -930,6 +930,10 @@ static uint8_t *osqlcomm_serial_type_put(const osql_serial_t *p_osql_serial,
     if (p_buf_end < p_buf || OSQLCOMM_SERIAL_TYPE_LEN > (p_buf_end - p_buf))
         return NULL;
 
+    if (p_osql_serial->file == UINT_MAX || p_osql_serial->offset == UINT_MAX)
+        abort();
+    if (p_osql_serial->orig_file == UINT_MAX || p_osql_serial->orig_offset == UINT_MAX)
+        abort();
     p_buf = buf_put(&(p_osql_serial->buf_size), sizeof(p_osql_serial->buf_size),
                     p_buf, p_buf_end);
     p_buf = buf_put(&(p_osql_serial->arr_size), sizeof(p_osql_serial->arr_size),
@@ -965,6 +969,11 @@ static const uint8_t *osqlcomm_serial_type_get(osql_serial_t *p_osql_serial,
                     p_buf_end);
     p_buf = buf_get(&(p_osql_serial->orig_offset), sizeof(p_osql_serial->orig_offset),
                     p_buf, p_buf_end);
+
+    if (p_osql_serial->file == UINT_MAX || p_osql_serial->offset == UINT_MAX)
+        abort();
+    if (p_osql_serial->orig_file == UINT_MAX || p_osql_serial->orig_offset == UINT_MAX)
+        abort();
 
     return p_buf;
 }
