@@ -6812,6 +6812,9 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
     unsigned long long id;
     char *msg = *pmsg;
 
+    currangearr_sanity_check(iq->selectv_arr);
+    currangearr_sanity_check(iq->arr);
+
     if (rqid == OSQL_RQID_USE_UUID) {
         osql_uuid_rpl_t rpl;
         p_buf = (const uint8_t *)msg;
@@ -7265,6 +7268,9 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         }
 #endif
 
+        currangearr_sanity_check(iq->arr);
+        currangearr_sanity_check(iq->selectv_arr);
+
         rc = upd_record(
             iq, trans, NULL, rrn, genid, tag_name_ondisk,
             tag_name_ondisk + tag_name_ondisk_len, /*tag*/
@@ -7284,6 +7290,10 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
                                             collected. */);
 
         free_blob_buffers(blobs, MAXBLOBS);
+
+        currangearr_sanity_check(iq->arr);
+        currangearr_sanity_check(iq->selectv_arr);
+
         if (iq->idxInsert || iq->idxDelete) {
             free_cached_idx(iq->idxInsert);
             free_cached_idx(iq->idxDelete);
@@ -7404,6 +7414,10 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
                         dt.buf_size, dt.arr_size, dt.file, dt.offset);
             sbuf2flush(logsb);
         }
+
+        currangearr_sanity_check(iq->arr);
+        currangearr_sanity_check(iq->selectv_arr);
+
     } break;
     case OSQL_DELIDX:
     case OSQL_INSIDX: {
@@ -7624,6 +7638,9 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         return conv_rc_sql2blkop(iq, step, -1, ERR_BADREQ, err, NULL, 0);
     }
     }
+
+    currangearr_sanity_check(iq->selectv_arr);
+    currangearr_sanity_check(iq->arr);
 
     return 0;
 }

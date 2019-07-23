@@ -195,6 +195,15 @@ void currangearr_init(CurRangeArr *arr, struct sqlclntstate *clnt)
     arr->ranges = malloc(sizeof(CurRange *) * arr->cap);
 }
 
+void currangearr_sanity_check(CurRangeArr *arr)
+{
+    if (!arr)
+        return;
+    if (arr->file == UINT_MAX || arr->offset == UINT_MAX ||
+            arr->orig_file == UINT_MAX || arr->orig_offset == UINT_MAX)
+        abort();
+}
+
 void currangearr_append(CurRangeArr *arr, CurRange *r)
 {
     currangearr_double_if_full(arr);
@@ -4338,6 +4347,7 @@ const char *sqlite3BtreeGetJournalname(Btree *pBt)
                 pBt->btreeid, jname);
     return NULL;
 }
+
 
 void get_current_lsn(struct sqlclntstate *clnt)
 {

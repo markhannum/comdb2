@@ -278,6 +278,7 @@ void currangearr_append(CurRangeArr *arr, CurRange *r);
 CurRange *currangearr_get(CurRangeArr *arr, int n);
 void currangearr_double_if_full(CurRangeArr *arr);
 void currangearr_build_hash(CurRangeArr *arr);
+void currangearr_sanity_check(CurRangeArr *arr);
 void currangearr_free(CurRangeArr *arr);
 void currangearr_print(CurRangeArr *arr);
 void currange_free(CurRange *cr);
