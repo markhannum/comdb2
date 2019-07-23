@@ -7389,6 +7389,8 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         p_buf = (uint8_t *)osqlcomm_serial_type_get(&dt, p_buf, p_buf_end);
         arr->file = dt.file;
         arr->offset = dt.offset;
+        arr->orig_file = dt.orig_file;
+        arr->orig_offset = dt.orig_offset;
 
         p_buf_end = p_buf + dt.buf_size;
 
