@@ -449,6 +449,7 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                 if (seriallsn.file < curlsn.file || seriallsn.offset < curlsn.offset) {
                     abort();
                 }
+                break;
             } else {
                 fprintf(stderr, "Unable to get last_logical_lsn, rc %d\n", rc);
                 fprintf(stderr, "@ file: %d, offset %d\n", seriallsn.file,
