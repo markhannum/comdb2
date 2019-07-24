@@ -5109,7 +5109,10 @@ backout:
             int ckrc = bdb_osql_serial_check_range(thedb->bdb_env, iq->selectv_arr,
                     iq->selectv_arr->orig_file, iq->selectv_arr->orig_offset,
                     iq->selectv_arr->file, iq->selectv_arr->offset);
-            int ckfst = bdb_osql_serial_check_range(thedb->bdb_env, iq->selectv_arr,
+            int p1 = bdb_osql_serial_check_range(thedb->bdb_env, iq->selectv_arr,
+                    iq->selectv_arr->orig_file, iq->selectv_arr->orig_offset,
+                    first_file, first_offset);
+            int p2 = bdb_osql_serial_check_range(thedb->bdb_env, iq->selectv_arr,
                     first_file, first_offset, iq->selectv_arr->file,
                     iq->selectv_arr->offset);
 
@@ -5117,12 +5120,14 @@ backout:
             logmsg(LOGMSG_USER, "Verify error set in %s line %d\n", iq->verify_err_func,
                     iq->verify_err_line);
             logmsg(LOGMSG_USER, "first-lsn checked here was [%u][%u]\n", first_file, first_offset);
-            logmsg(LOGMSG_USER, "Did later check from [%u][%u] to [%u][%u] and got %d?\n",
+            logmsg(LOGMSG_USER, "Did entire range check from [%u][%u] to [%u][%u] and got %d\n",
                     iq->selectv_arr->orig_file, iq->selectv_arr->orig_offset,
                     iq->selectv_arr->file, iq->selectv_arr->offset, ckrc);
-            logmsg(LOGMSG_USER, "Later check from first-file [%u][%u] to [%u][%u] and got %d?\n",
-                    first_file, first_offset, iq->selectv_arr->file, 
-                    iq->selectv_arr->offset, ckfst);
+            logmsg(LOGMSG_USER, "Did first-segment range check from [%u][%u] to [%u][%u] and got %d\n",
+                    iq->selectv_arr->orig_file, iq->selectv_arr->orig_offset,
+                    first_file, first_offset, p1);
+            logmsg(LOGMSG_USER, "Did second-segment range check from [%u][%u] to [%u][%u] and got %d\n",
+                    first_file, first_offset, iq->selectv_arr->file, iq->selectv_arr->offset, p2);
             currangearr_print(iq->selectv_arr);
             fflush(stdout);
             fflush(stderr);
