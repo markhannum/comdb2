@@ -446,7 +446,9 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
             if (!rc)
                 LOGCOPY_32(&rectype, logdta.data);
             else if (rc == DB_NOTFOUND) {
-                break;
+                if (seriallsn.file < curlsn.file || seriallsn.offset <= curlsn.offset) {
+                    abort();
+                }
             } else {
                 fprintf(stderr, "Unable to get last_logical_lsn, rc %d\n", rc);
                 fprintf(stderr, "@ file: %d, offset %d\n", seriallsn.file,
