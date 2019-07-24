@@ -446,7 +446,7 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
             if (!rc)
                 LOGCOPY_32(&rectype, logdta.data);
             else if (rc == DB_NOTFOUND) {
-                if (seriallsn.file < curlsn.file || seriallsn.offset <= curlsn.offset) {
+                if (seriallsn.file < curlsn.file || seriallsn.offset < curlsn.offset) {
                     abort();
                 }
             } else {
