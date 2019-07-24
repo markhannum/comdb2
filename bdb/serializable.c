@@ -379,6 +379,9 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
     if (!regop_only) {
         *file = curlsn.file;
         *offset = curlsn.offset;
+        if ((*offset) < 28)
+            abort();
+
     }
 
     if (curlsn.file > stopfile || curlsn.offset > stopoffset) {

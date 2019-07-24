@@ -592,6 +592,9 @@ __log_txn_lsn(dbenv, lsnp, mbytesp, bytesp)
 	if (lp->lsn.offset > lp->len)
 		lsnp->offset -= lp->len;
 
+    if (lsnp->offset < 28)
+        abort();
+
 	/*
 	 * Since we're holding the log region lock, return the bytes put into
 	 * the log since the last checkpoint, transaction checkpoint needs it.
