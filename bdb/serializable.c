@@ -449,8 +449,7 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                 if (*file > seriallsn.file ||
                         *offset > seriallsn.offset) {
                     logmsg(LOGMSG_USER, "Setting lsn to [%u][%u] rather than "
-                            "[%u][%u]\n", *file, *offset, curlsn.file,
-                            curlsn.offset);
+                            "[%u][%u]\n", seriallsn.file, seriallsn.offset, *file, *offset);
                 }
                 *file = seriallsn.file;
                 *offset = seriallsn.offset;
