@@ -66,14 +66,16 @@ typedef struct dbg_lock_pthread_inner_key_t inner_key_t;
 typedef struct dbg_lock_pthread_inner_pair_t inner_pair_t;
 
 #define DBG_PTHREAD_LOCKS_LOCK_ONLY
-#define DBG_PTHREAD_LOCKS_LOCK_ONLY_POLLMS 1
+#define DBG_PTHREAD_LOCKS_LOCK_ONLY_SLEEPUS 0
+//#define DBG_PTHREAD_LOCKS_USLEEP usleep(DBG_PTHREAD_LOCKS_LOCK_ONLY_SLEEPUS);
+#define DBG_PTHREAD_LOCKS_USLEEP
 
 #if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
 static uint64_t dbg_locks_bytes = 0;
 static hash_t *dbg_locks = NULL;
 static uint64_t dbg_locks_peak_bytes = 0;
 #else
-#include <poll.h>
+#include <unistd.h>
 #endif
 
 static pthread_mutex_t dbg_locks_lk = PTHREAD_MUTEX_INITIALIZER;
@@ -222,7 +224,7 @@ void dbg_pthread_dump(
   hash_for(dbg_locks, dbg_pthread_dump_outer_pair, out);
 done:
 #else
-  poll(NULL, 0, DBG_PTHREAD_LOCKS_LOCK_ONLY_POLLMS);
+  DBG_PTHREAD_LOCKS_USLEEP;
 #endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
@@ -238,7 +240,7 @@ static void dbg_pthread_check_init(void){
     DBG_MORE_MEMORY(sizeof(hash_t*));
   }
 #else
-  poll(NULL, 0, DBG_PTHREAD_LOCKS_LOCK_ONLY_POLLMS);
+  DBG_PTHREAD_LOCKS_USLEEP;
 #endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
@@ -259,7 +261,7 @@ void dbg_pthread_term(void){
   XCHANGE(gbl_debug_pthread_locks, 0);
 done:
 #else
-  poll(NULL, 0, DBG_PTHREAD_LOCKS_LOCK_ONLY_POLLMS);
+  DBG_PTHREAD_LOCKS_USLEEP;
 #endif
   pthread_mutex_unlock(&dbg_locks_lk);
   dbg_pthread_dump(stdout, "after cleanup", 1);
@@ -268,7 +270,7 @@ done:
   // ??? how can we guarantee this is 0 here????  we released the mutex
   assert( dbg_locks_bytes==0 );
 #else
-  poll(NULL, 0, DBG_PTHREAD_LOCKS_LOCK_ONLY_POLLMS);
+  DBG_PTHREAD_LOCKS_USLEEP;
 #endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
@@ -327,7 +329,7 @@ static void dbg_pthread_add_self(
   }
 done:
 #else
-  poll(NULL, 0, DBG_PTHREAD_LOCKS_LOCK_ONLY_POLLMS);
+  DBG_PTHREAD_LOCKS_USLEEP;
 #endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
@@ -372,7 +374,7 @@ static void dbg_pthread_remove_self(
   }
 done:
 #else
-  poll(NULL, 0, DBG_PTHREAD_LOCKS_LOCK_ONLY_POLLMS);
+  DBG_PTHREAD_LOCKS_USLEEP;
 #endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
