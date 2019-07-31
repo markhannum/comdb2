@@ -65,10 +65,15 @@ typedef struct dbg_lock_pthread_outer_pair_t outer_pair_t;
 typedef struct dbg_lock_pthread_inner_key_t inner_key_t;
 typedef struct dbg_lock_pthread_inner_pair_t inner_pair_t;
 
+#define DBG_PTHREAD_LOCKS_LOCK_ONLY
+
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
 static uint64_t dbg_locks_bytes = 0;
-static uint64_t dbg_locks_peak_bytes = 0;
-static pthread_mutex_t dbg_locks_lk = PTHREAD_MUTEX_INITIALIZER;
 static hash_t *dbg_locks = NULL;
+static uint64_t dbg_locks_peak_bytes = 0;
+#endif
+
+static pthread_mutex_t dbg_locks_lk = PTHREAD_MUTEX_INITIALIZER;
 
 #define DBG_SET_NAME(a) snprintf(zBuf, nBuf, "%s", (a))
 #define DBG_UNK_NAME(a) snprintf(zBuf, nBuf, "unk:%d", (a))
@@ -87,9 +92,13 @@ static hash_t *dbg_locks = NULL;
   }                                           \
 } while(0)
 
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
 #define DBG_LESS_MEMORY(a) do {               \
   dbg_locks_bytes -= (a);                     \
 } while(0)
+#else
+#define DBG_LESS_MEMORY(a) 
+#endif
 
 /*****************************************************************************/
 
@@ -202,12 +211,14 @@ void dbg_pthread_dump(
   int bSummaryOnly
 ){
   pthread_mutex_lock(&dbg_locks_lk);
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
   logmsgf(LOGMSG_USER, out, "%s (%s): bytes used %" BBPRIu64
           ", bytes peak %" BBPRIu64 "\n", __func__, zDesc,
           dbg_locks_bytes, dbg_locks_peak_bytes);
   if( bSummaryOnly || dbg_locks==NULL ) goto done;
   hash_for(dbg_locks, dbg_pthread_dump_outer_pair, out);
 done:
+#endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
 
@@ -215,11 +226,13 @@ done:
 
 static void dbg_pthread_check_init(void){
   pthread_mutex_lock(&dbg_locks_lk);
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
   if( dbg_locks==NULL ){
     dbg_locks = hash_setalloc_init(malloc, free, 0, sizeof(void *));
     if( dbg_locks==NULL ) abort();
     DBG_MORE_MEMORY(sizeof(hash_t*));
   }
+#endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
 
@@ -228,6 +241,7 @@ static void dbg_pthread_check_init(void){
 void dbg_pthread_term(void){
   dbg_pthread_dump(stdout, "before cleanup", 1);
   pthread_mutex_lock(&dbg_locks_lk);
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
   assert( dbg_locks_bytes<=dbg_locks_peak_bytes );
   if( dbg_locks==NULL ) goto done;
   hash_for(dbg_locks, dbg_pthread_free_outer_pair, NULL);
@@ -237,10 +251,14 @@ void dbg_pthread_term(void){
   dbg_locks = NULL;
   XCHANGE(gbl_debug_pthread_locks, 0);
 done:
+#endif
   pthread_mutex_unlock(&dbg_locks_lk);
   dbg_pthread_dump(stdout, "after cleanup", 1);
   pthread_mutex_lock(&dbg_locks_lk);
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
+  // ??? how can we guarantee this is 0 here????  we released the mutex
   assert( dbg_locks_bytes==0 );
+#endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
 
@@ -255,6 +273,7 @@ static void dbg_pthread_add_self(
   int line
 ){
   pthread_mutex_lock(&dbg_locks_lk);
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
   if( dbg_locks==NULL ) goto done;
   outer_pair_t *opair = hash_find(dbg_locks, &obj);
   if( opair==NULL ){
@@ -296,6 +315,7 @@ static void dbg_pthread_add_self(
     ipair->line = line;
   }
 done:
+#endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
 
@@ -309,6 +329,7 @@ static void dbg_pthread_remove_self(
   int line
 ){
   pthread_mutex_lock(&dbg_locks_lk);
+#if !defined(DBG_PTHREAD_LOCKS_LOCK_ONLY)
   if( dbg_locks==NULL ) goto done;
   outer_pair_t *opair = hash_find(dbg_locks, &obj);
   if( opair==NULL ) goto done;
@@ -337,6 +358,7 @@ static void dbg_pthread_remove_self(
     assert( ipair->nRef>0 );
   }
 done:
+#endif
   pthread_mutex_unlock(&dbg_locks_lk);
 }
 
