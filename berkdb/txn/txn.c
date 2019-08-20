@@ -1712,6 +1712,7 @@ __txn_isvalid(txnp, tdp, op)
 	/* Check for live cursors. */
 	if (txnp->cursors != 0) {
 		__db_err(mgrp->dbenv, "transaction has active cursors");
+        abort();
 		goto err;
 	}
 

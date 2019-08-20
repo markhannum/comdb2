@@ -1756,6 +1756,7 @@ struct cursor_track {
 
 struct __dbc {
 	DB *dbp;			/* Related DB access method. */
+	struct __dbc *alt;
 	DB_TXN	 *txn;			/* Associated transaction. */
 
 	/*

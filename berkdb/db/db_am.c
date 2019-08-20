@@ -13,6 +13,7 @@ static const char revid[] = "$Id: db_am.c,v 11.112 2003/09/13 19:23:42 bostic Ex
 
 #ifndef NO_SYSTEM_INCLUDES
 #include <sys/types.h>
+#include <logmsg.h>
 
 #include <string.h>
 #endif
@@ -47,27 +48,27 @@ extern int gbl_berk_track_cursors;
 extern int gbl_skip_cget_in_db_put;
 
 /*
- * __db_cursor_int --
+ * __db_cursor_alt_int --
  *	Internal routine to create a cursor.
  *
- * PUBLIC: int __db_cursor_int
- * PUBLIC:     __P((DB *, DB_TXN *, DBTYPE, db_pgno_t, int, u_int32_t, DBC **, u_int32_t));
+ * PUBLIC: int __db_cursor_alt_int
+ * PUBLIC:     __P((DB *, DB_TXN *, DBTYPE, db_pgno_t, int, u_int32_t, DBC **, DBC **, u_int32_t));
  */
 int
-__db_cursor_int(dbp, txn, dbtype, root, is_opd, lockerid, dbcp, flags)
+__db_cursor_alt_int(dbp, txn, dbtype, root, is_opd, lockerid, alt_dbcp, dbcp, flags)
 	DB *dbp;
 	DB_TXN *txn;
 	DBTYPE dbtype;
 	db_pgno_t root;
 	int is_opd;
 	u_int32_t lockerid;
-	DBC **dbcp;
+	DBC **alt_dbcp, **dbcp;
 	u_int32_t flags;
 {
 	DBC *dbc, *adbc;
 	DBC_INTERNAL *cp;
 	DB_ENV *dbenv;
-	int allocated, ret;
+	int allocated, ret, using_alt = 0;
 
 	dbenv = dbp->dbenv;
 	allocated = 0;
@@ -80,15 +81,21 @@ __db_cursor_int(dbp, txn, dbtype, root, is_opd, lockerid, dbcp, flags)
 	 * right type.  With off page dups we may have different kinds
 	 * of cursors on the queue for a single database.
 	 */
-	MUTEX_THREAD_LOCK(dbenv, dbp->free_mutexp);
-	for (dbc = TAILQ_FIRST(&dbp->free_queue);
-	    dbc != NULL; dbc = TAILQ_NEXT(dbc, links))
-		if (dbtype == dbc->dbtype) {
-			TAILQ_REMOVE(&dbp->free_queue, dbc, links);
-			F_CLR(dbc, ~DBC_OWN_LID);
-			break;
-		}
-	MUTEX_THREAD_UNLOCK(dbenv, dbp->free_mutexp);
+	if (alt_dbcp && (*alt_dbcp != NULL)) {
+		using_alt = 1;
+		dbc = *alt_dbcp;
+		logmsg(LOGMSG_ERROR, "%s line %d using alt cursor %p\n", __func__, __LINE__, (*alt_dbcp));
+	} else {
+		MUTEX_THREAD_LOCK(dbenv, dbp->free_mutexp);
+		for (dbc = TAILQ_FIRST(&dbp->free_queue);
+			dbc != NULL; dbc = TAILQ_NEXT(dbc, links))
+			if (dbtype == dbc->dbtype) {
+				TAILQ_REMOVE(&dbp->free_queue, dbc, links);
+				F_CLR(dbc, ~DBC_OWN_LID);
+				break;
+			}
+		MUTEX_THREAD_UNLOCK(dbenv, dbp->free_mutexp);
+	}
 
 	if (dbc == NULL) {
 		if ((ret = __os_calloc(dbenv, 1, sizeof(DBC), &dbc)) != 0)
@@ -281,6 +288,8 @@ __db_cursor_int(dbp, txn, dbtype, root, is_opd, lockerid, dbcp, flags)
 
 		dbc->locker = txn->txnid;
 		txn->cursors++;
+		logmsg(LOGMSG_ERROR, "%s line %d txn %p setting cursors to %d\n", __func__,
+				__LINE__, txn, txn->cursors);
 	}
 #if 0
 	ctrace("LL %d open %d\n", pthread_self(), dbc->locker);
@@ -334,6 +343,16 @@ __db_cursor_int(dbp, txn, dbtype, root, is_opd, lockerid, dbcp, flags)
 	MUTEX_THREAD_UNLOCK(dbenv, dbp->mutexp);
 
 	*dbcp = dbc;
+	if (alt_dbcp) {
+		if ((*alt_dbcp) == NULL) {
+			(*alt_dbcp) = dbc;
+			logmsg(LOGMSG_ERROR, "%s line %d setting alt cursor to %p\n",
+					__func__, __LINE__, *alt_dbcp);
+		} else {
+			assert((*alt_dbcp) == dbc);
+		}
+	}
+
 	return (0);
 
 err:	if (allocated)
@@ -341,6 +360,26 @@ err:	if (allocated)
 	return (ret);
 }
 
+/*
+ * __db_cursor_int --
+ *	Internal routine to create a cursor.
+ *
+ * PUBLIC: int __db_cursor_int
+ * PUBLIC:	 __P((DB *, DB_TXN *, DBTYPE, db_pgno_t, int, u_int32_t, DBC **, u_int32_t));
+ */
+int
+__db_cursor_int(dbp, txn, dbtype, root, is_opd, lockerid, dbcp, flags)
+	DB *dbp;
+	DB_TXN *txn;
+	DBTYPE dbtype;
+	db_pgno_t root;
+	int is_opd;
+	u_int32_t lockerid;
+	DBC **dbcp;
+	u_int32_t flags;
+{
+	return __db_cursor_alt_int(dbp, txn, dbtype, root, is_opd, lockerid, NULL, dbcp, flags);
+}
 
 
 int __db_c_close_ll __P((DBC *, int));

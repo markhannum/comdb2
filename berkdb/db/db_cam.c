@@ -67,10 +67,14 @@ static int __db_wrlock_err __P((DB_ENV *));
 	if (F_ISSET(dbc, DBC_WRITECURSOR))				\
 		(void)__lock_downgrade(					\
 		    (dbp)->dbenv, &(dbc)->mylock, DB_LOCK_IWRITE, 0);
+
+#define DB_C_CLOSE_KEEPACTIVE 1
+#define DB_C_CLOSE_NODECREMENT 2
+
 int
-__db_c_close_ll(dbc, countmein)
+__db_c_close_ll(dbc, flags)
 	DBC *dbc;
-	int countmein;
+	u_int32_t flags;
 {
 	DB *dbp;
 	DBC *opd;
@@ -116,16 +120,15 @@ __db_c_close_ll(dbc, countmein)
 	 * access specific cursor close routine, btree depends on having that
 	 * order of operations.
 	 */
-	MUTEX_THREAD_LOCK(dbenv, dbp->mutexp);
+	if (!LF_ISSET(DB_C_CLOSE_KEEPACTIVE)) {
+		MUTEX_THREAD_LOCK(dbenv, dbp->mutexp);
 
-	if (opd != NULL) {
-		F_CLR(opd, DBC_ACTIVE);
-		TAILQ_REMOVE(&dbp->active_queue, opd, links);
+		assert(opd == NULL);
+		F_CLR(dbc, DBC_ACTIVE);
+		TAILQ_REMOVE(&dbp->active_queue, dbc, links);
+
+		MUTEX_THREAD_UNLOCK(dbenv, dbp->mutexp);
 	}
-	F_CLR(dbc, DBC_ACTIVE);
-	TAILQ_REMOVE(&dbp->active_queue, dbc, links);
-
-	MUTEX_THREAD_UNLOCK(dbenv, dbp->mutexp);
 
 	/* Call the access specific cursor close routine. */
 	if ((t_ret =
@@ -151,23 +154,31 @@ __db_c_close_ll(dbc, countmein)
 
 		/* For safety's sake, since this is going on the free queue. */
 		memset(&dbc->mylock, 0, sizeof(dbc->mylock));
-		if (opd != NULL)
-			memset(&opd->mylock, 0, sizeof(opd->mylock));
+		assert(opd == NULL);
 	}
 
-	if (dbc->txn != NULL)
-		dbc->txn->cursors--;
+	if (dbc->txn) {
+		if (!LF_ISSET(DB_C_CLOSE_NODECREMENT)) {
+			dbc->txn->cursors--;
+			logmsg(LOGMSG_ERROR, "%s line %d decrementing txn %p cursors to %d\n",
+					__func__, __LINE__, dbc->txn, dbc->txn->cursors);
+		} else {
+			logmsg(LOGMSG_ERROR, "%s line %d NOT decrementing txn %p cursors, "
+					"it is %d\n", __func__, __LINE__, dbc->txn,
+					dbc->txn->cursors);
+		}
+	}
 
 	/* Move the cursor(s) to the free queue. */
-	MUTEX_THREAD_LOCK(dbenv, dbp->free_mutexp);
-	if (opd != NULL) {
-		if (dbc->txn != NULL)
-			dbc->txn->cursors--;
-		TAILQ_INSERT_TAIL(&dbp->free_queue, opd, links);
-		opd = NULL;
+	if (!LF_ISSET(DB_C_CLOSE_KEEPACTIVE)) {
+		logmsg(LOGMSG_ERROR, "%s line %d setting txn %p cursors to %d\n",
+				__func__, __LINE__, dbc->txn ? dbc->txn : 0,
+				dbc->txn ? dbc->txn->cursors : 0);
+		MUTEX_THREAD_LOCK(dbenv, dbp->free_mutexp);
+		assert(opd == NULL);
+		TAILQ_INSERT_TAIL(&dbp->free_queue, dbc, links);
+		MUTEX_THREAD_UNLOCK(dbenv, dbp->free_mutexp);
 	}
-	TAILQ_INSERT_TAIL(&dbp->free_queue, dbc, links);
-	MUTEX_THREAD_UNLOCK(dbenv, dbp->free_mutexp);
 
 	return (ret);
 }
@@ -182,7 +193,12 @@ int
 __db_c_close(dbc)
 	DBC *dbc;
 {
-	return __db_c_close_ll(dbc, 1);
+	if (dbc->alt) {
+		assert(dbc->alt->alt == NULL);
+		__db_c_close_ll(dbc->alt, DB_C_CLOSE_NODECREMENT);
+		dbc->alt = NULL;
+	}
+	return __db_c_close_ll(dbc, 0);
 }
 
 /*
@@ -503,7 +519,8 @@ int
 __db_c_close_nocount(dbc)
 	DBC *dbc;
 {
-	return __db_c_close_ll(dbc, 0);
+    /* This is not used */
+    abort();
 }
 
 /*
@@ -706,14 +723,16 @@ err:	if (dbc_n != NULL)
 }
 
 /*
- * __db_c_idup --
- *	Internal version of __db_c_dup.
+ * __db_c_alt_idup -- 
+ *  Use alternate version of cursor rather than hitting the free list
  *
- * PUBLIC: int __db_c_idup __P((DBC *, DBC **, u_int32_t));
+ * PUBLIC: int __db_c_alt_idup __P((DBC *, DBC **, DBC **, u_int32_t));
+ *
  */
+
 int
-__db_c_idup(dbc_orig, dbcp, flags)
-	DBC *dbc_orig, **dbcp;
+__db_c_alt_idup(dbc_orig, dbc_alt, dbcp, flags)
+	DBC *dbc_orig, **dbc_alt, **dbcp;
 	u_int32_t flags;
 {
 	DB *dbp;
@@ -725,10 +744,10 @@ __db_c_idup(dbc_orig, dbcp, flags)
 	dbc_n = *dbcp;
 
 	/* Pausible must be set before the cursor is on the active queue */
-	if ((ret = __db_cursor_int(dbp, dbc_orig->txn, dbc_orig->dbtype,
-	    dbc_orig->internal->root, F_ISSET(dbc_orig, DBC_OPD),
-	    dbc_orig->locker, &dbc_n,
-	    F_ISSET(dbc_orig, DBC_PAUSIBLE) ? DB_PAUSIBLE : 0)) != 0)
+	if ((ret = __db_cursor_alt_int(dbp, dbc_orig->txn, dbc_orig->dbtype,
+		dbc_orig->internal->root, F_ISSET(dbc_orig, DBC_OPD),
+		dbc_orig->locker, dbc_alt, &dbc_n,
+		F_ISSET(dbc_orig, DBC_PAUSIBLE) ? DB_PAUSIBLE : 0)) != 0)
 		return (ret);
 #if USE_BTPF
 	btpf_copy_dbc(dbc_orig, dbc_n);
@@ -817,6 +836,21 @@ __db_c_idup(dbc_orig, dbcp, flags)
 
 err:	(void)__db_c_close(dbc_n);
 	return (ret);
+}
+
+/*
+ * __db_c_idup --
+ *	Internal version of __db_c_dup.
+ *
+ * PUBLIC: int __db_c_idup __P((DBC *, DBC **, u_int32_t));
+ */
+
+int
+__db_c_idup(dbc_orig, dbcp, flags)
+	DBC *dbc_orig, **dbcp;
+	u_int32_t flags;
+{
+	return __db_c_alt_idup(dbc_orig, NULL, dbcp, flags);
 }
 
 /*
@@ -959,34 +993,7 @@ __db_c_get_dup(dbc_arg, dbc_dup, key, data, flags)
 	 */
 	cp = dbc_arg->internal;
 
-	if (cp->opd != NULL &&
-	    (flags == DB_CURRENT || flags == DB_GET_BOTHC ||
-	    flags == DB_NEXT || flags == DB_NEXT_DUP || flags == DB_PREV)) {
-		if (tmp_rmw && (ret = dbc_arg->c_am_writelock(dbc_arg)) != 0)
-			return (ret);
-		if ((ret = __db_c_idup(cp->opd, &opd, DB_POSITION)) != 0)
-			return (ret);
-
-		switch ((ret = opd->c_am_get(opd, key, data, flags, NULL))) {
-		case 0:
-			goto done;
-		case DB_NOTFOUND:
-			/*
-			 * Translate DB_NOTFOUND failures for the DB_NEXT and
-			 * DB_PREV operations into a subsequent operation on
-			 * the parent cursor.
-			 */
-			if (flags == DB_NEXT || flags == DB_PREV) {
-				if ((ret = __db_c_close(opd)) != 0)
-					goto err;
-				opd = NULL;
-				break;
-			}
-			goto err;
-		default:
-			goto err;
-		}
-	}
+    assert(cp->opd == NULL);
 
 	if (flags == DB_PREV_VALUE) {
 		flags = DB_PREV;
@@ -1027,7 +1034,12 @@ __db_c_get_dup(dbc_arg, dbc_dup, key, data, flags)
 	if (F_ISSET(dbc_arg, DBC_TRANSIENT))
 		dbc_n = dbc_arg;
 	else {
-		ret = __db_c_idup(dbc_arg, &dbc_n, tmp_flags);
+		if (dbc_dup == NULL) {
+			logmsg(LOGMSG_ERROR, "%s line %d using alt for %p alt is %p\n",
+					__func__, __LINE__, dbc_arg, &dbc_arg->alt);
+		}
+		ret = __db_c_alt_idup(dbc_arg, dbc_dup ? NULL : &dbc_arg->alt,
+				&dbc_n, tmp_flags);
 		if (tmp_dirty)
 			F_CLR(dbc_arg, DBC_DIRTY_READ);
 
@@ -1082,39 +1094,7 @@ __db_c_get_dup(dbc_arg, dbc_dup, key, data, flags)
 	 * We may be referencing a new off-page duplicates tree.  Acquire
 	 * a new cursor and call the underlying function.
 	 */
-	if (pgno != PGNO_INVALID) {
-		if ((ret = __db_c_newopd(dbc_arg,
-		    pgno, cp_n->opd, &cp_n->opd)) != 0)
-			goto err;
-
-		switch (flags) {
-		case DB_FIRST:
-		case DB_NEXT:
-		case DB_NEXT_NODUP:
-		case DB_SET:
-		case DB_SET_RECNO:
-		case DB_SET_RANGE:
-			tmp_flags = DB_FIRST;
-			break;
-		case DB_LAST:
-		case DB_PREV:
-		case DB_PREV_NODUP:
-			tmp_flags = DB_LAST;
-			break;
-		case DB_GET_BOTH:
-		case DB_GET_BOTHC:
-		case DB_GET_BOTH_RANGE:
-			tmp_flags = flags;
-			break;
-		default:
-			ret = __db_unknown_flag(dbp->dbenv, "__db_c_get", flags);
-			goto err;
-		}
-		if ((ret = cp_n->opd->c_am_get(
-		    cp_n->opd, key, data, tmp_flags, NULL)) != 0)
-			goto err;
-	}
-
+	assert (pgno == PGNO_INVALID);
 done:	/*
 	 * Return a key/data item.  The only exception is that we don't return
 	 * a key if the user already gave us one, that is, if the DB_SET flag
@@ -1129,53 +1109,20 @@ done:	/*
 	 * If not a Btree and DB_SET_RANGE is set, we shouldn't return a key
 	 * either, should we?
 	 */
-	cp_n = dbc_n == NULL ? dbc_arg->internal : dbc_n->internal;
+	assert(dbc_n != NULL);
+	cp_n = dbc_n->internal;
 	if (!F_ISSET(key, DB_DBT_ISSET)) {
 		if (cp_n->page == NULL && (ret =
-		    __memp_fget(mpf, &cp_n->pgno, 0, &cp_n->page)) != 0)
+			__memp_fget(mpf, &cp_n->pgno, 0, &cp_n->page)) != 0)
 			goto err;
 
 		if ((ret = __db_ret(dbp, cp_n->page, cp_n->indx,
-		    key, &dbc_arg->rkey->data, &dbc_arg->rkey->ulen)) != 0)
+			key, &dbc_arg->rkey->data, &dbc_arg->rkey->ulen)) != 0)
 			goto err;
 	}
 	if (multi != 0) {
-		/*
-		 * Even if fetching from the OPD cursor we need a duplicate
-		 * primary cursor if we are going after multiple keys.
-		 */
-		if (dbc_n == NULL) {
-			/*
-			 * Non-"_KEY" DB_MULTIPLE doesn't move the main cursor,
-			 * so it's safe to just use dbc_arg, unless dbc_arg
-			 * has an open OPD cursor whose state might need to
-			 * be preserved.
-			 */
-			if ((!(multi & DB_MULTIPLE_KEY) &&
-			    dbc_arg->internal->opd == NULL) ||
-			    F_ISSET(dbc_arg, DBC_TRANSIENT))
-				dbc_n = dbc_arg;
-			else {
-				if ((ret = __db_c_idup(dbc_arg, &dbc_n, DB_POSITION)) != 0)
-					goto err;
-				if ((ret = dbc_n->c_am_get(dbc_n,
-				    key, data, DB_CURRENT, &pgno)) != 0)
-					goto err;
-			}
-			cp_n = dbc_n->internal;
-		}
-
-		/*
-		 * If opd is set then we dupped the opd that we came in with.
-		 * When we return we may have a new opd if we went to another
-		 * key.
-		 */
-		if (opd != NULL) {
-			DB_ASSERT(cp_n->opd == NULL);
-			cp_n->opd = opd;
-			opd = NULL;
-		}
-
+		assert(dbc_n != NULL);
+		assert(opd == NULL);
 		/*
 		 * Bulk get doesn't use __db_retcopy, so data.size won't
 		 * get set up unless there is an error.  Assume success
@@ -1186,11 +1133,13 @@ done:	/*
 		data->size = data->ulen;
 		ret = dbc_n->c_am_bulk(dbc_n, data, flags | multi);
 	} else if (!F_ISSET(data, DB_DBT_ISSET)) {
-		dbc = opd != NULL ? opd : cp_n->opd != NULL ? cp_n->opd : dbc_n;
+		assert(opd == NULL);
+		assert(cp_n->opd == NULL);
+		dbc = dbc_n;
 		type = TYPE(dbc->internal->page);
 		ret = __db_ret(dbp, dbc->internal->page, dbc->internal->indx +
-		    (type == P_LBTREE || type == P_HASH ? O_INDX : 0),
-		    data, &dbc_arg->rdata->data, &dbc_arg->rdata->ulen);
+			(type == P_LBTREE || type == P_HASH ? O_INDX : 0),
+			data, &dbc_arg->rdata->data, &dbc_arg->rdata->ulen);
 	}
 
 err:	/* Don't pass DB_DBT_ISSET back to application level, error or no. */
@@ -1198,12 +1147,7 @@ err:	/* Don't pass DB_DBT_ISSET back to application level, error or no. */
 	F_CLR(data, DB_DBT_ISSET);
 
 	/* Cleanup and cursor resolution. */
-	if (opd != NULL) {
-		if ((t_ret = __db_c_cleanup(
-		    dbc_arg->internal->opd, opd, ret)) != 0 && ret == 0)
-			ret = t_ret;
-
-	}
+	assert(opd == NULL);
 
 	/* Keep cursor around if user requested it */
 	if (dbc_dup && !ret) {
@@ -1874,7 +1818,6 @@ __db_c_cleanup(dbc, dbc_n, failed)
 	int failed;
 {
 	DB *dbp;
-	DBC *opd;
 	DBC_INTERNAL *internal;
 	DB_MPOOLFILE *mpf;
 	int ret, t_ret;
@@ -1891,13 +1834,7 @@ __db_c_cleanup(dbc, dbc_n, failed)
 			ret = t_ret;
 		internal->page = NULL;
 	}
-	opd = internal->opd;
-	if (opd != NULL && opd->internal->page != NULL) {
-		if ((t_ret =
-		    __memp_fput(mpf, opd->internal->page, 0)) != 0 && ret == 0)
-			ret = t_ret;
-		opd->internal->page = NULL;
-	}
+    assert(internal->opd == NULL);
 
 	/*
 	 * If dbc_n is NULL, there's no internal cursor swapping to be done
@@ -1922,13 +1859,7 @@ __db_c_cleanup(dbc, dbc_n, failed)
 			ret = t_ret;
 		dbc_n->internal->page = NULL;
 	}
-	opd = dbc_n->internal->opd;
-	if (opd != NULL && opd->internal->page != NULL) {
-		if ((t_ret =
-		    __memp_fput(mpf, opd->internal->page, 0)) != 0 && ret == 0)
-			ret = t_ret;
-		opd->internal->page = NULL;
-	}
+    assert(dbc_n->internal->opd == NULL);
 
 	/*
 	 * If we didn't fail before entering this routine or just now when
@@ -1960,7 +1891,11 @@ __db_c_cleanup(dbc, dbc_n, failed)
 	 * We might want to consider adding a flag to the cursor, so that any
 	 * subsequent operations other than close just return an error?
 	 */
-	if ((t_ret = __db_c_close(dbc_n)) != 0 && ret == 0)
+	u_int32_t flags = 0;
+	if (dbc->alt && dbc_n == dbc->alt) {
+		flags = DB_C_CLOSE_KEEPACTIVE; 
+	}
+	if ((t_ret = __db_c_close_ll(dbc_n, flags)) != 0 && ret == 0)
 		ret = t_ret;
 
 	return (ret);
