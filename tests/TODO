@@ -77,6 +77,7 @@ killcluster.test
 register_linearizable.test
 sigstopcluster.test
 cinsert_linearizable.test
+incoherent_dc.test
 netloss.test              -- does not pass most of the time; requires kernel 4.x & docker 17.x
 phys_rep.test
 <END>

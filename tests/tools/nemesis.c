@@ -41,7 +41,7 @@ static int setcluster(struct nemesis *n, char *dbname, char *cltype,
         rc = cdb2_next_record(db);
     } while (rc == CDB2_OK);
 
-    cdb2_cluster_info(db, n->cluster, n->ports, MAXCL, &n->numnodes);
+    cdb2_cluster_info(db, n->cluster, n->ports, NULL, MAXCL, &n->numnodes);
     cdb2_close(db);
 
     n->master = master(n->dbname, n->cltype);

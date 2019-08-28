@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+dbnm=$1
+
+set -e
+
+# This test intends to reproduce the sockpool bug which occurred when all nodes
+# in the same datacenter go incoherent.
+# Borrowed from allow_incoherent_sql heavily
+
+# Get machines in the same datacenter
+machs=`cdb2sql --tabs ${CDB2_OPTIONS} $dbnm default 'select 1' 2>&1 >/dev/null`
+mcount=$(echo "$machs" | wc -l)
+dccount=$(echo "$machs" | egrep "same-dc:Y" | wc -l)
+
+if [[ "$dccount" == 0 || "$dccount" == "$mcount" ]]; then
+    echo "Incorrect test setup"
+    echo "Test requires cluster to span two datacenters, and client should be in one of those datacenters"
+    exit 1
+fi
+
+# Force a replicant to go incoherent
+master=`cdb2sql --tabs ${CDB2_OPTIONS} $dbnm default 'exec procedure sys.cmd.send("bdb cluster")' | grep MASTER | awk '{print $1}' | cut -d':' -f1`
+
+dcmachs=$(echo "$machs" | egrep "same-dc:Y" | awk '{print $1}' | while read x ; do echo ${x#*:} ; done)
+for host in $dcmachs ; do
+    cdb2sql $dbnm --host $host 'exec procedure sys.cmd.send("on rep_delay")'
+done
+
+cdb2sql $dbnm --host $master 'exec procedure sys.cmd.send("pushnext")'
+
+set +e
+dc_incoh=0
+for i in `seq 1 60`; do
+    count_incoh=0
+    x=$(cdb2sql $dbnm --host $master 'exec procedure sys.cmd.send("bdb cluster")' | egrep -i "incoherent|master")
+    for host in $dcmachs ; do
+        echo "$x" | egrep $host >/dev/null 2>&1
+        [[ $? == 0 ]] && let count_incoh=count_incoh+1
+    done
+    if [ "$count_incoh" == "$dccount" ]; then
+        dc_incoh=1
+        break
+    fi
+    sleep 1
+done
+
+if [[ $dc_incoh != "1" ]]; then
+    echo 'Took too long to go incoherent!' >&2
+    exit 1
+fi
+
+
+#set -e
+
+# All of our own datacenter hosts should be incoherent: verify that this
+# works, and selects a host in a different datacenter
+newhost=$(cdb2sql --tabs ${CDB2_OPTIONS} $dbnm default 'select comdb2_host()')
+if [[ $? != 0 ]]; then
+    echo "Couldn't contact database hosts in other dc"
+    exit 1
+fi
+
+# Fail if this isn't the other datacenter as we didn't actually run the test
+egrep $newhost "$dcmachs" >/dev/null 2>&1
+if [[ $? == 0 ]]; then
+    echo "Contacted a machine in my own dc which should be incoherent"
+    exit 1
+fi
+
+echo "Success!"
+return 0

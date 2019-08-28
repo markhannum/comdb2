@@ -61,6 +61,7 @@ enum {
 };
 
 static int show_ports = 0;
+static int cluster_info = 0;
 static int debug_trace = 0;
 static int pausemode = 0;
 static int printmode = DISP_CLASSIC;
@@ -1252,6 +1253,20 @@ static int run_statement(const char *sql, int ntypes, int *types,
         if (show_ports) {
             cdb2_dump_ports(cdb2h, stderr);
         }
+#define MAXCL 64
+        if (cluster_info) {
+            char **cluster = (char **)malloc(sizeof(char *) * MAXCL);
+            int *ports = (int *)malloc(sizeof(int) * MAXCL);
+            int sameroom = 0, clcount = 0;
+            cdb2_cluster_info(cdb2h, cluster, ports, &sameroom, MAXCL,
+                    &clcount);
+            for (int i = 0; i < clcount; i++) {
+                fprintf(stderr,"machine:%s port:%d same-dc:%s\n", cluster[i],
+                        ports[i], (i < sameroom) ? "Y" : "N");
+            }
+            free(cluster);
+            free(ports);
+        }
         if (docost) {
             rc = cdb2_run_statement(cdb2h, "set getcost on");
             if (rc) {
@@ -1645,6 +1660,7 @@ int main(int argc, char *argv[])
         {"strblobs", no_argument, &string_blobs, 1},
         {"debugtrace", no_argument, &debug_trace, 1},
         {"showports", no_argument, &show_ports, 1},
+        {"cluster_info", no_argument, &cluster_info, 1},
         {"showeffects", no_argument, &show_effects, 1},
         {"cost", no_argument, &docost, 1},
         {"exponent", no_argument, &exponent, 1},
