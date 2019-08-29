@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
 
+set -x
 dbnm=$1
+
+echo '
+comdb2_config:room:myroom
+' >>$DBDIR/comdb2db.cfg
 
 set -e
 
@@ -9,12 +14,16 @@ set -e
 # in the same datacenter go incoherent.
 # Borrowed from allow_incoherent_sql heavily
 
-# Get machines in the same datacenter
-machs=`cdb2sql --tabs ${CDB2_OPTIONS} $dbnm default 'select 1' 2>&1 >/dev/null`
-mcount=$(echo "$machs" | wc -l)
+# Get machines
+inmachs=`cdb2sql --cluster_info -tabs ${CDB2_OPTIONS} $dbnm default 'select 1' 2>&1 >/dev/null`
+machs=$(echo "$inmachs" | awk '{print $1}' | while read x ; do echo ${x#*:} ; done)
+mcount=$(echo "$inmachs" | wc -l)
+samedc=$(( mcount / 2 ))
+custom_cfg_string=$(echo @$(j=0 ; for x in $machs; do if [[ $j > 0 ]]; then echo -n "," ; fi ; if [[ $j < $samedc ]]; then echo -n "$x:dc=myroom" ; else echo -n "$x:dc=other" ; fi  ; let j=j+1 ; done))
+machs=`cdb2sql --cluster_info -tabs ${CDB2_OPTIONS} $dbnm $custom_cfg_string 'select 1' 2>&1 >/dev/null`
 dccount=$(echo "$machs" | egrep "same-dc:Y" | wc -l)
 
-if [[ "$dccount" == 0 || "$dccount" == "$mcount" ]]; then
+if [[ "$dccount" == 0 || "$dccount" == "$mcount" || $dccount != $samedc ]]; then
     echo "Incorrect test setup"
     echo "Test requires cluster to span two datacenters, and client should be in one of those datacenters"
     exit 1
@@ -56,7 +65,7 @@ fi
 
 # All of our own datacenter hosts should be incoherent: verify that this
 # works, and selects a host in a different datacenter
-newhost=$(cdb2sql --tabs ${CDB2_OPTIONS} $dbnm default 'select comdb2_host()')
+newhost=$(cdb2sql --tabs ${CDB2_OPTIONS} $dbnm $custom_cfg_string 'select comdb2_host()')
 if [[ $? != 0 ]]; then
     echo "Couldn't contact database hosts in other dc"
     exit 1
@@ -70,4 +79,3 @@ if [[ $? == 0 ]]; then
 fi
 
 echo "Success!"
-return 0

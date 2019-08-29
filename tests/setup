@@ -180,7 +180,12 @@ setup_db() {
 
     # Configure client SSL
     echo "comdb2_config:ssl_cert_path=$TESTDIR" >>$CDB2_CONFIG
-    echo "comdb2_config:allow_pmux_route:true" >> $CDB2_CONFIG
+
+    if [[ -n "$DISABLE_PMUX_ROUTE" ]] ; then
+        echo "comdb2_config:allow_pmux_route:false" >> $CDB2_CONFIG
+    else
+        echo "comdb2_config:allow_pmux_route:true" >> $CDB2_CONFIG
+    fi
 
     set +e
 

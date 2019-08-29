@@ -1,3 +1,4 @@
+DISABLE_PMUX_ROUTE=1
 ifeq ($(TESTSROOTDIR),)
   include ../testcase.mk
 else
