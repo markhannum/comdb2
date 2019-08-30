@@ -1257,12 +1257,13 @@ static int run_statement(const char *sql, int ntypes, int *types,
         if (cluster_info) {
             char **cluster = (char **)malloc(sizeof(char *) * MAXCL);
             int *ports = (int *)malloc(sizeof(int) * MAXCL);
-            int sameroom = 0, clcount = 0;
+            int sameroom = 0, clcount = 0, master = -1;
             cdb2_cluster_info(cdb2h, cluster, ports, &sameroom, MAXCL,
-                    &clcount);
+                    &master, &clcount);
             for (int i = 0; i < clcount; i++) {
-                fprintf(stderr,"machine:%s port:%d same-dc:%s\n", cluster[i],
-                        ports[i], (i < sameroom) ? "Y" : "N");
+                fprintf(stderr,"machine:%s port:%d same-dc:%s master:%s\n",
+                        cluster[i], ports[i], (i < sameroom) ? "Y" : "N",
+                        (master == i) ? "Y" : "N");
             }
             free(cluster);
             free(ports);

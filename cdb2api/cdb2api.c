@@ -4881,7 +4881,7 @@ void cdb2_dump_ports(cdb2_hndl_tp *hndl, FILE *out)
 }
 
 void cdb2_cluster_info(cdb2_hndl_tp *hndl, char **cluster, int *ports,
-        int *sameroom, int max, int *count)
+        int *sameroom, int max, int *master, int *count)
 {
     int i, target;
     if (count)
@@ -4896,6 +4896,9 @@ void cdb2_cluster_info(cdb2_hndl_tp *hndl, char **cluster, int *ports,
     }
     if (sameroom) {
         (*sameroom) = hndl->num_hosts_sameroom;
+    }
+    if (master) {
+        (*master) = hndl->master;
     }
 }
 

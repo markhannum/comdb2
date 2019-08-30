@@ -217,7 +217,7 @@ const char *cdb2_cnonce(cdb2_hndl_tp *hndl);
 void cdb2_set_debug_trace(cdb2_hndl_tp *hndl);
 void cdb2_dump_ports(cdb2_hndl_tp *hndl, FILE *out);
 void cdb2_cluster_info(cdb2_hndl_tp *hndl, char **cluster, int *ports,
-        int *sameroom, int max, int *count);
+        int *sameroom, int max, int *master, int *count);
 int cdb2_snapshot_file(cdb2_hndl_tp *hndl, int *file, int *offset);
 void cdb2_getinfo(cdb2_hndl_tp *hndl, int *intrans, int *hasql);
 void cdb2_set_max_retries(int max_retries);

@@ -1322,7 +1322,7 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
 
         char *hosts[32];
         int count;
-        cdb2_cluster_info(hndl, hosts, NULL, NULL, 32, &count);
+        cdb2_cluster_info(hndl, hosts, NULL, NULL, 32, NULL, &count);
         count = (count < 32 ? count : 32);
         for (ii = 0; ii < count; ii++) {
             if (add_replicant_host(hosts[ii], dbname, 0) != 0) {

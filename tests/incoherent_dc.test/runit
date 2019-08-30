@@ -14,12 +14,13 @@ set -e
 # in the same datacenter go incoherent.
 # Borrowed from allow_incoherent_sql heavily
 
-# Get machines
-inmachs=`cdb2sql --cluster_info -tabs ${CDB2_OPTIONS} $dbnm default 'select 1' 2>&1 >/dev/null`
+# Get machines - this intentionally lists master last
+inmachs=`cdb2sql --cluster_info -tabs ${CDB2_OPTIONS} $dbnm default 'select 1' 2>&1 >/dev/null | sort -k 4,4`
 machs=$(echo "$inmachs" | awk '{print $1}' | while read x ; do echo ${x#*:} ; done)
 mcount=$(echo "$inmachs" | wc -l)
 samedc=$(( mcount / 2 ))
-custom_cfg_string=$(echo @$(j=0 ; for x in $machs; do if [[ $j > 0 ]]; then echo -n "," ; fi ; if [[ $j < $samedc ]]; then echo -n "$x:dc=myroom" ; else echo -n "$x:dc=other" ; fi  ; let j=j+1 ; done))
+custom_cfg_string=$(echo @$(j=0 ; for x in $machs; do if [[ $j > 0 ]]; then echo -n "," ; fi ; if [[ $j < $samedc ]]; then echo -n "$x:dc=myroom" ; else echo -n "$x:dc=other" ; fi ; let j=j+1 ; done))
+echo "custom_cfg_string is $custom_cfg_string"
 machs=`cdb2sql --cluster_info -tabs ${CDB2_OPTIONS} $dbnm $custom_cfg_string 'select 1' 2>&1 >/dev/null`
 dccount=$(echo "$machs" | egrep "same-dc:Y" | wc -l)
 
