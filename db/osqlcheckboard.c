@@ -156,6 +156,8 @@ retry:
             Pthread_rwlock_unlock(&checkboard->rwlock);
             if (retry < 60) /* 60*500 = 30 seconds */
             {
+                logmsg(LOGMSG_WARN, "Polling func %s line %d\n", __func__,
+                        __LINE__);
                 poll(NULL, 0, 500);
                 retry++;
                 goto retry;
