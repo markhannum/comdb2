@@ -5,7 +5,6 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/ddl.sh
 
 export debug=1
-export loadrecs=1000000
 
 [[ $debug == "1" ]] && set -x
 
@@ -24,15 +23,11 @@ function bulk_insert_records
     [[ $debug == "1" ]] && set -x
     typeset func="bulk_insert_records"
     write_prompt $func "Running $func"
+    typeset count=${1:-10000}
     j=0
-    while [[ $cnt -gt 0 ]]; do
-        if [[ $cnt -lt $chunk ]]; then
-            amt=$cnt
-        else
-            amt=$chunk
-        fi
-        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into $table select * from generate_series(1, $amt)" >/dev/null
-        let cnt=$(( cnt - amt ))
+    while [[ $j -lt $count ]]; do
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into sessions_index (applicationId,key,sessionIds,occToken) values (\"$j\",\"$j\",\"$j\",\"$j\")"
+        let j=j+1
     done
 }
 
@@ -40,10 +35,24 @@ function setup
 {
     [[ $debug == "1" ]] && set -x
     typeset func="setup"
-    typeset table=${1:-sessions_index}
     write_prompt $func "Running $func"
-    drop_table $table
-    $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "create table $table { `cat sessions_index.csc2 ` }"
+    drop_table sessions_index
+    $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "create table sessions_index { `cat sessions_index.csc2` }"
+}
+
+function updater_thread
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="updater_thread"
+    write_prompt $func "Running $func"
+    typeset iterations=${1:-100000}
+    typeset thresholdms=${1:-400}
+    typeset updater=${TESTSBUILDDIR}/updater
+    $updater -d $DBNAME -i $iterations -t $thresholdms -c $CDB2_CONFIG
+    r=$?
+    if [[ $r != 0 ]]; then
+        failexit "Updater failed"
+    fi
 }
 
 function run_test
@@ -51,7 +60,14 @@ function run_test
     [[ $debug == "1" ]] && set -x
     typeset func="run_test"
     write_prompt $func "Running $func"
+    typeset updaters=3
     bulk_insert_records
+    i=0
+    while [[ $i -lt $updaters ]]; do
+        updater_thread &
+        let i=i+1
+    done
+    wait
 }
 
 setup

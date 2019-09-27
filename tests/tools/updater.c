@@ -2,30 +2,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <cdb2api.h>
-#include <db.h>
-#include <dbutil.h>
 #include <malloc.h>
 #include <errno.h>
+#include <time.h>
+#include <inttypes.h>
 #include "testutil.h"
 
 static char *argv0=NULL;
-
-#if 0
-(tablename='sessions_index', columnname='applicationid', type='cstring', size=30, sqltype='char(29)', varinlinesize=NULL, defaultvalue=NULL, dbload=NULL, isnullable='N')
-(tablename='sessions_index', columnname='key', type='cstring', size=128, sqltype='char(127)', varinlinesize=NULL, defaultvalue=NULL, dbload=NULL, isnullable='N')
-(tablename='sessions_index', columnname='sessionids', type='vutf8', size=5, sqltype='varchar', varinlinesize='0', defaultvalue=NULL, dbload=NULL, isnullable='N')
-(tablename='sessions_index', columnname='occtoken', type='byte', size=17, sqltype='blob(16)', varinlinesize=NULL, defaultvalue=NULL, dbload=NULL, isnullable='N')
-
-We are trying to understand this:
-
-09/26 14:55:28: LONG REQUEST 502 msec for fingerprint babc2fdef0ee836dbca6f003b16eea5f from rillnydsessi02 rc 0
-09/26 14:55:28:     table sessions_index finds 2 next/prev 0
-09/26 14:55:28:     index 0 on table sessions_index finds 1 next/prev 0
-09/26 14:55:28:   ncols=1, queuetime took 0ms
-09/26 14:55:28:   sql=UPDATE sessions_index SET sessionIds = @sessionIds, occToken = @newToken WHERE applicationId = @appId AND key = @key AND occToken = @oldToken;
-09/26 14:55:28:   cost=30.000000
-
-#endif
 
 #define APPIDSZ 30
 #define KEYSZ 128
@@ -170,11 +153,13 @@ void update(int iterations, int thresholdms)
         }
         end = timems();
         if ((end - start) > thresholdms) {
-            fprintf(stderr, "%u request iteration %lld took %lldms start-interval was %lldms, end-interval was %lldms\n",
+            fprintf(stderr, "%u request iteration %"PRId64" took %"PRId64"ms start-interval was %"PRId64
+                    "ms, end-interval was %"PRId64"ms\n",
                     (uint32_t)getpid(), i, (end - start), (mid - start), (end - mid));
+            exit(1);
         }
         if (print_interval > 0 && !(i % print_interval)) {
-            fprintf(stderr, "Completed %lld updates\n", i);
+            fprintf(stderr, "Completed %"PRId64" updates\n", i);
         }
     }
 
@@ -222,6 +207,7 @@ int main(int argc,char *argv[])
     print_node();
     populate();
     update(iterations, thresholdms);
+    return 0;
 }
 
 
