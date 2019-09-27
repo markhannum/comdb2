@@ -26,6 +26,7 @@ struct index_rec {
 struct index_rec *rec_array = NULL;
 int rec_alloc = 0;
 int rec_index = 0;
+int prthresholdms = 100;
 int print_interval = 1000;
 char *stage = "default";
 
@@ -55,7 +56,8 @@ void usage(FILE *f)
     fprintf(stderr, " -d <dbname>           - dbname\n");
     fprintf(stderr, " -c <config>           - config\n");
     fprintf(stderr, " -i <iterations>       - iterations\n");
-    fprintf(stderr, " -t <threashold-ms>    - print-threshold\n");
+    fprintf(stderr, " -t <threashold-ms>    - fail-threshold\n");
+    fprintf(stderr, " -P <threashold-ms>    - print-threshold\n");
     fprintf(stderr, " -s <stage>            - stage\n");
     fprintf(stderr, " -p <print-interval>   - print interval\n");
     fprintf(stderr, " -h                    - help\n");
@@ -152,6 +154,11 @@ void update(int iterations, int thresholdms)
             exit(1);
         }
         end = timems();
+        if ((end - start) > prthresholdms) {
+            fprintf(stderr, "%u request iteration %"PRId64" took %"PRId64"ms start-interval was %"PRId64
+                    "ms, end-interval was %"PRId64"ms\n",
+                    (uint32_t)getpid(), i, (end - start), (mid - start), (end - mid));
+	}
         if ((end - start) > thresholdms) {
             fprintf(stderr, "%u request iteration %"PRId64" took %"PRId64"ms start-interval was %"PRId64
                     "ms, end-interval was %"PRId64"ms\n",
@@ -174,13 +181,16 @@ int main(int argc,char *argv[])
     setvbuf(stderr, NULL, _IOLBF, 0);
     srand(time(NULL) ^ getpid());
 
-    while ((c = getopt(argc, argv, "hd:c:i:p:s:t:"))!=EOF) {
+    while ((c = getopt(argc, argv, "hd:c:i:p:s:t:P:"))!=EOF) {
         switch(c) {
             case 'd':
                 dbname = optarg;
                 break;
             case 'i':
                 iterations = atoi(optarg);
+                break;
+            case 'P':
+                prthresholdms = atoi(optarg);
                 break;
             case 't':
                 thresholdms = atoi(optarg);
