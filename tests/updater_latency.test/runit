@@ -4,7 +4,7 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/write_prompt.sh
 . ${TESTSROOTDIR}/tools/ddl.sh
 
-export debug=1
+#export debug=1
 
 [[ $debug == "1" ]] && set -x
 
@@ -26,7 +26,7 @@ function bulk_insert_records
     typeset count=${1:-10000}
     j=0
     while [[ $j -lt $count ]]; do
-        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into sessions_index (applicationId,key,sessionIds,occToken) values (\"$j\",\"$j\",\"$j\",\"$j\")"
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into sessions_index (applicationId,key,sessionIds,occToken) values (\"$j\",\"$j\",\"$j\",x'babababababababababababababababa')"
         let j=j+1
     done
 }
@@ -45,10 +45,11 @@ function updater_thread
     [[ $debug == "1" ]] && set -x
     typeset func="updater_thread"
     write_prompt $func "Running $func"
-    typeset iterations=${1:-100000}
-    typeset thresholdms=${1:-400}
+    typeset thd=${1}
+    typeset iterations=${2:-100000}
+    typeset thresholdms=${3:-300}
     typeset updater=${TESTSBUILDDIR}/updater
-    $updater -d $DBNAME -i $iterations -t $thresholdms -c $CDB2_CONFIG
+    $updater -d $DBNAME -i $iterations -t $thresholdms -c $CDB2_CONFIG 2>&1 | gawk "{print \"[$func-$thd]\", \$0; fflush(); }"
     r=$?
     if [[ $r != 0 ]]; then
         failexit "Updater failed"
@@ -64,7 +65,7 @@ function run_test
     bulk_insert_records
     i=0
     while [[ $i -lt $updaters ]]; do
-        updater_thread &
+        updater_thread $i &
         let i=i+1
     done
     wait
