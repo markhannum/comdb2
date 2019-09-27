@@ -5,6 +5,7 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/ddl.sh
 
 #export debug=1
+export fail_file=./updater_failed.txt
 
 [[ $debug == "1" ]] && set -x
 
@@ -26,7 +27,7 @@ function bulk_insert_records
     typeset count=${1:-10000}
     j=0
     while [[ $j -lt $count ]]; do
-        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into sessions_index (applicationId,key,sessionIds,occToken) values (\"$j\",\"$j\",\"$j\",x'babababababababababababababababa')"
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into sessions_index (applicationId,key,sessionIds,occToken) values (\"$j\",\"$j\",\"$j\",x'babababababababababababababababa')" >/dev/null 2>&1
         let j=j+1
     done
 }
@@ -53,6 +54,7 @@ function updater_thread
     r=$?
     if [[ $r != 0 ]]; then
         failexit "Updater failed"
+        touch $fail_file
     fi
 }
 
@@ -64,11 +66,15 @@ function run_test
     typeset updaters=3
     bulk_insert_records
     i=0
+    rm -f $fail_file
     while [[ $i -lt $updaters ]]; do
         updater_thread $i &
         let i=i+1
     done
     wait
+    if [[ -f "$fail_file" ]]; then
+        failexit "Updater failed"
+    fi
 }
 
 setup
