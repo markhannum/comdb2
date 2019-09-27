@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+
+export debug=1
+export loadrecs=1000000
+
+[[ $debug == "1" ]] && set -x
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="failexit"
+    write_prompt $func "Running $func"
+    typeset f=$1
+    write_prompt $func "$f failed: $2"
+    exit -1
+}
+
+function bulk_insert_records
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="bulk_insert_records"
+    write_prompt $func "Running $func"
+    j=0
+    while [[ $cnt -gt 0 ]]; do
+        if [[ $cnt -lt $chunk ]]; then
+            amt=$cnt
+        else
+            amt=$chunk
+        fi
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into $table select * from generate_series(1, $amt)" >/dev/null
+        let cnt=$(( cnt - amt ))
+    done
+}
+
+function setup
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="setup"
+    typeset table=${1:-sessions_index}
+    write_prompt $func "Running $func"
+    drop_table $table
+    $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "create table $table { `cat sessions_index.csc2 ` }"
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    write_prompt $func "Running $func"
+    bulk_insert_records
+}
+
+setup
+run_test
+echo "Success"
