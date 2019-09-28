@@ -20,7 +20,7 @@ nins=0
 function failexit
 {
     echo "Failed $1"
-    exit -1
+    exit 1
 }
 
 function assertcnt 
@@ -118,3 +118,4 @@ if [ $d -ne $((5-2+1)) ] ; then
     failexit "allrows3.txt allrows4.txt should differ by $((5-2+1)) rows not $d"
 fi
 echo "Success"
+echo 0

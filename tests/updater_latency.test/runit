@@ -16,7 +16,7 @@ function failexit
     write_prompt $func "Running $func"
     typeset f=$1
     write_prompt $func "$f failed: $2"
-    exit -1
+    exit 1
 }
 
 function bulk_insert_records
@@ -53,7 +53,6 @@ function updater_thread
     $updater -d $DBNAME -i $iterations -t $thresholdms -c $CDB2_CONFIG 2>&1 | gawk "{print \"[$func-$thd]\", \$0; fflush(); }"
     r=$?
     if [[ $r != 0 ]]; then
-        failexit "Updater failed"
         touch $fail_file
     fi
 }
