@@ -154,17 +154,16 @@ void update(int iterations, int thresholdms)
             exit(1);
         }
         end = timems();
-        if ((end - start) > prthresholdms) {
-            fprintf(stderr, "%u request iteration %"PRId64" took %"PRId64"ms start-interval was %"PRId64
-                    "ms, end-interval was %"PRId64"ms\n",
-                    (uint32_t)getpid(), i, (end - start), (mid - start), (end - mid));
-	}
-        if ((end - start) > thresholdms) {
+	if ((end - start) > thresholdms) {
             fprintf(stderr, "%u request iteration %"PRId64" took %"PRId64"ms start-interval was %"PRId64
                     "ms, end-interval was %"PRId64"ms\n",
                     (uint32_t)getpid(), i, (end - start), (mid - start), (end - mid));
             exit(1);
-        }
+        } else if ((end - start) > prthresholdms) {
+            fprintf(stderr, "%u request iteration %"PRId64" took %"PRId64"ms start-interval was %"PRId64
+                    "ms, end-interval was %"PRId64"ms\n",
+                    (uint32_t)getpid(), i, (end - start), (mid - start), (end - mid));
+	}
         if (print_interval > 0 && !(i % print_interval)) {
             fprintf(stderr, "Completed %"PRId64" updates\n", i);
         }

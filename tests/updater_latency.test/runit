@@ -4,7 +4,7 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/write_prompt.sh
 . ${TESTSROOTDIR}/tools/ddl.sh
 
-#export debug=1
+export debug=1
 export fail_file=./updater_failed.txt
 
 [[ $debug == "1" ]] && set -x
@@ -51,7 +51,7 @@ function updater_thread
     typeset thresholdms=${3:-300}
     typeset updater=${TESTSBUILDDIR}/updater
     $updater -d $DBNAME -i $iterations -t $thresholdms -c $CDB2_CONFIG 2>&1 | gawk "{print \"[$func-$thd]\", \$0; fflush(); }"
-    r=$?
+    r=${PIPESTATUS[0]}
     if [[ $r != 0 ]]; then
         touch $fail_file
     fi
