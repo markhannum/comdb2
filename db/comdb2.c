@@ -613,7 +613,7 @@ int verbose_deadlocks = 0;
 int gbl_early = 1;
 int gbl_reallyearly = 0;
 
-int gbl_udp = 1;
+int gbl_udp = 0;
 
 int gbl_berkdb_verify_skip_skipables = 0;
 

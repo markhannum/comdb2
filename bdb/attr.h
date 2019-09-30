@@ -561,7 +561,7 @@ DEF_ATTR(COHERENCY_LEASE, coherency_lease, MSECS, 500,
          "this many ms.")
 DEF_ATTR(ADDITIONAL_DEFERMS, additional_deferms, MSECS, 0,
          "Wait-fudge to ensure that a replicant has gone incoherent.")
-DEF_ATTR(COHERENCY_LEASE_UDP, coherency_lease_udp, BOOLEAN, 1,
+DEF_ATTR(COHERENCY_LEASE_UDP, coherency_lease_udp, BOOLEAN, 0,
          "Use udp to issue leases.")
 DEF_ATTR(LEASE_RENEW_INTERVAL, lease_renew_interval, MSECS, 200,
          "How often we renew leases.")
