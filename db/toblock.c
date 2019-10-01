@@ -2205,9 +2205,15 @@ static int toblock_outer(struct ireq *iq, block_state_t *blkstate)
 
         bdb_stripe_get(iq->dbenv->bdb_env);
 
+        int start = comdb2_time_epochms();
         rc = toblock_main(iq->jsph, iq, blkstate);
+        int end = comdb2_time_epochms();
 
         bdb_stripe_done(iq->dbenv->bdb_env);
+
+        if ((end - start) > 400) {
+            logmsg(LOGMSG_ERROR, "toblock_main took %d ms\n", end - start);
+        }
 
         if (gotlk)
             Pthread_rwlock_unlock(&gbl_block_qconsume_lock);

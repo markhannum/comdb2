@@ -1055,8 +1055,14 @@ retry:
                                    BDB_ATTR_SOSQL_MAX_COMMIT_WAIT_SEC);
 
         /* waits for a sign */
+        int start = comdb2_time_epochms();
         rc = osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout,
                                          &osql->xerr);
+        int end = comdb2_time_epochms();
+        if ((end - start) > 400) {
+            logmsg(LOGMSG_ERROR, "wait_commitrc took %d ms\n", end - start);
+        }
+
         if (rc) {
             rcout = SQLITE_CLIENT_CHANGENODE;
             logmsg(LOGMSG_ERROR, "%s line %d setting rcout to (%d) from %d\n", 

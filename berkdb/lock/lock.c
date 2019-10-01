@@ -5768,6 +5768,7 @@ err:
 	return (ret);
 }
 
+#include "epochlib.h"
 
 static int
 __lock_get_list_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
@@ -5786,8 +5787,13 @@ __lock_get_list_int(dbenv, locker, flags, lock_mode, list, pcontext, maxlsn,
 	extern int gbl_lock_get_list_start;
 
 	gbl_lock_get_list_start = time(NULL);
+    int start = comdb2_time_epochms();
 	rc = __lock_get_list_int_int(dbenv, locker, flags, lock_mode, list,
 	    pcontext, maxlsn, pglogs, keycnt, fp);
+    int end = comdb2_time_epochms();
+    if ((end - start) > 100) {
+        logmsg(LOGMSG_ERROR, "lock-get-list took %d ms\n", end - start);
+    }
 	gbl_lock_get_list_start = 0;
 	return rc;
 }

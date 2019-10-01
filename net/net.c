@@ -646,7 +646,7 @@ static int write_list(netinfo_type *netinfo_ptr, host_node_type *host_node_ptr,
     }
 
     insert->flags = flags;
-    insert->enque_time = comdb2_time_epoch();
+    insert->enque_time = comdb2_time_epochms();
     insert->next = NULL;
     insert->prev = NULL;
     insert->len = sizeof(wire_header_type) + datasz;
@@ -4088,11 +4088,20 @@ static void *writer_thread(void *args)
                     int age;
                     wire_header_type *wire_header, tmp_wire_hdr;
                     uint8_t *p_buf, *p_buf_end;
+                    int start_timems = comdb2_time_epochms();
 
                     if (flags & WRITE_MSG_NODELAY) {
                         age = comdb2_time_epoch() - write_list_ptr->enque_time;
                         if (age > maxage)
                             maxage = age;
+                    }
+
+                    if (write_list_ptr->flags & WRITE_MSG_NODELAY) {
+                        if ((start_timems - write_list_ptr->enque_time) > 100) {
+                            logmsg(LOGMSG_ERROR, "packet on queue for %d ms "
+                                    "before flush for nodelay packet\n",
+                                    (start_timems - write_list_ptr->enque_time));
+                        }
                     }
 
                     /* File in the wire header with correct details for our

@@ -2505,7 +2505,7 @@ static void got_new_seqnum_from_node(bdb_state_type *bdb_state,
                seqnum->commit_generation, mygen, change_coherency);
     }
     memcpy(&(bdb_state->seqnum_info->seqnums[node_ix]), seqnum,
-           sizeof(seqnum_type));
+            sizeof(seqnum_type));
 
     if (gbl_set_seqnum_trace) {
         logmsg(LOGMSG_USER, "%s line %d set %s seqnum to %d:%d\n", __func__,

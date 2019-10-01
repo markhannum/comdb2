@@ -760,8 +760,14 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
         return rc;
     }
 
+    int start = comdb2_time_epochms();
     rc = trans_wait_for_seqnum_int(bdb_handle, dbenv, iq, source_host,
                                    timeoutms, adaptive, &ss);
+    int end = comdb2_time_epochms();
+
+    if ((end - start) > 400) {
+        logmsg(LOGMSG_ERROR, "wait_for_seqnum took %d ms\n", end - start);
+    }
 
     if (cnonce) {
         DB_LSN *lsn = (DB_LSN *)&ss;
