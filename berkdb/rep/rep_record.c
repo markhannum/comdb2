@@ -564,7 +564,16 @@ static void *apply_thread(void *arg)
 
 					if (ret == DB_REP_ISPERM && !gbl_early && !gbl_reallyearly) {
 						/* Call this but not really early anymore */
+                        static int lastpr = 0;
+                        static int count = 0;
+                        int now;
+                        count++;
 						comdb2_early_ack(dbenv, ret_lsnp, q->gen);
+                        if ((now = time(NULL)) - lastpr != 0) {
+                            logmsg(LOGMSG_USER, "%s line %d %d acks\n", __func__, __LINE__,
+                                    count);
+                            lastpr = now;
+                        }
 					}
 				}
 				count++;
@@ -3603,8 +3612,16 @@ gap_check:		max_lsn_dbtp = NULL;
 					/* don't ack 0:0, which happens for out-of-sequence commits */
 					!(max_lsn.file == 0 && max_lsn.offset == 0)
 					) {
-					comdb2_early_ack(dbenv, max_lsn,
-						rep->committed_gen);
+                    static int lastpr = 0;
+                    static int count = 0;
+                    int now;
+                    count++;
+					comdb2_early_ack(dbenv, max_lsn, rep->committed_gen);
+                    if ((now = time(NULL)) - lastpr != 0) {
+                        logmsg(LOGMSG_USER, "%s line %d %d acks\n", __func__, __LINE__,
+                                count);
+                        lastpr = now;
+                    }
 				}
 
 				if (dbenv->num_recovery_processor_threads &&
@@ -4689,7 +4706,24 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 			F_ISSET(rctl, DB_LOG_REP_ACK))
 			) {
 			static int lastpr = 0;
+            static int count = 0;
+            static DB_LSN last_lsn = {0};
 			int now;
+
+            if (log_compare(&last_lsn, &maxlsn) > 0) {
+                logmsg(LOGMSG_USER, "%s line %d LSN moving backwards?  [%d][%d]"
+                        "to [%d][%d]\n", __func__, __LINE__, last_lsn.file,
+                        last_lsn.offset, maxlsn.file, maxlsn.offset);
+            }
+			comdb2_early_ack(dbenv, maxlsn, *commit_gen);
+            count++;
+            if ((now = time(NULL)) - lastpr != 0) {
+                logmsg(LOGMSG_USER, "%s line %d td %u %d acks\n", __func__, __LINE__,
+                        (uint32_t)pthread_self(), count);
+                lastpr = now;
+            }
+
+            last_lsn = maxlsn;
 
 			if (gbl_early_ack_trace && ((now = time(NULL)) - lastpr)) {
 				logmsg(LOGMSG_USER, "%s line %d send early-ack for %d:%d "
@@ -4697,7 +4731,6 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 						maxlsn.offset, *commit_gen);
 				lastpr = now;
 			}
-			comdb2_early_ack(dbenv, maxlsn, *commit_gen);
 		} 
 
 		if (txn_rl_args)
@@ -5410,7 +5443,16 @@ bad_resize:	;
 		F_ISSET(rctl, DB_LOG_REP_ACK))
 		) {
 		static int lastpr = 0;
+        static int count = 0;
 		int now;
+
+        count++;
+		comdb2_early_ack(dbenv, maxlsn, *commit_gen);
+        if ((now = time(NULL)) - lastpr != 0) {
+            logmsg(LOGMSG_USER, "%s line %d %d acks\n", __func__, __LINE__,
+                    count);
+            lastpr = now;
+        }
 
 		/* got all the locks.  ack back early */
 		if (gbl_early_ack_trace && ((now = time(NULL)) - lastpr)) {
@@ -5419,7 +5461,6 @@ bad_resize:	;
 					maxlsn.offset, *commit_gen);
 			lastpr = now;
 		}
-		comdb2_early_ack(dbenv, maxlsn, *commit_gen);
 	}
 
 	if (txn_rl_args)

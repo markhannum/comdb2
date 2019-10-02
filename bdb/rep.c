@@ -2359,7 +2359,7 @@ int verify_master_leases(bdb_state_type *bdb_state, const char *func,
 int gbl_catchup_window_trace = 0;
 extern int gbl_set_seqnum_trace;
 
-static inline int copy_seqnum(bdb_state_type *bdb_state, int seqnum_generations, 
+static int copy_seqnum(bdb_state_type *bdb_state, int seqnum_generations, 
         seqnum_type *seqnum, int node_ix)
 {
     int trace = bdb_state->attr->wait_for_seqnum_trace, now;
@@ -2383,13 +2383,14 @@ static inline int copy_seqnum(bdb_state_type *bdb_state, int seqnum_generations,
     }
 
     DB_LSN last_lsn = bdb_state->seqnum_info->seqnums[node_ix].lsn;
+    if (last_lsn.file == INT_MAX) {
+        return 1;
+    }
+
     if (log_compare(&last_lsn, &seqnum->lsn) > 0) {
-        if (trace && (now = time(NULL)) > lastpr) {
-            logmsg(LOGMSG_USER, "seqnum-lsn [%d][%d] < last_lsn [%d][%d], not"
-                    "copying\n", seqnum->lsn.file, seqnum->lsn.offset,
-                    last_lsn.file, last_lsn.offset);
-            lastpr = now;
-        }
+        logmsg(LOGMSG_USER, "seqnum-lsn [%d][%d] < last_lsn [%d][%d], not"
+                "copying\n", seqnum->lsn.file, seqnum->lsn.offset,
+                last_lsn.file, last_lsn.offset);
         return 0;
     }
 
@@ -2520,8 +2521,7 @@ static void got_new_seqnum_from_node(bdb_state_type *bdb_state,
 
     /* Completely possible .. it just means that the durable lsn will trail a
      * bit */
-    if (bdb_state->attr->wait_for_seqnum_trace &&
-        log_compare(&bdb_state->seqnum_info->seqnums[node_ix].lsn,
+    if (log_compare(&bdb_state->seqnum_info->seqnums[node_ix].lsn,
                     &seqnum->lsn) > 0) {
         logmsg(LOGMSG_USER,
                "%s seqnum from %s moving backwards from [%d][%d] gen %d to "
@@ -4058,7 +4058,16 @@ static int process_berkdb(bdb_state_type *bdb_state, char *host, DBT *control,
          */
 
         if (!gbl_early) {
+            static int lastpr = 0;
+            static int count = 0;
+            int now;
+            count++;
             rc = do_ack(bdb_state, permlsn, generation);
+            if ((now = time(NULL)) - lastpr != 0) {
+                logmsg(LOGMSG_USER, "%s line %d %d acks\n", __func__, __LINE__,
+                        count);
+                lastpr = now;
+            }
         }
 
         break;
@@ -4071,8 +4080,17 @@ static int process_berkdb(bdb_state_type *bdb_state, char *host, DBT *control,
            up the cluster */
         if ((!bdb_state->caught_up) || (bdb_state->exiting)) {
             uint32_t gen;
+            static int lastpr = 0;
+            static int count = 0;
+            int now;
+            count++;
             bdb_state->dbenv->get_rep_gen(bdb_state->dbenv, &gen);
             rc = do_ack(bdb_state, permlsn, gen);
+            if ((now = time(NULL)) - lastpr != 0) {
+                logmsg(LOGMSG_USER, "%s line %d %d acks\n", __func__, __LINE__,
+                        count);
+                lastpr = now;
+            }
         } else {
             /* fprintf(stderr, "got a NOTPERM\n"); */
         }
