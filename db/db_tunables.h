@@ -1848,4 +1848,9 @@ REGISTER_TUNABLE("strict_double_quotes",
 REGISTER_TUNABLE("eventlog_nkeep", "Keep this many eventlog files (Default: 2)",
                  TUNABLE_INTEGER, &eventlog_nkeep, 0, NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("sc_logical_pause_seconds", "Pause redo-thread before "
+                 "processing.  (Default: 0).", TUNABLE_INTEGER,
+                 &gbl_sc_logical_pause_seconds, EXPERIMENTAL | INTERNAL, NULL,
+                 NULL, NULL, NULL);
+
 #endif /* _DB_TUNABLES_H */

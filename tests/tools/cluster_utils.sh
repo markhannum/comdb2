@@ -7,6 +7,14 @@ if [[ -z "$sleeptime" ]]; then
     sleeptime=5
 fi
 
+function get_master
+{
+    [[ "$debug" == 1 ]] && set -x
+    typeset func="get_master"
+    x=$($CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME default 'exec procedure sys.cmd.send("bdb cluster")' | grep MASTER | cut -f1 -d":" | tr -d '[:space:]'
+    echo "$x"
+}
+
 function bounce_cluster
 {
     [[ "$debug" == 1 ]] && set -x

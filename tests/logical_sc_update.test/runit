@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export debug=1
+
+[[ $debug == "1" ]] && set -x
+
+function cleanup
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="cleanup"
+    write_prompt $func "Running $func"
+    wait
+}
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="failexit"
+    write_prompt $func "Running $func"
+    typeset f=$1
+    write_prompt $func "$f failed: $2"
+    cleanup
+    exit -1
+}
+
+function create_table
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="create_table"
+    write_prompt $func "Running $func"
+    drop_table
+    create_table
+    create_unique_index
+
+}
+
+function updater_thread
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="updater_thread"
+    typeset sleepbefore=${1:-10}
+    write_prompt $func "Running $func"
+    sleep $sleepbefore
+
+    # Schedule where records don't co-exist in the old table
+    # 'put schemachange convertsleep 7' forces the schema-change thread to pause
+    # 7 seconds before converting a record .. we want the initial first record 
+    # (where a = 1) to be copied into the new table.  So this is attempting to
+    # force all of these updates to occur between the conversion of the first
+    # and second records
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 1"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 1 where a = 123"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 2"
+}
+
+function test_iteration
+{
+    typeset func="test_iteration"
+    typeset iteration=$1
+    typeset master=$(get_master)
+    write_prompt $func "Running $func $iteration"
+    create_table
+
+    # Insert two records
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (1)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (2)"
+
+    # Updater thread in the background 
+    updater_thread 10 &
+
+    # Start a rebuild
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "rebuild t1"
+    r=$?
+
+    # Fail test if we failed this schemachange
+    if [[ $r != 0 ]]; then
+        failexit "failed to rebuild"
+    fi
+
+    wait
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    write_prompt $func "Running $func"
+    typeset iterations=3
+    typeset master=$(get_master)
+    typeset i=0
+
+    # Tweak tunables
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertsleep 7"
+    $CDB2SQL_EXE ${CDB2_OPTIONS} $DBNAME --host $master "PUT TUNABLE sc_logical_pause_seconds 30"
+
+    while [[ $i -lt $iterations ]]; do
+        test_iteration $i
+        let i=i+1
+    done
+}
+
+run_test
+echo "Success"

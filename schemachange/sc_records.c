@@ -3105,6 +3105,8 @@ static int sc_redo_size(bdb_state_type *bdb_state)
     return sz;
 }
 
+int gbl_sc_logical_pause_seconds = 0;
+
 void *live_sc_logical_redo_thd(struct convert_record_data *data)
 {
     struct schema_change_type *s = data->s;
@@ -3112,6 +3114,7 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
     enum thrtype oldtype = THRTYPE_UNKNOWN;
     int rc = 0;
     int finalizing = 0;
+    int pause_seconds = gbl_sc_logical_pause_seconds;
     bdb_llog_cursor llog_cur;
     bdb_llog_cursor *pCur = &llog_cur;
     DB_LSN curLsn = {0};
@@ -3194,6 +3197,12 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
     Pthread_mutex_lock(&s->livesc_mtx);
     s->curLsn = &curLsn;
     Pthread_mutex_unlock(&s->livesc_mtx);
+
+    if (pause_seconds > 0) {
+        sc_printf(s, "[%s] logical redo thread pausing for %d seconds\n",
+                s->tablename);
+        sleep(pause_seconds);
+    }
 
     while (1) {
         /* abort schema change if we need to */
