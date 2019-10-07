@@ -28,10 +28,10 @@ function failexit
     exit -1
 }
 
-function create_table
+function create_database_tables
 {
     [[ $debug == "1" ]] && set -x
-    typeset func="create_table"
+    typeset func="create_tables"
     write_prompt $func "Running $func"
     drop_table
     create_table
@@ -65,7 +65,7 @@ function test_iteration
     typeset iteration=$1
     typeset master=$(get_master)
     write_prompt $func "Running $func $iteration"
-    create_table
+    create_database_tables
 
     # Insert two records
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (1)"
