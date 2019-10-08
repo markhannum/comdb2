@@ -1,5 +1,5 @@
 nowatch
-logmsg level info
+logmsg level debug
 enable_new_snapshot
 enable_snapshot_isolation
 berkattr abort_on_replicant_log_write 1

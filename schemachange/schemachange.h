@@ -107,6 +107,7 @@ struct schema_change_type {
     int commit_sleep;     /* Used for testing; sleep a bit before committing
                              schemas. */
     int convert_sleep;    /* Also for testing */
+    int convert_record_sleep; /* Another testing tunable */
     int same_schema;      /* indicates that the schema hasn't changed, so
                              we can skip the schema reload steps */
     int dbnum;

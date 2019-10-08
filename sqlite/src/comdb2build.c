@@ -31,6 +31,7 @@
 extern pthread_key_t query_info_key;
 extern int gbl_commit_sleep;
 extern int gbl_convert_sleep;
+extern int gbl_convert_record_sleep;
 extern int gbl_check_access_controls;
 extern int gbl_allow_user_schema;
 extern int gbl_ddl_cascade_drop;
@@ -372,6 +373,7 @@ static void fillTableOption(struct schema_change_type* sc, int opt)
 
     sc->commit_sleep = gbl_commit_sleep;
     sc->convert_sleep = gbl_convert_sleep;
+    sc->convert_record_sleep = gbl_convert_record_sleep;
 }
 
 int comdb2PrepareSC(Vdbe *v, Parse *pParse, int int_arg,
@@ -815,6 +817,7 @@ static inline void comdb2Rebuild(Parse *pParse, Token* nm, Token* lnm, int opt)
     sc->alteronly = 1;
     sc->commit_sleep = gbl_commit_sleep;
     sc->convert_sleep = gbl_convert_sleep;
+    sc->convert_record_sleep = gbl_convert_record_sleep;
 
     sc->same_schema = 1;
     if(get_csc2_file(sc->tablename, -1 , &sc->newcsc2, NULL ))
@@ -1001,6 +1004,7 @@ void comdb2RebuildIndex(Parse* pParse, Token* nm, Token* lnm, Token* index, int 
 
     sc->commit_sleep = gbl_commit_sleep;
     sc->convert_sleep = gbl_convert_sleep;
+    sc->convert_record_sleep = gbl_convert_record_sleep;
 
     sc->same_schema = 1;
 
@@ -2471,6 +2475,26 @@ void comdb2schemachangeCommitsleep(Parse* pParse, int num)
         return;
 
     gbl_commit_sleep = num;
+}
+
+void comdb2schemachangeConvertrecordsleep(Parse* pParse, int num)
+{
+    if (comdb2IsPrepareOnly(pParse))
+        return;
+
+#ifndef SQLITE_OMIT_AUTHORIZATION
+    {
+        if( sqlite3AuthCheck(pParse, SQLITE_PUT_TUNABLE, 0, 0, 0) ){
+            setError(pParse, SQLITE_AUTH, COMDB2_NOT_AUTHORIZED_ERRMSG);
+            return;
+        }
+    }
+#endif
+
+    if (comdb2AuthenticateUserOp(pParse))
+        return;
+
+    gbl_convert_record_sleep = num;
 }
 
 void comdb2schemachangeConvertsleep(Parse* pParse, int num)

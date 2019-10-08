@@ -333,6 +333,7 @@ static Keyword aKeywordTable[] = {
   { "BULKIMPORT",       "TK_BULKIMPORT",     ALWAYS               },
   { "COMMITSLEEP",      "TK_COMMITSLEEP",    ALWAYS               },
   { "CONSUMER",         "TK_CONSUMER",       ALWAYS               },
+  { "CONVERTRECORDSLEEP","TK_CONVERTRECORDSLEEP",ALWAYS           },
   { "CONVERTSLEEP",     "TK_CONVERTSLEEP",   ALWAYS               },
   { "COUNTER",          "TK_COUNTER",        ALWAYS               },
   { "COVERAGE",         "TK_COVERAGE",       ALWAYS               },

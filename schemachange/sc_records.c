@@ -33,6 +33,7 @@
 
 #include "comdb2_atomic.h"
 #include "logmsg.h"
+#define LOGICAL_LIVESC_DEBUG 1
 
 int gbl_logical_live_sc = 0;
 
@@ -1175,6 +1176,13 @@ void *convert_records_thd(struct convert_record_data *data)
         /* convert_record returns 1 to continue, 0 on completion, < 0 if failed
          */
         rc = convert_record(data);
+
+        if (data->s->convert_record_sleep > 0) {
+            logmsg(LOGMSG_INFO, "%s schema change sleeping for %d seconds\n",
+                    __func__, data->s->convert_record_sleep);
+            sleep(data->s->convert_record_sleep);
+        }
+
         if (data->cmembers->is_decrease_thrds)
             release_rebuild_thr(&data->cmembers->thrcount);
 
@@ -3200,7 +3208,7 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
 
     if (pause_seconds > 0) {
         sc_printf(s, "[%s] logical redo thread pausing for %d seconds\n",
-                s->tablename);
+                s->tablename, pause_seconds);
         sleep(pause_seconds);
     }
 

@@ -1281,6 +1281,7 @@ int start_table_upgrade(struct dbenv *dbenv, const char *tbl,
 static const char *delims = " \n\r\t";
 int gbl_commit_sleep;
 int gbl_convert_sleep;
+int gbl_convert_record_sleep;
 
 void handle_setcompr(SBUF2 *sb)
 {

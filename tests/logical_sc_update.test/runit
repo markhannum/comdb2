@@ -48,7 +48,7 @@ function updater_thread
     sleep $sleepbefore
 
     # Schedule where records don't co-exist in the old table
-    # 'put schemachange convertsleep 7' forces the schema-change thread to pause
+    # 'put schemachange convertrecordsleep 7' forces the schema-change thread to pause
     # 7 seconds before converting a record .. we want the initial first record 
     # (where a = 1) to be copied into the new table.  So this is attempting to
     # force all of these updates to occur between the conversion of the first
@@ -57,6 +57,22 @@ function updater_thread
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 1"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 1 where a = 123"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 2"
+
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 124 where a = 3"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 3 where a = 124"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 124 where a = 4"
+#
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 125 where a = 5"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 5 where a = 125"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 125 where a = 6"
+#
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 126 where a = 7"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 7 where a = 126"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 126 where a = 8"
+#
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 127 where a = 9"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 9 where a = 127"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 127 where a = 10"
 }
 
 function test_iteration
@@ -65,18 +81,35 @@ function test_iteration
     typeset iteration=$1
     typeset master=$(get_master)
     write_prompt $func "Running $func $iteration"
+
     create_database_tables
 
-    # Insert two records
+    # Insert some records
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (1)"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (2)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (3)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (4)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (5)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (6)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (7)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (8)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (9)"
+#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (10)"
 
     # Updater thread in the background 
     updater_thread 10 &
 
+    # Tweak tunables
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 7"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "PUT TUNABLE 'sc_logical_pause_seconds' 30"
+
     # Start a rebuild
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "rebuild t1"
     r=$?
+
+    # Undo pause
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "PUT TUNABLE 'sc_logical_pause_seconds' 0"
+    sleep 1
 
     # Fail test if we failed this schemachange
     if [[ $r != 0 ]]; then
@@ -84,6 +117,8 @@ function test_iteration
     fi
 
     wait
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "select * from t1 order by a"
 }
 
 function run_test
@@ -94,10 +129,6 @@ function run_test
     typeset iterations=3
     typeset master=$(get_master)
     typeset i=0
-
-    # Tweak tunables
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertsleep 7"
-    $CDB2SQL_EXE ${CDB2_OPTIONS} $DBNAME --host $master "PUT TUNABLE sc_logical_pause_seconds 30"
 
     while [[ $i -lt $iterations ]]; do
         test_iteration $i

@@ -131,23 +131,23 @@ size_t schemachange_packed_size(struct schema_change_type *s)
         s->fname_len + sizeof(s->aname_len) + s->aname_len +
         sizeof(s->avgitemsz) + sizeof(s->fastinit) + sizeof(s->newdtastripe) +
         sizeof(s->blobstripe) + sizeof(s->live) + sizeof(s->addonly) +
-        sizeof(s->fulluprecs) + sizeof(s->partialuprecs) +
-        sizeof(s->alteronly) + sizeof(s->is_trigger) + sizeof(s->newcsc2_len) +
-        s->newcsc2_len + sizeof(s->scanmode) + sizeof(s->delay_commit) +
+        sizeof(s->fulluprecs) + sizeof(s->partialuprecs) + sizeof(s->alteronly)
+        + sizeof(s->is_trigger) + sizeof(s->newcsc2_len) + s->newcsc2_len +
+        sizeof(s->scanmode) + sizeof(s->delay_commit) +
         sizeof(s->force_rebuild) + sizeof(s->force_dta_rebuild) +
         sizeof(s->force_blob_rebuild) + sizeof(s->force) + sizeof(s->headers) +
         sizeof(s->header_change) + sizeof(s->compress) +
         sizeof(s->compress_blobs) + sizeof(s->ip_updates) +
         sizeof(s->instant_sc) + sizeof(s->preempted) + sizeof(s->use_plan) +
         sizeof(s->commit_sleep) + sizeof(s->convert_sleep) +
-        sizeof(s->same_schema) + sizeof(s->dbnum) + sizeof(s->flg) +
-        sizeof(s->rebuild_index) + sizeof(s->index_to_rebuild) +
-        sizeof(s->drop_table) + sizeof(s->original_master_node) +
-        dests_field_packed_size(s) + sizeof(s->spname_len) + s->spname_len +
-        sizeof(s->addsp) + sizeof(s->delsp) + sizeof(s->defaultsp) +
-        sizeof(s->is_sfunc) + sizeof(s->is_afunc) + sizeof(s->rename) +
-        sizeof(s->newtable) + sizeof(s->usedbtablevers) + sizeof(s->add_view) +
-        sizeof(s->drop_view);
+        sizeof(s->convert_record_sleep) + sizeof(s->same_schema) +
+        sizeof(s->dbnum) + sizeof(s->flg) + sizeof(s->rebuild_index) +
+        sizeof(s->index_to_rebuild) + sizeof(s->drop_table) +
+        sizeof(s->original_master_node) + dests_field_packed_size(s) +
+        sizeof(s->spname_len) + s->spname_len + sizeof(s->addsp) +
+        sizeof(s->delsp) + sizeof(s->defaultsp) + sizeof(s->is_sfunc) +
+        sizeof(s->is_afunc) + sizeof(s->rename) + sizeof(s->newtable) +
+        sizeof(s->usedbtablevers) + sizeof(s->add_view) + sizeof(s->drop_view);
 
     return s->packed_len;
 }
@@ -264,6 +264,9 @@ void *buf_put_schemachange(struct schema_change_type *s, void *p_buf,
 
     p_buf =
         buf_put(&s->convert_sleep, sizeof(s->convert_sleep), p_buf, p_buf_end);
+
+    p_buf = buf_put(&s->convert_record_sleep, sizeof(s->convert_record_sleep),
+            p_buf, p_buf_end);
 
     p_buf = buf_put(&s->same_schema, sizeof(s->same_schema), p_buf, p_buf_end);
 
@@ -480,6 +483,10 @@ void *buf_get_schemachange(struct schema_change_type *s, void *p_buf,
 
     p_buf = (uint8_t *)buf_get(&s->convert_sleep, sizeof(s->convert_sleep),
                                p_buf, p_buf_end);
+
+    p_buf = (uint8_t *)buf_get(&s->convert_record_sleep,
+                               sizeof(s->convert_record_sleep), p_buf,
+                               p_buf_end);
 
     p_buf = (uint8_t *)buf_get(&s->same_schema, sizeof(s->same_schema), p_buf,
                                p_buf_end);
