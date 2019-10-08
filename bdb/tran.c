@@ -1489,8 +1489,11 @@ static int update_logical_redo_lsn(void *obj, void *arg)
 
     last = LISTC_BOT(&bdb_state->sc_redo_list);
     /* Add in order */
-    if (!last || log_compare(&last->lsn, &redo->lsn) <= 0)
+    if (!last || log_compare(&last->lsn, &redo->lsn) <= 0) {
         listc_abl(&bdb_state->sc_redo_list, redo);
+        logmsg(LOGMSG_DEBUG, "%s: adding lsn [%d][%d] to redo list\n",
+                __func__, redo->lsn.file, redo->lsn.offset);
+    }
     else {
         logmsg(LOGMSG_FATAL, "%s: logical commit lsn should be in order\n",
                __func__);
@@ -1631,6 +1634,11 @@ int bdb_tran_commit_with_seqnum_int(bdb_state_type *bdb_state, tran_type *tran,
                 *bdberr = rc;
                 return -1;
             }
+
+            logmsg(LOGMSG_DEBUG, "%s: isabort=%d committed_child=%d "
+                    "force_logical_commit=%d dirty_hash_table=%d\n",
+                    __func__, isabort, tran->committed_child,
+                    tran->force_logical_commit, tran->dirty_table_hash?1:0);
 
             if (!isabort && tran->committed_child &&
                 tran->force_logical_commit && tran->dirty_table_hash) {
