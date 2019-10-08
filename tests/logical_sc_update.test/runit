@@ -118,7 +118,11 @@ function test_iteration
 
     wait
 
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "select * from t1 order by a"
+    expected="1
+123"
+
+    newtable=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select * from t1 order by a")
+    [[ "$expected" != "$newtable" ]] && failexit "New table has incorrect records: $newtable vs $expected"
 }
 
 function run_test
