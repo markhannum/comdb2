@@ -49,30 +49,13 @@ function updater_thread
 
     # Schedule where records don't co-exist in the old table
     # 'put schemachange convertrecordsleep 7' forces the schema-change thread to pause
-    # 7 seconds before converting a record .. we want the initial first record 
+    # 7 seconds before converting a record.  We want the "initial" first record 
     # (where a = 1) to be copied into the new table.  So this is attempting to
     # force all of these updates to occur between the conversion of the first
-    # and second records
-
+    # (a = 1) and second record (which should be a = 123).
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 1"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 1 where a = 123"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 2"
-
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 124 where a = 3"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 3 where a = 124"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 124 where a = 4"
-#
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 125 where a = 5"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 5 where a = 125"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 125 where a = 6"
-#
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 126 where a = 7"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 7 where a = 126"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 126 where a = 8"
-#
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 127 where a = 9"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 9 where a = 127"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 127 where a = 10"
 }
 
 function test_iteration
@@ -87,28 +70,20 @@ function test_iteration
     # Insert some records
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (1)"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (2)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (3)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (4)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (5)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (6)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (7)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (8)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (9)"
-#    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (10)"
 
     # Updater thread in the background 
     updater_thread 10 &
 
     # Tweak tunables
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 7"
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "PUT TUNABLE 'sc_logical_pause_seconds' 30"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put tunable 'sc_logical_pause_seconds' 30"
 
     # Start a rebuild
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "rebuild t1"
     r=$?
 
     # Undo pause
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "PUT TUNABLE 'sc_logical_pause_seconds' 0"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put tunable 'sc_logical_pause_seconds' 0"
     sleep 1
 
     # Fail test if we failed this schemachange
