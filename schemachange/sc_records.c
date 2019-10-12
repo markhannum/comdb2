@@ -1071,6 +1071,7 @@ err:
 
     /* Advance our progress markers */
     data->nrecs++;
+    logmsg(LOGMSG_DEBUG, "%s converted %lld records\n", __func__, data->nrecs);
     if (data->scanmode == SCAN_PARALLEL || data->scanmode == SCAN_PAGEORDER) {
         data->sc_genids[data->stripe] = genid;
     }
@@ -2776,6 +2777,8 @@ static int live_sc_redo_update(struct convert_record_data *data, DB_LOGC *logc,
              * -- try delete the oldgenid again.
              * TODO: differentiate the above two cases and no need to call
              * delete again for the first case */
+            logmsg(LOGMSG_DEBUG, "%s delete old record on verify error\n",
+                    __func__);
             rc = del_new_record(&data->iq, data->trans, oldgenid, -1ULL,
                                 data->oldodh.recptr, data->freeblb, 0);
         }
