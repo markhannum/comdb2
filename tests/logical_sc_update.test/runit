@@ -5,7 +5,7 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/ddl.sh
 . ${TESTSROOTDIR}/tools/cluster_utils.sh
 
-export debug=1
+#export debug=1
 
 [[ $debug == "1" ]] && set -x
 
@@ -47,12 +47,12 @@ function updater_thread
     write_prompt $func "Running $func"
     sleep $sleepbefore
 
-    # Schedule where records don't co-exist in the old table
-    # 'put schemachange convertrecordsleep 7' forces the schema-change thread to pause
-    # 7 seconds before converting a record.  We want the "initial" first record 
-    # (where a = 1) to be copied into the new table.  So this is attempting to
-    # force all of these updates to occur between the conversion of the first
-    # (a = 1) and second record (which should be a = 123).
+    # Schedule where records don't co-exist in the old table:
+    # 'put schemachange convertrecordsleep 12' forces the schema-change thread
+    # to pause 12 seconds before converting a record.  We want the "initial"
+    # first record (where a = 1) to be copied into the new table.  So this is
+    # attempting to force all of these updates to occur between the conversion
+    # of the first (a = 1) and second record (which should be a = 123).
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 1"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 1 where a = 123"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 2"
