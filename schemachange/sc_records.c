@@ -1178,7 +1178,9 @@ void *convert_records_thd(struct convert_record_data *data)
          */
         rc = convert_record(data);
 
-        if (data->s->convert_record_sleep > 0) {
+        if (data->s->convert_record_sleep > 0 && 
+                (data->s->convert_record_sleep_count <= 0 || data->nrecs < 
+                data->s->convert_record_sleep_count)) {
             logmsg(LOGMSG_INFO, "%s schema change sleeping for %d seconds\n",
                     __func__, data->s->convert_record_sleep);
             sleep(data->s->convert_record_sleep);

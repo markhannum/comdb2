@@ -140,7 +140,8 @@ size_t schemachange_packed_size(struct schema_change_type *s)
         sizeof(s->compress_blobs) + sizeof(s->ip_updates) +
         sizeof(s->instant_sc) + sizeof(s->preempted) + sizeof(s->use_plan) +
         sizeof(s->commit_sleep) + sizeof(s->convert_sleep) +
-        sizeof(s->convert_record_sleep) + sizeof(s->same_schema) +
+        sizeof(s->convert_record_sleep) +
+        sizeof(s->convert_record_sleep_count) + sizeof(s->same_schema) +
         sizeof(s->dbnum) + sizeof(s->flg) + sizeof(s->rebuild_index) +
         sizeof(s->index_to_rebuild) + sizeof(s->drop_table) +
         sizeof(s->original_master_node) + dests_field_packed_size(s) +
@@ -267,6 +268,9 @@ void *buf_put_schemachange(struct schema_change_type *s, void *p_buf,
 
     p_buf = buf_put(&s->convert_record_sleep, sizeof(s->convert_record_sleep),
             p_buf, p_buf_end);
+
+    p_buf = buf_put(&s->convert_record_sleep_count,
+            sizeof(s->convert_record_sleep_count), p_buf, p_buf_end);
 
     p_buf = buf_put(&s->same_schema, sizeof(s->same_schema), p_buf, p_buf_end);
 
@@ -486,6 +490,10 @@ void *buf_get_schemachange(struct schema_change_type *s, void *p_buf,
 
     p_buf = (uint8_t *)buf_get(&s->convert_record_sleep,
                                sizeof(s->convert_record_sleep), p_buf,
+                               p_buf_end);
+
+    p_buf = (uint8_t *)buf_get(&s->convert_record_sleep_count,
+                               sizeof(s->convert_record_sleep_count), p_buf,
                                p_buf_end);
 
     p_buf = (uint8_t *)buf_get(&s->same_schema, sizeof(s->same_schema), p_buf,

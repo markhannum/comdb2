@@ -1282,6 +1282,7 @@ static const char *delims = " \n\r\t";
 int gbl_commit_sleep;
 int gbl_convert_sleep;
 int gbl_convert_record_sleep;
+int gbl_convert_record_sleep_count;
 
 void handle_setcompr(SBUF2 *sb)
 {

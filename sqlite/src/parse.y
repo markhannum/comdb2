@@ -319,7 +319,7 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
   ODH OFF OP OPTION OPTIONS
   PAGEORDER PASSWORD PAUSE PERIOD PENDING PROCEDURE PUT
   REBUILD READ READONLY REC RESERVED RESUME RETENTION REVOKE RLE ROWLOCKS
-  SCALAR SCHEMACHANGE SKIPSCAN START SUMMARIZE
+  SCALAR SCHEMACHANGE SKIPSCAN SLEEPCOUNT START SUMMARIZE
   THREADS THRESHOLD TIME TRUNCATE TUNABLE TYPE
   VERSION WRITE DDL USERSCHEMA ZLIB
 %endif SQLITE_BUILDING_FOR_COMDB2
@@ -2168,11 +2168,13 @@ putcmd ::= SCHEMACHANGE CONVERTSLEEP INTEGER(F). {
     comdb2schemachangeConvertsleep(pParse, tmp);
 }
 
-putcmd ::= SCHEMACHANGE CONVERTRECORDSLEEP INTEGER(F). {
-    int tmp;
+putcmd ::= SCHEMACHANGE CONVERTRECORDSLEEP INTEGER(F) SLEEPCOUNT INTEGER(C). {
+    int tmp, scount;
     if (!readIntFromToken(&F, &tmp))
         tmp = 0;
-    comdb2schemachangeConvertrecordsleep(pParse, tmp);
+    if (!readIntFromToken(&C, &scount))
+        scount = 0;
+    comdb2schemachangeConvertrecordsleep(pParse, tmp, scount);
 }
 
 

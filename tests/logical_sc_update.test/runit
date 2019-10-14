@@ -36,13 +36,41 @@ function create_database_tables
     drop_table
     create_table
     create_unique_index
-
 }
 
-function updater_thread
+function delete_add_updater
 {
     [[ $debug == "1" ]] && set -x
-    typeset func="updater_thread"
+    typeset func="delete_add_updater"
+    typeset sleepbefore=${1:-10}
+    typeset master=$(get_master)
+    write_prompt $func "Running $func"
+    sleep $sleepbefore
+
+    # t1 has a single record in the old table, (a=1), and a copy of this record
+    # in the new table.  The asynchronous redo thread is paused until we 
+    # complete all of our updates.  The convert-records thread is paused until 
+    # we complete this set of operations.  We instruct it to resume at normal
+    # speed after these are complete- it should convert the last '(a=123)'
+    # performed by the last insert into the new table.
+    #
+    # When the asynchonous redo thread starts, it will fail to complete the 
+    # first update, as it causes a unique-key constraint violation in the new
+    # table which never existed in the old.
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 1"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "delete from t1 where a = 123"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (123)"
+
+    # Must make sure that the converter thread converts the latest (a=123) to
+    # the new table.
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 0 sleepcount 0"
+}
+
+function inplace_updater
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="inplace_updater"
     typeset sleepbefore=${1:-10}
     write_prompt $func "Running $func"
     sleep $sleepbefore
@@ -58,24 +86,27 @@ function updater_thread
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set a = 123 where a = 2"
 }
 
-function test_iteration
+function update_test
 {
-    typeset func="test_iteration"
-    typeset iteration=$1
+    typeset func="update_test"
+    typeset inplace=$1
     typeset master=$(get_master)
-    write_prompt $func "Running $func $iteration"
+    write_prompt $func "Running $func"
 
     create_database_tables
+
+    # Remove in-place if disabled
+    [[ "$inplace" == 0 ]] && $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "alter table t1 options rebuild, ipu off { schema { int a } }"
 
     # Insert some records
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (1)"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (2)"
 
     # Updater thread in the background 
-    updater_thread 9 &
+    inplace_updater 9 &
 
     # Tweak tunables
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 12"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 12 sleepcount 2"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put tunable 'sc_logical_pause_seconds' 30"
 
     # Start a rebuild
@@ -98,6 +129,89 @@ function test_iteration
 
     newtable=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select * from t1 order by a")
     [[ "$expected" != "$newtable" ]] && failexit "New table has incorrect records: $newtable vs $expected"
+
+    # Restore tunable
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 0 sleepcount 0"
+}
+
+function update_delete_add_test
+{
+    typeset func="update_delete_add_test"
+    typeset inplace=$1
+    typeset master=$(get_master)
+    write_prompt $func "Running $func $iteration"
+
+    create_database_tables
+
+    # Remove in-place if disabled
+    [[ "$inplace" == 0 ]] && $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "alter table t1 options rebuild, ipu off { schema { int a } }"
+
+    # Insert some records
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (1)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 values (2)"
+
+    # Updater thread in the background 
+    delete_add_updater 9 &
+
+    # Tweak tunables
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 12 sleepcount 2"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put tunable 'sc_logical_pause_seconds' 30"
+
+    # Start a rebuild
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "rebuild t1"
+    r=$?
+
+    # Undo pause
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put tunable 'sc_logical_pause_seconds' 0"
+    sleep 1
+
+    # Fail test if we failed this schemachange
+    if [[ $r != 0 ]]; then
+        failexit "failed to rebuild"
+    fi
+
+    wait
+
+    expected="2
+123"
+
+    newtable=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select * from t1 order by a")
+    [[ "$expected" != "$newtable" ]] && failexit "New table has incorrect records: $newtable vs $expected"
+
+    # Restore tunable
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "put schemachange convertrecordsleep 0 sleepcount 0"
+}
+
+function inplace_update_delete_add_test
+{
+    typeset func="inplace_update_delete_add_test"
+    write_prompt $func "Running $func"
+    update_delete_add_test 1
+    write_prompt $func "Success"
+}
+
+function noinplace_update_delete_add_test
+{
+    typeset func="noinplace_update_delete_add_test"
+    write_prompt $func "Running $func"
+    update_delete_add_test 1
+    write_prompt $func "Success"
+}
+
+function inplace_update_test
+{
+    typeset func="inplace_update_test"
+    write_prompt $func "Running $func"
+    update_test 1
+    write_prompt $func "Success"
+}
+
+function noinplace_update_test
+{
+    typeset func="noinplace_update_test"
+    write_prompt $func "Running $func"
+    update_test 0
+    write_prompt $func "Success"
 }
 
 function run_test
@@ -105,14 +219,11 @@ function run_test
     [[ $debug == "1" ]] && set -x
     typeset func="run_test"
     write_prompt $func "Running $func"
-    typeset iterations=1
-    typeset master=$(get_master)
-    typeset i=0
 
-    while [[ $i -lt $iterations ]]; do
-        test_iteration $i
-        let i=i+1
-    done
+    noinplace_update_test
+    noinplace_update_delete_add_test
+    inplace_update_delete_add_test
+    inplace_update_test
 }
 
 run_test

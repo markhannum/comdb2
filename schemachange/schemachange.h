@@ -108,6 +108,7 @@ struct schema_change_type {
                              schemas. */
     int convert_sleep;    /* Also for testing */
     int convert_record_sleep; /* Another testing tunable */
+    int convert_record_sleep_count; /* Another testing tunable */
     int same_schema;      /* indicates that the schema hasn't changed, so
                              we can skip the schema reload steps */
     int dbnum;
