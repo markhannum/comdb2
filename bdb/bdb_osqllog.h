@@ -275,6 +275,12 @@ struct bdb_llog_cursor {
     DB_LOGC *logc; /* Log Cursor */
     int getflags;
     DBT data;
+    /* Conflict handling */
+    struct temp_table *genid_conflict_tbl;
+    struct temp_cursor *genid_conflict_cur;
+    struct temp_table *lsn_conflict_tbl;
+    struct temp_cursor *lsn_conflict_cur;
+    DB_LSN conflict_low_lsn;
     bdb_osql_log_t *log;
 };
 
