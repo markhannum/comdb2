@@ -194,7 +194,7 @@ function noinplace_update_delete_add_test
 {
     typeset func="noinplace_update_delete_add_test"
     write_prompt $func "Running $func"
-    update_delete_add_test 1
+    update_delete_add_test 0
     write_prompt $func "Success"
 }
 

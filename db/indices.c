@@ -963,9 +963,9 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
                                int verify)
 {
     int rc = 0;
-#ifdef DEBUG
-    logmsg(LOGMSG_DEBUG, "upd_new_record_add2indices: genid %llx\n", newgenid);
-#endif
+
+    logmsg(LOGMSG_DEBUG, "upd_new_record_add2indices: genid %llx nix=%d\n",
+            newgenid, iq->usedb->nix);
 
     if (!iq->usedb)
         return ERR_BADREQ;
@@ -1005,13 +1005,19 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
 
         /* are we supposed to convert this ix -- if no skip work */
         if (gbl_use_plan && iq->usedb->plan &&
-            iq->usedb->plan->ix_plan[ixnum] != -1)
+            iq->usedb->plan->ix_plan[ixnum] != -1) {
+            logmsg(LOGMSG_DEBUG, "%s skipping ix %d on plan\n", __func__,
+                    ixnum);
             continue;
+        }
 
         /* only add  keys when told */
         if (gbl_partial_indexes && iq->usedb->ix_partial &&
-            !(ins_keys & (1ULL << ixnum)))
+            !(ins_keys & (1ULL << ixnum))) {
+            logmsg(LOGMSG_DEBUG, "%s skipping ix %d on partial\n", __func__,
+                    ixnum);
             continue;
+        }
 
         /* form new index */
         if (iq->idxInsert)
@@ -1046,7 +1052,11 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
             rc = ix_find_by_key_tran(iq, key, getkeysize(iq->usedb, ixnum),
                                      ixnum, NULL, &fndrrn, &fndgenid, NULL,
                                      NULL, 0, trans);
+            logmsg(LOGMSG_DEBUG, "%s ix_find_by_key_tran rc=%d\n", __func__,
+                    rc);
             if (rc == IX_FND && fndgenid == vgenid) {
+                logmsg(LOGMSG_DEBUG, "%s found record in new index\n",
+                        __func__);
                 return ERR_VERIFY;
             } else if (rc == RC_INTERNAL_RETRY) {
                 return RC_INTERNAL_RETRY;
@@ -1064,11 +1074,17 @@ int upd_new_record_add2indices(struct ireq *iq, void *trans,
         rc = ix_addk(iq, trans, key, ixnum, newgenid, 2, (void *)od_dta_tail,
                      od_tail_len, ix_isnullk(iq->usedb, key, ixnum));
 
+        logmsg(LOGMSG_DEBUG, "%s ix_addk rc=%d\n", __func__, rc);
+
         if (vgenid && rc == IX_DUP) {
             if (iq->usedb->ix_dupes[ixnum] || isnullk) {
+                logmsg(LOGMSG_DEBUG, "%s dup adding index to new table\n",
+                        __func__);
                 return ERR_VERIFY;
             }
         }
+        logmsg(LOGMSG_DEBUG, "%s add index to new table rc=%d\n",
+                __func__, rc);
 
         if (iq->debug) {
             reqprintf(iq, "ix_addk IX %d KEY ", ixnum);
@@ -1140,6 +1156,7 @@ int upd_new_record_indices(
 
         rc = ix_delk(iq, trans, key, ixnum, 2 /*rrn*/, oldgenid,
                      ix_isnullk(iq->usedb, key, ixnum));
+        logmsg(LOGMSG_DEBUG, "%s ix_delk rc = %d\n", __func__, rc);
         if (iq->debug) {
             reqprintf(iq, "ix_delk IX %d KEY ", ixnum);
             reqdumphex(iq, key, getkeysize(iq->usedb, ixnum));
@@ -1171,6 +1188,10 @@ int upd_new_record_indices(
             iq, trans, newgenid, use_new_tag ? sc_new : new_dta,
             use_new_tag ? iq->usedb->lrl : nd_len, ins_keys, use_new_tag,
             add_idx_blobs, !verify_retry);
+
+        logmsg(LOGMSG_DEBUG, "%s upd_new_record_add2indices rc = %d\n",
+                __func__, rc);
+
     } else
         reqprintf(iq, "is deferredAdd so will add to indices at the end");
 

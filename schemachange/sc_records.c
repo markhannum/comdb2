@@ -2766,10 +2766,14 @@ static int live_sc_redo_update(struct convert_record_data *data, DB_LOGC *logc,
                                          data->sc_genids)) {
         /* if the newgenid is to the right of the sc cursor, we only need to
          * delete the old record */
+        logmsg(LOGMSG_DEBUG, "%s new-genid is to right of stripe pointer\n",
+                __func__);
         rc = del_new_record(&data->iq, data->trans, oldgenid, -1ULL,
                             data->oldodh.recptr, data->freeblb, 0);
     } else {
         /* try to update the record in the new btree */
+        logmsg(LOGMSG_DEBUG, "%s new-genid is to left of stripe pointer\n",
+                __func__);
         rc = upd_new_record(&data->iq, data->trans, oldgenid,
                             data->oldodh.recptr, genid, data->odh.recptr, -1ULL,
                             -1ULL, updlen, updCols, data->wrblb, 0,
