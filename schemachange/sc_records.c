@@ -2901,6 +2901,7 @@ static int live_sc_redo_logical_log(struct convert_record_data *data,
                                     bdb_llog_cursor *pCur)
 {
     int rc = 0;
+    int bdberr = 0;
     bdb_state_type *bdb_state = thedb->bdb_env;
     bdb_osql_log_rec_t *rec = NULL, *tmp = NULL;
     DB_LOGC *logc = NULL;
@@ -3017,7 +3018,6 @@ again:
     if (data->nrecs %
             BDB_ATTR_GET(thedb->bdb_attr, SC_LOGICAL_SAVE_LSN_EVERY_N) ==
         0) {
-        int bdberr = 0;
         rc = bdb_set_sc_start_lsn(data->trans, data->s->tablename,
                                   &(pCur->curLsn), &bdberr);
         if (rc != 0) {
@@ -3136,7 +3136,7 @@ static int genid_conflict_genid_cmp(void *_, int key1len, const void *key1,
     assert(key1len == key2len);
     pkey1 = (genid_conflict_key *)key1;
     pkey2 = (genid_conflict_key *)key2;
-    rc = memcmp(pkey1->genid, pkey2->genid, sizeof(unsigned long long));
+    rc = memcmp(&pkey1->genid, &pkey2->genid, sizeof(unsigned long long));
     return rc;
 }
 
@@ -3149,7 +3149,9 @@ static int genid_conflict_lsn_cmp(void *_, int key1len, const void *key1,
     assert(key1len == key2len);
     pkey1 = (genid_conflict_key *)key1;
     pkey2 = (genid_conflict_key *)key2;
-    rc = log_compare(&pkey1->expiration_lsn, pkey2->expiration_lsn);
+    rc = log_compare(&pkey1->expiration_lsn, &pkey2->expiration_lsn);
+    if (!rc)
+        rc = memcmp(&pkey1->genid, &pkey2->genid, sizeof(unsigned long long));
     return rc;
 }
 
@@ -3159,6 +3161,7 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
     struct thr_handle *thr_self = thrman_self();
     enum thrtype oldtype = THRTYPE_UNKNOWN;
     int rc = 0;
+    int bdberr = 0;
     int finalizing = 0;
     int pause_seconds = gbl_sc_logical_pause_seconds;
     bdb_llog_cursor llog_cur;
@@ -3204,38 +3207,38 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
     }
 
     /* Conflict temp_tables */
-    data->genid_conflict_tbl = bdb_temp_table_create(bdb_state, &bdberr);
-    if (data->genid_conflict_tbl == NULL) {
+    pCur->genid_conflict_tbl = bdb_temp_table_create(bdb_state, &bdberr);
+    if (pCur->genid_conflict_tbl == NULL) {
         logmsg(LOGMSG_FATAL, "%s:%d failed to create temp table, bdberr=%d\n",
                 __func__, __LINE__, bdberr);
         abort();
     }
-    data->genid_conflict_cur = bdb_temp_table_cursor(bdb_state,
-            data->genid_conflict_tbl, NULL, &bdberr);
-    if (data->genid_conflict_cur == NULL) {
+    pCur->genid_conflict_cur = bdb_temp_table_cursor(bdb_state,
+            pCur->genid_conflict_tbl, NULL, &bdberr);
+    if (pCur->genid_conflict_cur == NULL) {
         logmsg(LOGMSG_FATAL,
                 "%s:%d failed to create temp cursor, bdberr=%d\n", __func__,
                 __LINE__, bdberr);
         abort();
     }
-    bdb_temp_table_set_cmp_func(data->genid_conflict_tbl,
+    bdb_temp_table_set_cmp_func(pCur->genid_conflict_tbl,
             genid_conflict_genid_cmp);
 
-    data->lsn_conflict_tbl = bdb_temp_table_create(bdb_state, &bdberr);
-    if (data->lsn_conflict_tbl == NULL) {
+    pCur->lsn_conflict_tbl = bdb_temp_table_create(bdb_state, &bdberr);
+    if (pCur->lsn_conflict_tbl == NULL) {
         logmsg(LOGMSG_FATAL, "%s:%d failed to create temp table, bdberr=%d\n",
                 __func__, __LINE__, bdberr);
         abort();
     }
-    data->lsn_conflict_cur = bdb_temp_table_cursor(bdb_state,
-            data->lsn_conflict_tbl, NULL, &bdberr);
-    if (data->lsn_conflict_cur == NULL) {
+    pCur->lsn_conflict_cur = bdb_temp_table_cursor(bdb_state,
+            pCur->lsn_conflict_tbl, NULL, &bdberr);
+    if (pCur->lsn_conflict_cur == NULL) {
         logmsg(LOGMSG_FATAL,
                 "%s:%d failed to create temp cursor, bdberr=%d\n", __func__,
                 __LINE__, bdberr);
         abort();
     }
-    bdb_temp_table_set_cmp_func(data->lsn_conflict_tbl,
+    bdb_temp_table_set_cmp_func(pCur->lsn_conflict_tbl,
             genid_conflict_lsn_cmp);
 
     /* init all buffer needed by this thread to do logical redo so we don't need
@@ -3400,7 +3403,6 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
             }
             else if (log_compare(&curLsn, &serialLsn) > 0) {
                 sc_printf(s, "[%s] logical redo exits serial mode\n",
-
                           s->tablename);
                 serial = 0;
             }
@@ -3459,12 +3461,12 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
 
     /* verify the conflict_genid table */
     if (s->got_tablelock) {
-        rc = bdb_temp_table_first(bdb_state, data->genid_conflict_cur, bdberr);
+        rc = bdb_temp_table_first(bdb_state, pCur->genid_conflict_cur, &bdberr);
         if (rc == IX_OK) {
             sc_errf(s, "[%s] logical redo failed with unresolved conflicts:\n",
                     s->tablename);
-            genid_conflict_key *k = bdb_temp_table_key(data->genid_conflict_cur,
-                    &bdberr);
+            genid_conflict_key *k = bdb_temp_table_key(
+                    pCur->genid_conflict_cur);
             sc_errf(s, "[%s] GENID %llx EXPIRATION-LSN [%d][%d]\n",
                     s->tablename, k->genid, k->expiration_lsn.file,
                     k->expiration_lsn.offset);
@@ -3475,22 +3477,22 @@ void *live_sc_logical_redo_thd(struct convert_record_data *data)
 cleanup:
     convert_record_data_cleanup(data);
 
-    rc = bdb_temp_table_close_cursor(bdb_state, data->genid_conflict_cur, &bdberr);
+    rc = bdb_temp_table_close_cursor(bdb_state, pCur->genid_conflict_cur, &bdberr);
     if (rc)
         logmsg(LOGMSG_ERROR, "%s:%d close cursor %d %d\n", __func__, __LINE__,
                 rc, bdberr);
 
-    rc = bdb_temp_table_close(bdb_state, data->genid_conflict_tbl, &bdberr);
+    rc = bdb_temp_table_close(bdb_state, pCur->genid_conflict_tbl, &bdberr);
     if (rc)
         logmsg(LOGMSG_ERROR, "%s:%d close temp_table %d %d\n", __func__, __LINE__,
                 rc, bdberr);
 
-    rc = bdb_temp_table_close_cursor(bdb_state, data->lsn_conflict_cur, &bdberr);
+    rc = bdb_temp_table_close_cursor(bdb_state, pCur->lsn_conflict_cur, &bdberr);
     if (rc)
         logmsg(LOGMSG_ERROR, "%s:%d close cursor %d %d\n", __func__, __LINE__,
                 rc, bdberr);
 
-    rc = bdb_temp_table_close(bdb_state, data->lsn_conflict_tbl, &bdberr);
+    rc = bdb_temp_table_close(bdb_state, pCur->lsn_conflict_tbl, &bdberr);
     if (rc)
         logmsg(LOGMSG_ERROR, "%s:%d close temp_table %d %d\n", __func__, __LINE__,
                 rc, bdberr);
