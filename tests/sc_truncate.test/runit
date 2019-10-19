@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export debug=1
+export stopfile=./stop.test
+
+[[ $debug == "1" ]] && set -x
+
+function cleanup
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="cleanup"
+    write_prompt $func "Running $func"
+    touch $stopfile
+    wait
+}
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="failexit"
+    write_prompt $func "Running $func"
+    typeset f=$1
+    write_prompt $func "$f failed: $2"
+    cleanup
+    exit -1
+}
+
+function create_database_tables
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="create_tables"
+    write_prompt $func "Running $func"
+    drop_table
+    create_table
+}
+
+function truncate_thread
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="truncate_thread"
+    typeset sleep_sec=${1:-0}
+    write_prompt $func "Running $func"
+    while [[ ! -f $stopfile ]]; do
+        truncate_table
+        [[ $sleep_sec ]] && sleep $sleep_sec
+    done
+}
+
+function insert_thread
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="insert_thread"
+    typeset sleep_sec=${1:-0}
+    write_prompt $func "Running $func"
+    while [[ ! -f $stopfile ]]; do
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME "INSERT INTO t1 SELECT * FROM generate_series(1, 10000)"
+        [[ $sleep_sec ]] && sleep $sleep_sec
+    done
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    write_prompt $func "Running $func"
+    typeset downgrades=30
+    typeset inserters=3
+    typeset maxtime=600
+    typeset dgsleep=20
+    typeset i=0
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    create_database_tables
+    rm -f $stopfile
+    truncate_thread &
+
+    i=0
+    while [[ $i -lt $inserters ]]; do
+        insert_thread &
+        let i=i+1
+    done
+
+    while [[ "$(date +%s)" -lt $endtime ]]; do
+        for node in $CLUSTER ; do
+            $CDB2SQL_EXE -tabs $CDB2_OPTIONS --host $node $DBNAME "EXEC PROCEDURE sys.cmd.send('downgrade')"
+        done
+        sleep $dgsleep
+    done
+    touch $stopfile
+}
+
+run_test
+echo "Success"
