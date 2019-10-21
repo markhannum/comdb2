@@ -58,7 +58,7 @@ function insert_thread
     typeset sleep_sec=${1:-0}
     write_prompt $func "Running $func"
     while [[ ! -f $stopfile ]]; do
-        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME "INSERT INTO t1 SELECT * FROM generate_series(1, 10000)"
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "INSERT INTO t1 SELECT * FROM generate_series(1, 10000)"
         [[ $sleep_sec ]] && sleep $sleep_sec
     done
 }
@@ -72,6 +72,7 @@ function run_test
     typeset inserters=3
     typeset maxtime=600
     typeset dgsleep=20
+    typeset downgrade=0
     typeset i=0
     typeset now=$(date +%s)
     typeset endtime=$(( now + maxtime ))
@@ -87,9 +88,11 @@ function run_test
     done
 
     while [[ "$(date +%s)" -lt $endtime ]]; do
-        for node in $CLUSTER ; do
-            $CDB2SQL_EXE -tabs $CDB2_OPTIONS --host $node $DBNAME "EXEC PROCEDURE sys.cmd.send('downgrade')"
-        done
+        if [[ $downgrade != 0 ]]; then
+            for node in $CLUSTER ; do
+                $CDB2SQL_EXE -tabs $CDB2_OPTIONS --host $node $DBNAME "EXEC PROCEDURE sys.cmd.send('downgrade')"
+            done
+        fi
         sleep $dgsleep
     done
     touch $stopfile
