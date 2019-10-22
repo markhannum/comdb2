@@ -1732,6 +1732,8 @@ void *osql_commit_timepart_resuming_sc(void *p)
         goto abort_sc;
     }
 
+    assert(iq.sc_logical_tran);
+
     if ((parent_trans = bdb_get_physical_tran(iq.sc_logical_tran)) == NULL) {
         logmsg(LOGMSG_ERROR,
                "%s:%d failed to start schema change transaction\n", __func__,
@@ -1785,6 +1787,7 @@ void *osql_commit_timepart_resuming_sc(void *p)
                __LINE__);
         abort();
     }
+    iq.sc_logical_tran = NULL;
 
     osql_postcommit_handle(&iq);
 
@@ -1803,8 +1806,10 @@ abort_sc:
     }
     if (parent_trans)
         trans_abort(&iq, parent_trans);
-    if (iq.sc_logical_tran)
+    if (iq.sc_logical_tran) {
         trans_abort_logical(&iq, iq.sc_logical_tran, NULL, 0, NULL, 0);
+        iq.sc_logical_tran = NULL;
+    }
     osql_postabort_handle(&iq);
     bdb_thread_event(thedb->bdb_env, BDBTHR_EVENT_DONE_RDWR);
     return NULL;

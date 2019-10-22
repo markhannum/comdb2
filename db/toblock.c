@@ -2025,6 +2025,7 @@ osql_create_transaction(struct javasp_trans_state *javasp_trans_handle,
     if (iq->tranddl) {
         irc = trans_start_logical_sc(iq, &(iq->sc_logical_tran));
         if (gbl_rowlocks && irc == 0) { // rowlock
+            assert(iq->sc_logical_tran);
             tran_type *sc_parent = NULL;
             if (parent_trans)
                 *parent_trans = NULL;
@@ -2038,6 +2039,7 @@ osql_create_transaction(struct javasp_trans_state *javasp_trans_handle,
             } else
                 irc = trans_start_sc(iq, sc_parent, &(iq->sc_tran));
         } else if (irc == 0) { // pagelock
+            assert(iq->sc_logical_tran);
             if (parent_trans) {
                 *parent_trans = bdb_get_physical_tran(iq->sc_logical_tran);
                 /* start child tran */
@@ -2051,6 +2053,10 @@ osql_create_transaction(struct javasp_trans_state *javasp_trans_handle,
                 *trans = bdb_get_physical_tran(iq->sc_logical_tran);
                 irc = create_child_transaction(iq, *trans, &(iq->sc_tran));
             }
+        } else {
+            logmsg(LOGMSG_ERROR, "%s:%d trans_start failed rc %d\n", __func__,
+                    __LINE__, irc);
+            return irc;
         }
     } else if (!gbl_rowlocks) {
         /* start parent transaction */
@@ -5560,7 +5566,8 @@ add_blkseq:
                 if (iq->tranddl) {
                     if (backed_out) {
                         assert(trans == NULL);
-                        bdb_ltran_put_schema_lock(iq->sc_logical_tran);
+                        if (iq->sc_logical_tran)
+                            bdb_ltran_put_schema_lock(iq->sc_logical_tran);
                     } else {
                         assert(iq->sc_tran);
                         assert(trans != NULL);
@@ -5579,9 +5586,10 @@ add_blkseq:
                         unlock_schema_lk();
                         iq->sc_locked = 0;
                     }
-                    irc = trans_commit_logical(iq, iq->sc_logical_tran,
-                                               gbl_mynode, 0, 1, NULL, 0, NULL,
-                                               0);
+                    if (iq->sc_logical_tran)
+                        irc = trans_commit_logical(iq, iq->sc_logical_tran,
+                                gbl_mynode, 0, 1, NULL, 0, NULL,
+                                0);
                     iq->sc_logical_tran = NULL;
                 } else {
                     irc = trans_commit_adaptive(iq, parent_trans, source_host);

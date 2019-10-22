@@ -61,6 +61,8 @@ int do_alter_stripes_int(struct schema_change_type *s)
         return SC_FAILED_TRANSACTION;
     }
 
+    assert(sc_logical_tran);
+
     bdb_ltran_get_schema_lock(sc_logical_tran);
 
     if ((phys_tran = bdb_get_physical_tran(sc_logical_tran)) == NULL) {
