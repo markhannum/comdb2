@@ -5,7 +5,7 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/ddl.sh
 . ${TESTSROOTDIR}/tools/cluster_utils.sh
 
-export debug=1
+#export debug=1
 export stopfile=./stop.test
 
 [[ $debug == "1" ]] && set -x
@@ -43,8 +43,9 @@ function truncate_thread
 {
     [[ $debug == "1" ]] && set -x
     typeset func="truncate_thread"
-    typeset sleep_sec=${1:-0.10}
-    write_prompt $func "Running $func"
+    typeset tdno=$1
+    typeset sleep_sec=${2:-0.10}
+    write_prompt $func "Running $func $tdno"
     while [[ ! -f $stopfile ]]; do
         truncate_table
         [[ $sleep_sec ]] && sleep $sleep_sec
@@ -55,11 +56,12 @@ function insert_thread
 {
     [[ $debug == "1" ]] && set -x
     typeset func="insert_thread"
-    typeset sleep_sec=${1:-0}
-    typeset maxrec=${2:-10000}
-    write_prompt $func "Running $func"
+    typeset tdno=$1
+    typeset sleep_sec=${2:-0}
+    typeset maxrec=${3:-10000}
+    write_prompt $func "Running $func $tdno"
     while [[ ! -f $stopfile ]]; do
-        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "INSERT INTO t1 SELECT * FROM generate_series(1, $maxrec)"
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "INSERT INTO t1 SELECT * FROM generate_series(1, $maxrec)" >/dev/null 2>&1
         [[ $sleep_sec ]] && sleep $sleep_sec
     done
 }
@@ -71,6 +73,7 @@ function run_test
     write_prompt $func "Running $func"
     typeset downgrades=30
     typeset inserters=10
+    typeset truncaters=5
     typeset maxtime=300
     typeset dgsleep=20
     typeset downgrade=1
@@ -80,11 +83,16 @@ function run_test
 
     create_database_tables
     rm -f $stopfile
-    truncate_thread &
+
+    i=0
+    while [[ $i -lt $truncaters ]]; do
+        truncate_thread $i &
+        let i=i+1
+    done
 
     i=0
     while [[ $i -lt $inserters ]]; do
-        insert_thread 0 10 &
+        insert_thread $i 0 10 &
         let i=i+1
     done
 
