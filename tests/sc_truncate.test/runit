@@ -7,6 +7,7 @@ bash -n "$0" | exit 1
 
 #export debug=1
 export stopfile=./stop.test
+export tablecount=3
 
 [[ $debug == "1" ]] && set -x
 
@@ -17,6 +18,13 @@ function cleanup
     write_prompt $func "Running $func"
     touch $stopfile
     wait
+}
+
+function randomtable
+{
+    [[ $debug == "1" ]] && set -x
+    typeset table=$(( RANDOM % tablecount ))
+    echo "t$table"
 }
 
 function failexit
@@ -35,8 +43,18 @@ function create_database_tables
     [[ $debug == "1" ]] && set -x
     typeset func="create_tables"
     write_prompt $func "Running $func"
-    drop_table
-    create_table
+
+    i=0
+    while [[ $i -lt $tablecount ]]; do
+        drop_table t$i
+        let i=i+1
+    done
+
+    i=0
+    while [[ $i -lt $tablecount ]]; do
+        create_table t$i
+        let i=i+1
+    done
 }
 
 function truncate_thread
@@ -47,7 +65,8 @@ function truncate_thread
     typeset sleep_sec=${2:-0.10}
     write_prompt $func "Running $func $tdno"
     while [[ ! -f $stopfile ]]; do
-        truncate_table
+        table=$(randomtable)
+        truncate_table $table
         [[ $sleep_sec ]] && sleep $sleep_sec
     done
 }
@@ -61,7 +80,8 @@ function insert_thread
     typeset maxrec=${3:-10000}
     write_prompt $func "Running $func $tdno"
     while [[ ! -f $stopfile ]]; do
-        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "INSERT INTO t1 SELECT * FROM generate_series(1, $maxrec)" >/dev/null 2>&1
+        table=$(randomtable)
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "INSERT INTO $table SELECT * FROM generate_series(1, $maxrec)" >/dev/null 2>&1
         [[ $sleep_sec ]] && sleep $sleep_sec
     done
 }
