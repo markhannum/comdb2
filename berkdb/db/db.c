@@ -519,6 +519,8 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 
 	/* set up peer pointer */
 	dbp->peer = NULL;
+	dbp->revpeer = NULL;
+	dbp->revpeer_count = 0;
 
 	if (F_ISSET(dbp, DB_AM_HASH))
 		dbp->peer = dbp;
@@ -527,6 +529,9 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 		if (memcmp(lldbp->fileid, dbp->fileid, DB_FILE_ID_LEN) == 0) {
 			if (F_ISSET(dbp, DB_AM_HASH)) {
 				lldbp->peer = dbp;
+				dbp->revpeer_count++;
+				realloc(dbp->revpeer, dbp->revpeer_count * sizeof(DB *));
+				dbp->revpeer[dbp->revpeer_count-1] = lldbp;
 			} else {
 				dbp->peer = lldbp->peer;
 				break;
@@ -770,14 +775,32 @@ __db_close(dbp, txn, flags)
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
 	db_ref = --dbenv->db_ref;
+	if (dbp->peer) {
+		for (int i = 0; i < dbp->peer->revpeer_count; i++) {
+			if (dbp->peer->revpeer[i] == dbp)
+				dbp->peer->revpeer[i] = NULL;
+		}
+	}
+
+	for (int i = 0; i < dbp->revpeer_count; i++) {
+		DB *lldbp = dbp->revpeer[i];
+		if (lldbp != NULL)
+			lldbp->peer = NULL;
+	}
 	MUTEX_THREAD_UNLOCK(dbenv, dbenv->dblist_mutexp);
 	if (F_ISSET(dbenv, DB_ENV_DBLOCAL) && db_ref == 0 &&
-	    (t_ret = __dbenv_close(dbenv, 0)) != 0 && ret == 0)
+		(t_ret = __dbenv_close(dbenv, 0)) != 0 && ret == 0)
 		ret = t_ret;
 
 	/* Free bthash. */
-	if (F_ISSET(dbp, DB_AM_HASH) && dbp->pg_hash)
+	if (F_ISSET(dbp, DB_AM_HASH) && dbp->pg_hash) {
 		genid_hash_free(dbenv, dbp->pg_hash);
+		if (dbp->revpeer) {
+			free(dbp->revpeer);
+			dbp->revpeer = NULL;
+		}
+		dbp->pg_hash = NULL;
+	}
 
 	/* Free the database handle. */
 	memset(dbp, CLEAR_BYTE, sizeof(*dbp));

@@ -1664,6 +1664,13 @@ struct __db {
 	 */
 	DB *peer;
 
+	/* DB **revpeer points back to the recovery dbp.  It allows us
+	 * to set it's peer pointer to NULL if the table is closed.
+	 */
+
+	DB **revpeer;
+	int revpeer_count;
+
 	genid_hash *pg_hash;
 
 	dbp_bthash_stat pg_hash_stat;
