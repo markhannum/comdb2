@@ -5,11 +5,17 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/ddl.sh
 . ${TESTSROOTDIR}/tools/cluster_utils.sh
 
-#export debug=1
+[[ $debug == "1" ]] && set -x
+
+export debug=1
 export stopfile=./stop.test
 export tablecount=3
-
-[[ $debug == "1" ]] && set -x
+export truncaters=5
+export truncater_sleep=0
+export downgrade_sleep=20
+export inserters=10
+export insertrecs=10
+export nocheckpoint=0
 
 function cleanup
 {
@@ -91,11 +97,17 @@ function run_test
     [[ $debug == "1" ]] && set -x
     typeset func="run_test"
     write_prompt $func "Running $func"
-    typeset downgrades=30
-    typeset inserters=10
-    typeset truncaters=5
+
+    # Arguments
+    typeset truncaters=${1}
+    typeset truncate_sleep=${2}
+    typeset downgrade_sleep=${3}
+    typeset inserters=${4}
+    typeset insertrecs=${5}
+    typeset nocheckpoint=${6}
+
+    # Locals
     typeset maxtime=300
-    typeset dgsleep=20
     typeset downgrade=1
     typeset i=0
     typeset now=$(date +%s)
@@ -104,28 +116,47 @@ function run_test
     create_database_tables
     rm -f $stopfile
 
+    # Tell nodes to not change the checkpoint-lsn
+    if [[ $nocheckpoint != 0 ]]; then
+        for node in $CLUSTER ; do
+            $CDB2SQL_EXE --admin -tabs $CDB2_OPTIONS --host $node $DBNAME "PUT TUNABLE 'disable_ckp' 1"
+        done
+    fi
+
     i=0
     while [[ $i -lt $truncaters ]]; do
-        truncate_thread $i &
+        truncate_thread $i $truncate_sleep &
         let i=i+1
     done
 
     i=0
     while [[ $i -lt $inserters ]]; do
-        insert_thread $i 0 10 &
+        insert_thread $i 0 $insertrecs &
         let i=i+1
     done
 
     while [[ "$(date +%s)" -lt $endtime ]]; do
+        sleep $downgrade_sleep
         if [[ $downgrade != 0 ]]; then
             for node in $CLUSTER ; do
                 $CDB2SQL_EXE -tabs $CDB2_OPTIONS --host $node $DBNAME "EXEC PROCEDURE sys.cmd.send('downgrade')"
             done
         fi
-        sleep $dgsleep
     done
     touch $stopfile
 }
 
-run_test
+# Tweak test to reproduce bthash dangling reference bug
+if [[ $DBNAME == *"bthashgenerated"* ]]; then
+    export inserters=10
+    export tablecount=1
+    export truncaters=1
+    export truncate_sleep=30
+    export downgrade_sleep=30
+    export insertrecs=10000
+    export nocheckpoint=1
+fi
+
+run_test $truncaters $truncate_sleep $downgrade_sleep $inserters $insertrecs $nocheckpoint
+
 echo "Success"

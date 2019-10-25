@@ -428,6 +428,8 @@ int get_dblist_count(dbenv, dbp, op, func, line)
 	return count;
 }
 
+#define BTHASH_REPRODUCE 1
+
 /*
  * __db_dbenv_setup --
  *	Set up the underlying environment during a db_open.
@@ -529,9 +531,11 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 		if (memcmp(lldbp->fileid, dbp->fileid, DB_FILE_ID_LEN) == 0) {
 			if (F_ISSET(dbp, DB_AM_HASH)) {
 				lldbp->peer = dbp;
+#if !defined BTHASH_REPRODUCE
 				dbp->revpeer_count++;
 				realloc(dbp->revpeer, dbp->revpeer_count * sizeof(DB *));
 				dbp->revpeer[dbp->revpeer_count-1] = lldbp;
+#endif
 			} else {
 				dbp->peer = lldbp->peer;
 				break;
@@ -775,6 +779,7 @@ __db_close(dbp, txn, flags)
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
 	db_ref = --dbenv->db_ref;
+#if !defined BTHASH_REPRODUCE
 	if (dbp->peer) {
 		for (int i = 0; i < dbp->peer->revpeer_count; i++) {
 			if (dbp->peer->revpeer[i] == dbp)
@@ -787,6 +792,7 @@ __db_close(dbp, txn, flags)
 		if (lldbp != NULL)
 			lldbp->peer = NULL;
 	}
+#endif
 	MUTEX_THREAD_UNLOCK(dbenv, dbenv->dblist_mutexp);
 	if (F_ISSET(dbenv, DB_ENV_DBLOCAL) && db_ref == 0 &&
 		(t_ret = __dbenv_close(dbenv, 0)) != 0 && ret == 0)
@@ -804,7 +810,13 @@ __db_close(dbp, txn, flags)
 
 	/* Free the database handle. */
 	memset(dbp, CLEAR_BYTE, sizeof(*dbp));
+#if defined BTHASH_REPRODUCE
+    /* Stack the deck and dont actually free */
+    F_SET(dbp, DB_AM_HASH);
+    F_CLR(dbp, DB_AM_RECOVER);
+#else
 	__os_free(dbenv, dbp);
+#endif
 
 	return (ret);
 }
