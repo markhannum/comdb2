@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
 
+#export debug=1
+[[ $debug == "1" ]] && set -x
+
 . ${TESTSROOTDIR}/tools/write_prompt.sh
 . ${TESTSROOTDIR}/tools/ddl.sh
 . ${TESTSROOTDIR}/tools/cluster_utils.sh
 
-[[ $debug == "1" ]] && set -x
-
-export debug=1
+# Globals
 export stopfile=./stop.test
 export tablecount=3
 export truncaters=5
-export truncater_sleep=0
+export truncate_sleep=0
 export downgrade_sleep=20
 export inserters=10
 export insertrecs=10
