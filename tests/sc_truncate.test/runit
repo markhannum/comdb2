@@ -8,17 +8,6 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/ddl.sh
 . ${TESTSROOTDIR}/tools/cluster_utils.sh
 
-# Globals
-export stopfile=./stop.test
-export tablecount=3
-export truncaters=5
-export truncate_sleep=0
-export downgrade_sleep=20
-export inserters=10
-export insertrecs=10
-export nocheckpoint=0
-export bthashtest=0
-
 function cleanup
 {
     [[ $debug == "1" ]] && set -x
@@ -149,8 +138,18 @@ function run_test
     touch $stopfile
 }
 
-# Tweak test to reproduce bthash dangling reference bug
-if [[ $DBNAME == *"bthashgenerated"* ]]; then
+# Globals
+export stopfile=./stop.test
+if [[ $DBNAME == *"lockordergenerated"* ]]; then
+    export tablecount=3
+    export truncaters=5
+    export truncate_sleep=0
+    export downgrade_sleep=20
+    export inserters=10
+    export insertrecs=10
+    export nocheckpoint=0
+    export bthashtest=0
+else
     export inserters=1
     export tablecount=100
     export truncaters=1
