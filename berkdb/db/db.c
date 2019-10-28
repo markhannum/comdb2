@@ -428,8 +428,6 @@ int get_dblist_count(dbenv, dbp, op, func, line)
 	return count;
 }
 
-#define BTHASH_REPRODUCE_BUG 1
-
 /*
  * __db_dbenv_setup --
  *	Set up the underlying environment during a db_open.
