@@ -1671,6 +1671,8 @@ struct __db {
 	DB **revpeer;
 	int revpeer_count;
 
+	int is_free;
+
 	genid_hash *pg_hash;
 
 	dbp_bthash_stat pg_hash_stat;

@@ -428,7 +428,8 @@ int get_dblist_count(dbenv, dbp, op, func, line)
 	return count;
 }
 
-#define BTHASH_REPRODUCE 1
+#define BTHASH_REPRODUCE_BUG 1
+void comdb2_cheapstack(FILE *f);
 
 /*
  * __db_dbenv_setup --
@@ -523,19 +524,23 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 	dbp->peer = NULL;
 	dbp->revpeer = NULL;
 	dbp->revpeer_count = 0;
+	dbp->is_free = 0;
 
-	if (F_ISSET(dbp, DB_AM_HASH))
+	if (F_ISSET(dbp, DB_AM_HASH)) {
 		dbp->peer = dbp;
+	}
 	for (lldbp = LIST_FIRST(&dbenv->dblist);
 		lldbp != NULL; lldbp = LIST_NEXT(lldbp, dblistlinks)) {
 		if (memcmp(lldbp->fileid, dbp->fileid, DB_FILE_ID_LEN) == 0) {
 			if (F_ISSET(dbp, DB_AM_HASH)) {
 				lldbp->peer = dbp;
-#if !defined BTHASH_REPRODUCE
+				logmsg(LOGMSG_USER, "%s line %d dbp=%p peer=%p\n", __func__, __LINE__,
+						dbp, dbp->peer);
+				comdb2_cheapstack(stderr);
 				dbp->revpeer_count++;
-				realloc(dbp->revpeer, dbp->revpeer_count * sizeof(DB *));
+				dbp->revpeer = realloc(dbp->revpeer, dbp->revpeer_count *
+						sizeof(DB *));
 				dbp->revpeer[dbp->revpeer_count-1] = lldbp;
-#endif
 			} else {
 				dbp->peer = lldbp->peer;
 				break;
@@ -590,16 +595,16 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 		aft = get_dblist_count(dbenv, dbp, "after-insert", __func__, __LINE__);
 		if (gbl_instrument_dblist && aft != (bef+1))
 			abort();
-        if (gbl_instrument_dblist)
-            logmsg(LOGMSG_DEBUG, "%s found match for dbp at adj_fileid %u\n",
-                    __func__, ldbp->adj_fileid);
+		if (gbl_instrument_dblist)
+			logmsg(LOGMSG_DEBUG, "%s found match for dbp at adj_fileid %u\n",
+					__func__, ldbp->adj_fileid);
 	}
 	dbp->inadjlist = 1;
 	listc_abl(&dbenv->dbs[dbp->adj_fileid], dbp);
-    if (gbl_instrument_dblist)
-        logmsg(LOGMSG_DEBUG, "%s putting dbp %p adj_fileid %u into %p list "
-                "%p\n", __func__, dbp, dbp->adj_fileid, dbenv, &dbenv->dbs[
-                dbp->adj_fileid]);
+	if (gbl_instrument_dblist)
+		logmsg(LOGMSG_DEBUG, "%s putting dbp %p adj_fileid %u into %p list "
+				"%p\n", __func__, dbp, dbp->adj_fileid, dbenv, &dbenv->dbs[
+				dbp->adj_fileid]);
 
 	MUTEX_THREAD_UNLOCK(dbenv, dbenv->dblist_mutexp);
 
@@ -729,6 +734,22 @@ __db_close(dbp, txn, flags)
 
 	dbenv->close_flags = flags;
 
+#if defined BTHASH_REPRODUCE_BUG
+
+	logmsg(LOGMSG_USER, "%s closing dbp %p, peer is %p\n",
+			__func__, dbp, dbp->peer);
+	comdb2_cheapstack(stderr);
+
+	if (F_ISSET(dbp, DB_AM_HASH)) {
+		for (int i = 0; i < dbp->revpeer_count; i++) {
+			if (dbp->revpeer[i]->peer == dbp) {
+				logmsg(LOGMSG_USER, "%p has dangling peer %p\n",
+						dbp, dbp->revpeer[i]);
+			}
+		}
+	} 
+#endif
+
 	/*
 	 * Validate arguments, but as a DB handle destructor, we can't fail.
 	 *
@@ -779,7 +800,8 @@ __db_close(dbp, txn, flags)
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
 	db_ref = --dbenv->db_ref;
-#if !defined BTHASH_REPRODUCE
+
+#if !defined BTHASH_REPRODUCE_BUG
 	if (dbp->peer) {
 		for (int i = 0; i < dbp->peer->revpeer_count; i++) {
 			if (dbp->peer->revpeer[i] == dbp)
@@ -801,21 +823,26 @@ __db_close(dbp, txn, flags)
 	/* Free bthash. */
 	if (F_ISSET(dbp, DB_AM_HASH) && dbp->pg_hash) {
 		genid_hash_free(dbenv, dbp->pg_hash);
+#if ! defined BTHASH_REPRODUCE_BUG
 		if (dbp->revpeer) {
 			free(dbp->revpeer);
 			dbp->revpeer = NULL;
 		}
 		dbp->pg_hash = NULL;
+#endif
 	}
 
 	/* Free the database handle. */
-	memset(dbp, CLEAR_BYTE, sizeof(*dbp));
-#if defined BTHASH_REPRODUCE
-    /* Stack the deck and dont actually free */
-    F_SET(dbp, DB_AM_HASH);
-    F_CLR(dbp, DB_AM_RECOVER);
-#else
+#if defined BTHASH_REPRODUCE_BUG
+	memset(dbp, 0xdb, sizeof(*dbp));
+	dbp->is_free = 1;
+	F_SET(dbp, DB_AM_HASH);
+	F_CLR(dbp, DB_AM_RECOVER);
 	__os_free(dbenv, dbp);
+#else
+	memset(dbp, CLEAR_BYTE, sizeof(*dbp));
+	dbp->is_free = 1;
+	//__os_free(dbenv, dbp);
 #endif
 
 	return (ret);

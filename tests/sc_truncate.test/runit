@@ -17,6 +17,7 @@ export downgrade_sleep=20
 export inserters=10
 export insertrecs=10
 export nocheckpoint=0
+export bthashtest=0
 
 function cleanup
 {
@@ -106,6 +107,7 @@ function run_test
     typeset inserters=${4}
     typeset insertrecs=${5}
     typeset nocheckpoint=${6}
+    typeset bthashtest=${7}
 
     # Locals
     typeset maxtime=300
@@ -149,15 +151,16 @@ function run_test
 
 # Tweak test to reproduce bthash dangling reference bug
 if [[ $DBNAME == *"bthashgenerated"* ]]; then
-    export inserters=10
-    export tablecount=1
+    export inserters=1
+    export tablecount=100
     export truncaters=1
     export truncate_sleep=30
     export downgrade_sleep=30
     export insertrecs=10000
     export nocheckpoint=1
+    export bthashtest=1
 fi
 
-run_test $truncaters $truncate_sleep $downgrade_sleep $inserters $insertrecs $nocheckpoint
+run_test $truncaters $truncate_sleep $downgrade_sleep $inserters $insertrecs $nocheckpoint $bthashtest
 
 echo "Success"
