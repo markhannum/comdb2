@@ -429,7 +429,6 @@ int get_dblist_count(dbenv, dbp, op, func, line)
 }
 
 #define BTHASH_REPRODUCE_BUG 1
-void comdb2_cheapstack(FILE *f);
 
 /*
  * __db_dbenv_setup --
@@ -534,9 +533,6 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 		if (memcmp(lldbp->fileid, dbp->fileid, DB_FILE_ID_LEN) == 0) {
 			if (F_ISSET(dbp, DB_AM_HASH)) {
 				lldbp->peer = dbp;
-				logmsg(LOGMSG_USER, "%s line %d dbp=%p peer=%p\n", __func__, __LINE__,
-						dbp, dbp->peer);
-				comdb2_cheapstack(stderr);
 				dbp->revpeer_count++;
 				dbp->revpeer = realloc(dbp->revpeer, dbp->revpeer_count *
 						sizeof(DB *));
@@ -546,6 +542,12 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 				break;
 			}
 		}
+	}
+
+	/* See if I can maintain only a single pointer */
+	if (dbp->revpeer_count > 1) {
+		logmsg(LOGMSG_INFO, "%s revpeer_count for %p is %d\n", __func__, dbp,
+				dbp->revpeer_count);
 	}
 
 	int count=0;
@@ -734,22 +736,6 @@ __db_close(dbp, txn, flags)
 
 	dbenv->close_flags = flags;
 
-#if defined BTHASH_REPRODUCE_BUG
-
-	logmsg(LOGMSG_USER, "%s closing dbp %p, peer is %p\n",
-			__func__, dbp, dbp->peer);
-	comdb2_cheapstack(stderr);
-
-	if (F_ISSET(dbp, DB_AM_HASH)) {
-		for (int i = 0; i < dbp->revpeer_count; i++) {
-			if (dbp->revpeer[i]->peer == dbp) {
-				logmsg(LOGMSG_USER, "%p has dangling peer %p\n",
-						dbp, dbp->revpeer[i]);
-			}
-		}
-	} 
-#endif
-
 	/*
 	 * Validate arguments, but as a DB handle destructor, we can't fail.
 	 *
@@ -833,17 +819,14 @@ __db_close(dbp, txn, flags)
 	}
 
 	/* Free the database handle. */
-#if defined BTHASH_REPRODUCE_BUG
-	memset(dbp, 0xdb, sizeof(*dbp));
-	dbp->is_free = 1;
-	F_SET(dbp, DB_AM_HASH);
-	F_CLR(dbp, DB_AM_RECOVER);
-	__os_free(dbenv, dbp);
-#else
 	memset(dbp, CLEAR_BYTE, sizeof(*dbp));
 	dbp->is_free = 1;
-	//__os_free(dbenv, dbp);
+
+#if defined BTHASH_REPRODUCE_BUG
+	F_SET(dbp, DB_AM_HASH);
+	F_CLR(dbp, DB_AM_RECOVER);
 #endif
+	__os_free(dbenv, dbp);
 
 	return (ret);
 }

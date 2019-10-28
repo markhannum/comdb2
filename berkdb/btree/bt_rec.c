@@ -371,13 +371,13 @@ lrundo:		if ((rootsplit && lp != NULL) || rp != NULL) {
 done:	*lsnp = argp->prev_lsn;
 	ret = 0;
 
-	if (dbp) {
-		if (dbp->is_free)
-			abort();
-		logmsg(LOGMSG_USER, "%s line %d file_dbp=%p dbp=%p AM_RECOVER=%d AM_HASH=%d"
-				" HASH=%p rootsplit=%d\n",
-				__func__, __LINE__, file_dbp, dbp, dbp ? F_ISSET(dbp, DB_AM_RECOVER) : 0,
-				dbp ? F_ISSET(dbp, DB_AM_HASH) : 0, dbp ? dbp->pg_hash : NULL, rootsplit);
+	if (dbp && dbp->is_free) {
+		logmsg(LOGMSG_FATAL, "%s line %d file_dbp=%p freed-dbp=%p AM_RECOVER=%d"
+				" AM_HASH=%d HASH=%p rootsplit=%d\n", __func__, __LINE__,
+				file_dbp, dbp, dbp ? F_ISSET(dbp, DB_AM_RECOVER) : 0, dbp ?
+				F_ISSET(dbp, DB_AM_HASH) : 0, dbp ? dbp->pg_hash : NULL,
+				rootsplit);
+		abort();
 	}
 	if (file_dbp && dbp &&
 		!F_ISSET(dbp, DB_AM_RECOVER) &&
