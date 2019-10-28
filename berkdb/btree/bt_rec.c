@@ -384,8 +384,6 @@ done:	*lsnp = argp->prev_lsn;
 		F_ISSET(dbp, DB_AM_HASH) &&
 		(hash = dbp->pg_hash) != NULL &&!rootsplit) {
 		argp_lp = argp->pg.data;
-		logmsg(LOGMSG_USER, "%s line %d copying genids to bt-hash\n", __func__,
-				__LINE__);
 		// Update the page numbers in the genid-pg hash
 		for (off = argp->indx; off < NUM_ENT(argp_lp); off += P_INDX) {
 			// for each key on the new page

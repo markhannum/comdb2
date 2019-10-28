@@ -526,6 +526,7 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 	if (F_ISSET(dbp, DB_AM_HASH)) {
 		dbp->peer = dbp;
 	}
+
 	for (lldbp = LIST_FIRST(&dbenv->dblist);
 		lldbp != NULL; lldbp = LIST_NEXT(lldbp, dblistlinks)) {
 		if (memcmp(lldbp->fileid, dbp->fileid, DB_FILE_ID_LEN) == 0) {
@@ -536,7 +537,13 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 						sizeof(DB *));
 				dbp->revpeer[dbp->revpeer_count-1] = lldbp;
 			} else {
-				dbp->peer = lldbp->peer;
+				if (lldbp->peer && F_ISSET(lldbp->peer, DB_AM_HASH)) {
+					dbp->peer = lldbp->peer;
+					lldbp->peer->revpeer_count++;
+					lldbp->peer->revpeer = realloc(lldbp->peer->revpeer,
+							lldbp->peer->revpeer_count * sizeof(DB *));
+					lldbp->peer->revpeer[lldbp->peer->revpeer_count-1] = dbp;
+				}
 				break;
 			}
 		}
