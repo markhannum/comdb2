@@ -453,6 +453,12 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 
 	dbenv = dbp->dbenv;
 
+	/* Set up peer pointers */
+	dbp->peer = NULL;
+	dbp->revpeer = NULL;
+	dbp->revpeer_count = 0;
+	dbp->is_free = 0;
+
 	/* If we don't yet have an environment, it's time to create it. */
 	if (!F_ISSET(dbenv, DB_ENV_OPEN_CALLED)) {
 		/* Make sure we have at least DB_MINCACHE pages in our cache. */
@@ -516,12 +522,6 @@ __db_dbenv_setup(dbp, txn, fname, id, flags)
 	 * expensive memcmps.
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
-
-	/* set up peer pointer */
-	dbp->peer = NULL;
-	dbp->revpeer = NULL;
-	dbp->revpeer_count = 0;
-	dbp->is_free = 0;
 
 	if (F_ISSET(dbp, DB_AM_HASH)) {
 		dbp->peer = dbp;
@@ -807,7 +807,7 @@ __db_close(dbp, txn, flags)
 	/* Free bthash. */
 	if (F_ISSET(dbp, DB_AM_HASH) && dbp->pg_hash) {
 		genid_hash_free(dbenv, dbp->pg_hash);
-#if ! defined BTHASH_REPRODUCE_BUG
+#if !defined BTHASH_REPRODUCE_BUG
 		if (dbp->revpeer) {
 			free(dbp->revpeer);
 			dbp->revpeer = NULL;
