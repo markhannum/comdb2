@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+sleeptime=2
+ckiters=10
 dbnm=$1
 #cat <<EOF | cdb2sql ${CDB2_OPTIONS} $dbnm default - > output.txt 2>&1
 cat <<EOF | cdb2sql ${CDB2_OPTIONS} $dbnm default - > output.txt 2>&1
@@ -61,5 +65,61 @@ if [ $? -ne 0 ] ; then
      echo " "
      exit 1
 fi 
+
+# Enable logging for this part
+set -x
+
+# Change the name
+cdb2sql ${CDB2_OPTIONS} $dbnm default "alter table t rename to identifiers_staged" 
+if [[ $? -ne 0 ]]; then
+    echo "Can't find rename to new table"
+    exit 1
+fi
+
+cdb2sql ${CDB2_OPTIONS} $dbnm default "select count(*) from identifiers_staged"
+if [[ $? -ne 0 ]]; then
+    echo "Can't find records in new table"
+    exit 1
+fi
+
+cdb2sql ${CDB2_OPTIONS} $dbnm default "alter table identifiers_staged rename to identifiers"
+if [[ $? -ne 0 ]]; then
+    echo "Can't find rename to new table"
+    exit 1
+fi
+
+# Bounce
+bounce_database
+sleep $sleeptime
+export out=""
+
+# Make sure cluster is alive
+if [[ -z "$CLUSTER" ]]; then
+    export cnt=0
+    while [[ "$out" != "1" ]]; do
+        out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs $DBNAME default 'select 1' 2> /dev/null)
+        $CDB2SQL_EXE -v ${CDB2_OPTIONS} --tabs $DBNAME default 'select 1' 
+        sleep $sleeptime
+        let cnt=cnt+1
+        if [[ $cnt -gt $ckiters ]]; then
+            echo "Database failed to restart"
+            exit 1
+        fi
+    done
+else
+    for node in ${CLUSTER}; do
+        export cnt=0
+        while [[ "$out" != "1" ]]; do
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node $DBNAME 'select 1' 2> /dev/null)
+            $CDB2SQL_EXE -v ${CDB2_OPTIONS} --tabs --host $node $DBNAME 'select 1' 
+            sleep $sleeptime
+            let cnt=cnt+1
+            if [[ $cnt -gt $ckiters ]]; then
+                echo "Database failed to restart on $node"
+                exit 1
+            fi
+        done
+    done
+fi
 
 echo "Success"

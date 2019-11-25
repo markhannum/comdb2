@@ -22,7 +22,7 @@ function bounce_cluster
     typeset sleeptime=${1:-5}
     write_prompt $func "Running $func"
     for node in $CLUSTER ; do
-        $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME --host $n "exec procedure sys.cmd.send(\"exit\")"
+        $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME --host $node "exec procedure sys.cmd.send(\"exit\")"
     done
     sleep $sleeptime
 
