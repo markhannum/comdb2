@@ -62,7 +62,6 @@ void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
  * PUBLIC: int __db_open __P((DB *, DB_TXN *,
  * PUBLIC:     const char *, const char *, DBTYPE, u_int32_t, int, db_pgno_t));
  */
-#include "cheapstack.h"
 int
 __db_open(dbp, txn, fname, dname, type, flags, mode, meta_pgno)
 	DB *dbp;
