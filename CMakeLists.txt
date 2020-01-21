@@ -83,6 +83,12 @@ add_definitions(
   -D_FILE_OFFSET_BITS=64
 )
 
+option(STACK_AT_DB_OPEN_CLOSE "Save a cheap-stack at every db_open" OFF)
+mark_as_advanced(STACK_AT_DB_OPEN_CLOSE)
+if(STACK_AT_DB_OPEN_CLOSE)
+    add_definitions(-DSTACK_AT_DB_OPEN_CLOSE)
+endif()
+
 option(COMDB2_PER_THREAD_MALLOC "Turn OFF to run under Valgrind" ON)
 if(COMDB2_PER_THREAD_MALLOC)
   add_definitions(-DPER_THREAD_MALLOC)

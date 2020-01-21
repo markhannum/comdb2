@@ -39,6 +39,11 @@
 
 #include "db_config.h"
 #include <stdlib.h>
+#include "cheapstack.h"
+
+#if defined (STACK_AT_DB_OPEN_CLOSE)
+void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
+#endif
 
 #ifndef lint
 static const char revid[] = "$Id: db.c,v 11.283 2003/11/14 05:32:29 ubell Exp $";
@@ -62,6 +67,7 @@ static const char revid[] = "$Id: db.c,v 11.283 2003/11/14 05:32:29 ubell Exp $"
 #include "dbinc/qam.h"
 #include "dbinc/txn.h"
 #include "logmsg.h"
+#include <tohex.h>
 
 static int __db_dbenv_mpool __P((DB *, const char *, u_int32_t));
 static int __db_disassociate __P((DB *));
@@ -851,6 +857,13 @@ __db_refresh(dbp, txn, flags, deferred_closep)
 
 	dbenv = dbp->dbenv;
 
+#if defined (STACK_AT_DB_OPEN_CLOSE)
+	char fid_str[(DB_FILE_ID_LEN * 2) + 1] = {0};
+	fileid_str(dbp->fileid, fid_str);
+	comdb2_cheapstack_sym(stderr, "%ld closed %s at %p txn=0x%x unopened=%u:",
+			pthread_self(), fid_str, dbp, txn ? txn->txnid : 0,
+			F_ISSET(dbp, DB_AM_OPEN_CALLED));
+#endif
 	/* If never opened, or not currently open, it's easy. */
 	if (!F_ISSET(dbp, DB_AM_OPEN_CALLED))
 		goto never_opened;
