@@ -328,31 +328,6 @@ static int perform_trigger_update_int(struct schema_change_type *sc)
     scdone_t scdone_type = llmeta_queue_add;
     SBUF2 *sb = sc->sb;
 
-// <<<<<<< Updated upstream
-// =======
-//     set_empty_queue_options(sc);
-// 
-//     init_fake_ireq(thedb, &iq);
-//     iq.usedb = &thedb->static_table;
-// 
-//     rc = trans_start(&iq, NULL, (void *)&tran);
-//     if (rc) {
-//         sbuf2printf(sb, "!Error %d creating a transaction for %s.\n", rc,
-//                     sc->tablename);
-//         sbuf2printf(sb, "FAILED\n");
-//         goto done;
-//     }
-// 
-//     bdb_ltran_get_schema_lock(tran);
-//     rc = bdb_lock_tablename_write(thedb->bdb_env, sc->tablename, tran);
-//     if (rc) {
-//         sbuf2printf(sb, "!Error %d getting tablelock for %s.\n", rc,
-//                     sc->tablename);
-//         sbuf2printf(sb, "FAILED\n");
-//         goto done;
-//     }
-// 
-// >>>>>>> Stashed changes
     db = get_dbtable_by_name(sc->tablename);
     if (db) {
         sbuf2printf(sb, "!Trigger name %s clashes with existing table.\n",
