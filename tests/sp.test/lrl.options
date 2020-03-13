@@ -1,2 +1,4 @@
 dtastripe 1
 enable_snapshot_isolation
+cohlease
+dbnum 2857
