@@ -1535,7 +1535,7 @@ __lock_vec(dbenv, locker, flags, list, nlist, elistp)
 						SH_LIST_INIT(&lklsnp->lsns);
 						Pthread_mutex_lock(&lp->
 						    lsns_mtx);
-						lklsnp->dlen = sh_obj->priority;
+						//lklsnp->dlen = sh_obj->priority;
 						lklsnp->nlsns = lp->nlsns;
 						SH_LIST_FIRST(&(lklsnp->lsns),
 						    __db_lock_lsn) =
@@ -1555,7 +1555,7 @@ __lock_vec(dbenv, locker, flags, list, nlist, elistp)
 						DB_ASSERT((char *)np <
 						    (char *)objlist->data +
 						    objlist->size);
-						np->dlen = sh_obj->priority;
+						//np->dlen = sh_obj->priority;
 						np->data = sh_obj->lockobj.data;
 						np->size = sh_obj->lockobj.size;
 						np++;
@@ -2868,13 +2868,18 @@ expired:			obj_ndx = sh_obj->index;
 
 	if (IS_WRITELOCK(newl->mode)) {
 		sh_locker->nwrites++;
+        /*
         if (LF_ISSET(DB_LOCK_PRIORITY))
             sh_obj->priority = 1;
         else
             sh_obj->priority = 0;
-    } else {
+        */
+    } 
+    /*
+    else {
         sh_obj->priority = 0;
     }
+    */
 	if (is_pagelock(sh_obj) && IS_WRITELOCK(lock->mode) &&
 	    F_ISSET(sh_locker, DB_LOCKER_TRACK_WRITELOCKS)) {
 		if (sh_locker->ntrackedlocks + 1 > sh_locker->maxtrackedlocks) {
