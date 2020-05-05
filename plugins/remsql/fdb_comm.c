@@ -2149,33 +2149,44 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
     case FDB_MSG_DATA_ROW:
 
-        rc = sbuf2fwrite(msg->dr.cid, 1, idsz, sb);
+        remsql_msg.cid = msg->dr.cid;
+        /*rc = sbuf2fwrite(msg->dr.cid, 1, idsz, sb);
         if (rc != idsz)
-            return FDB_ERR_WRITE_IO;
+            return FDB_ERR_WRITE_IO;*/
 
         tmp = htonl(msg->dr.rc);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        remsql_msg.rc = tmp;
+        /*rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
+            return FDB_ERR_WRITE_IO;*/
 
         lltmp = flibc_htonll(msg->dr.genid);
-        rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
+        remsql_msg.genid = lltmp;
+        /*rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return FDB_ERR_WRITE_IO;
+            return FDB_ERR_WRITE_IO;*/
 
         if (unlikely(msg->dr.datacopylen != 0))
             abort();
         tmp = (((unsigned)msg->dr.datalen) << 16) +
               (((unsigned)msg->dr.datalen) >> 16);
         tmp = htonl(tmp);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        remsql_msg.datalen = tmp;
+        /*rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
+            return FDB_ERR_WRITE_IO;*/
 
         if (msg->dr.data && msg->dr.datalen > 0) {
-            rc = sbuf2fwrite(msg->dr.data, 1, msg->dr.datalen, sb);
-            if (rc != msg->dr.datalen)
+            char *buf = malloc(msg->dr.datalen);
+            if(!buf){
+                logmsg(LOGMSG_USER, "%s:%d out of memory malloc\n",__func__, __LINE__);
                 return FDB_ERR_WRITE_IO;
+            }
+            memcpy(buf,msg->dr.data,msg->dr.datalen);
+            remsql_msg.data = buf;
+            /*rc = sbuf2fwrite(msg->dr.data, 1, msg->dr.datalen, sb);
+            if (rc != msg->dr.datalen)
+                return FDB_ERR_WRITE_IO;*/
         }
         break;
 
