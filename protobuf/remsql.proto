@@ -1,0 +1,32 @@
+syntax = "proto2";
+
+option java_package = "com.bloomberg.comdb2.jdbc";
+
+enum RunSqlFlags {
+    NORMAL = 1 ; // regular request
+    SCHEMA = 2; /* special schema request, instructs sende to mark all indexes as
+                   covered indexed */
+    TRIM = 3; // remote trimms data using the provided key as boundary condition 
+}
+
+message CDB2_REMSQL_MSG { 
+  required int32 type = 1; //  type of the message
+  optional string cid = 2; // cursor id
+  optional string tid = 3; // transaction id
+  optional string ciduuid = 4;
+  optional string tiduuid = 5;
+  optional int32 seq = 6; /* used for ordering of certain operations in 
+                             transactional cursors */
+  optional int32 flags = 7;
+  optional int32 rootpage = 8; // which btree
+  optional int32 version = 9; // which version of schema
+  optional int32 srcpid = 10; // pid of the source
+  optional int32 srcnamelen = 11; // length of hostname of the source
+  optional string srcname = 12; // hostname of the source 
+  optional int32 ssl = 13; 
+  optional RunSqlFlags run_sql_flags = 14; // flags changing the remote behavior
+  optional int32 sqllen = 15; // length of sql query
+  optional string sql = 16; // sql query
+  optional int32 keylen = 17; // keylen of key used for trimming
+  optional string key = 18; // key used for end of trimming 
+}
