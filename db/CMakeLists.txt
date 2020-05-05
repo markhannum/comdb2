@@ -95,6 +95,7 @@ set(src
   machclass.c
   osqluprec.c
   ${PROJECT_BINARY_DIR}/protobuf/bpfunc.pb-c.c
+  ${PROJECT_BINARY_DIR}/protobuf/remsql.pb-c.c
   ${PROJECT_SOURCE_DIR}/tools/cdb2_dump/cdb2_dump.c
   ${PROJECT_SOURCE_DIR}/tools/cdb2_load/cdb2_load.c
   ${PROJECT_SOURCE_DIR}/tools/cdb2_printlog/cdb2_printlog.c
