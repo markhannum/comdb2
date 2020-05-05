@@ -29,4 +29,11 @@ message CDB2_REMSQL_MSG {
   optional string sql = 16; // sql query
   optional int32 keylen = 17; // keylen of key used for trimming
   optional string key = 18; // key used for end of trimming 
+
+  optional int32 rc = 19; //results of the search
+  optional uint64 genid = 20; // genid
+  optional int32 datalen = 21; /* NET FORMAT = data length: high 16 bits; datacopy length: low 16 bits*/
+  optional int32 datacopylen = 22; // datacopylen afterr extraction
+  optional string data = 23; // row(including datacopy) or error string
+  optional string datacopy = 24; // after extraction
 }
