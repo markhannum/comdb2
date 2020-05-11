@@ -2478,12 +2478,28 @@ fdb_cursor_if_t *fdb_cursor_open(struct sqlclntstate *clnt, BtCursor *pCur,
     int rc;
     int source_rootpage;
     int flags;
-
+    char *db_name;
+    const char *db_location;
+    cdb2_hndl_tp *db;
     assert(pCur->bt->is_remote);
 
+    flags = CDB2_REMSQL; 
     fdb = pCur->bt->fdb;
-
     assert(fdb != NULL);
+
+    db_name = fdb->dbname;
+    assert(db_name!=NULL);
+
+    if(fdb->local){ // This db was added by a local access
+        db_location = "local";
+    }
+    else{
+        db_location = mach_class_class2name(fdb->class);
+    }
+    assert(db_location!=NULL);
+
+    // call cdb2_open() to establish connection to remote db
+    rc = cdb2_open(&db, db_name,db_location,CDB2_REMSQL); 
 
     if (pCur->fdbc) {
         logmsg(LOGMSG_ERROR, "%s: fdb cursor already opened, refreshing\n",
