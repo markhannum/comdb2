@@ -1035,6 +1035,8 @@ struct cdb2_hndl {
     int comdb2db_timeout;
     int socket_timeout;
     cdb2_event events;
+    // If cdb2_open call is to a remote db
+    int is_remsql;
     // Protobuf allocator data used only for row data i.e. lastresponse
     void *protobuf_data;
     int protobuf_size;
@@ -2296,7 +2298,12 @@ static int newsql_connect(cdb2_hndl_tp *hndl, int node_indx)
         }
         if (hndl->is_admin)
             sbuf2printf(sb, "@");
-        sbuf2printf(sb, "newsql\n");
+        if(hndl->is_remsql){ // if using cdb2api for remote db connection 
+            sbuf2printf(sb, "remsql\n");
+        }
+        else {
+            sbuf2printf(sb, "newsql\n");
+        }
         sbuf2flush(sb);
     }
 
@@ -6118,6 +6125,10 @@ int cdb2_open(cdb2_hndl_tp **handle, const char *dbname, const char *type,
     strncpy(hndl->dbname, dbname, sizeof(hndl->dbname) - 1);
     strncpy(hndl->cluster, type, sizeof(hndl->cluster) - 1);
     strncpy(hndl->type, type, sizeof(hndl->type) - 1);
+    // use cdb2api for remote db connection
+    if(flags & CDB2_REMSQL){
+        hndl->is_remsql = 1;
+    }
     hndl->flags = flags;
     hndl->dbnum = 1;
     hndl->connected_host = -1;
