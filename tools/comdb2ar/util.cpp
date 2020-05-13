@@ -278,6 +278,43 @@ void make_dirs(const std::string& dirname)
 
 }
 
+std::unique_ptr<fdostream> output_existing_file(
+        const std::string& filename,
+        bool direct)
+{
+    struct stat st;
+    /*
+    if(stat(filename.c_str(), &st) != 0) {
+        throw Error("Cannot open existing '" + filename + "' for writing");
+    }
+    */
+
+    int flags = O_WRONLY | O_CREAT;
+#if defined(__sun) || defined(__APPLE__)
+    int fd = open(filename.c_str(), flags, 0666);
+    if (fd == -1) throw Error("Error opening existing '" + filename + "'for writing");
+    
+#else
+    if (direct)
+        flags |= O_DIRECT;
+reopen:
+    int fd = open(filename.c_str(), flags, 0666);
+    if (fd == -1) {
+        if (EINVAL == errno) {
+            std::clog << "Turning off directio, err: " << std::strerror(errno) << std::endl;
+            flags ^= O_DIRECT;
+            goto reopen;
+        } else {
+            throw Error("Error opening '" + filename + "' for writing");
+        }
+    }
+#endif
+
+    return std::unique_ptr<fdostream>(new fdostream(fd));
+}
+
+        
+
 
 std::unique_ptr<fdostream> output_file(
         const std::string& filename,

@@ -17,6 +17,8 @@
 #include <sstream>
 #include <iostream>
 #include <fstream>
+#include <thread>
+#include <mutex>
 #include <vector>
 #include <memory>
 
@@ -103,6 +105,30 @@ bool read_octal_ull(const char *str, size_t len, unsigned long long& number)
         }
     }
     return true;
+}
+
+static void check_remaining_space(const std::string &datadestdir,
+        unsigned percent_full, const std::string &filename,
+        unsigned long long bytesleft)
+{
+    struct statvfs stfs;
+    int rc = statvfs(datadestdir.c_str(), &stfs);
+    if(rc == -1) {
+        std::ostringstream ss;
+        ss << "Error running statvfs on " << datadestdir
+            << ": " << strerror(errno);
+        throw Error(ss);
+    }
+
+    fsblkcnt_t fsblocks = bytesleft / stfs.f_bsize;
+    double percent_free = 100.00 * ((double)(stfs.f_bavail - fsblocks) / (double)stfs.f_blocks);
+    if(100.00 - percent_free >= percent_full) {
+        std::ostringstream ss;
+        ss << "Not enough space to deserialise " << filename
+            << " (" << bytesleft << " bytes) - would leave only "
+            << percent_free << "% free space";
+        throw Error(ss);
+    }
 }
 
 
@@ -355,6 +381,112 @@ static bool check_dest_dir(const std::string& dir)
 
 #define write_size (1000*1024)
 
+void do_write(const std::string filename, const std::string destdir,
+                unsigned long long bytesleft, size_t bufsize,
+                bool file_is_sparse, unsigned long long padding_bytes,
+                unsigned percent_full, bool direct)
+{
+    uint8_t *buf;
+    unsigned long long recheck_count = FS_PERIODIC_CHECK;
+    unsigned long long readbytes = 0;
+    unsigned long long skipped_bytes = 0;
+    unsigned long long filesize = bytesleft;
+    std::string outfilename(destdir + "/" + filename);
+
+    void *empty_page = malloc(65536);
+    memset(empty_page, 0, 65536);
+    
+    std::unique_ptr<fdostream> of_ptr;
+
+    of_ptr = output_file(outfilename, false, direct);
+#if defined _HP_SOURCE || defined _SUN_SOURCE
+    buf = (uint8_t*) memalign(512, bufsize);
+#else
+    if (posix_memalign((void**) &buf, 512, bufsize))
+        throw Error("Failed to allocate output buffer");
+#endif
+    RIIA_malloc free_guard(buf);
+
+
+    while (bytesleft > 0) {
+
+        /* Set amount to read */
+        readbytes = (bytesleft > bufsize) ? bufsize : bytesleft;
+
+        /* Read */
+        if(readall(0, &buf[0], readbytes) != readbytes) {
+            std::ostringstream ss;
+
+            ss << "Error reading " << readbytes << " bytes for file "
+                << filename << " after "
+                << (filesize - bytesleft) << " bytes, with "
+                << bytesleft << " bytes left to read:"
+                << errno << " " << strerror(errno);
+            throw Error(ss);
+        }
+        
+        bytesleft -= readbytes;
+
+        /* Skipping sparse bytes */
+        if (file_is_sparse && (readbytes == bufsize) && memcmp(empty_page,
+                    &buf[0], bufsize) == 0) {
+            skipped_bytes += bufsize;
+            continue;
+        }
+
+        recheck_count -= readbytes;
+
+        /* Increment file */
+        if (skipped_bytes) {
+            if((of_ptr->skip(skipped_bytes)))
+            {
+                std::ostringstream ss;
+
+                ss << "Error skipping " << filename << " after "
+                    << (filesize - bytesleft) << " bytes";
+                throw Error(ss);
+            }
+            skipped_bytes = 0;
+        }
+
+        uint64_t bytes = readbytes;
+        uint64_t off = 0;
+
+        /* Write out in a loop */
+        while (bytes > 0) {
+            int lim = (bytes < write_size) ? bytes : write_size;
+
+            if (!of_ptr->write((char*) &buf[off], lim))
+            {
+                std::ostringstream ss;
+                ss << "Error Writing " << filename << " after "
+                    << (filesize - bytesleft) << " bytes";
+                throw Error(ss);
+            }
+            off += lim;
+            bytes -= lim;
+        }
+
+        /* Check remaining space */
+        if (recheck_count <= 0) {
+            check_remaining_space(destdir, percent_full, filename, bytesleft);
+            recheck_count = FS_PERIODIC_CHECK;
+        }
+    }
+
+    if (padding_bytes) {
+        if(readall(0, &buf[0], padding_bytes) != padding_bytes) {
+            std::ostringstream ss;
+    
+            ss << "Error reading padding after " << filename
+                << ": " << errno << " " << strerror(errno);
+            throw Error(ss);
+        }
+    }
+
+    free(empty_page);
+}
+
 void deserialise_database(
         const std::string *p_lrldestdir,
         const std::string *p_datadestdir,
@@ -366,6 +498,7 @@ void deserialise_database(
         bool force_mode,
         bool legacy_mode,
         bool& is_disk_full,
+        int deserialization_threads,
         bool run_with_done_file,
         bool incr_mode,
         bool dryrun
@@ -538,6 +671,9 @@ void deserialise_database(
         }
         const std::string filename(head.h.filename);
 
+        if (filename == "FLUFF")
+            return;
+
         // Try to find this file in our manifest
         std::map<std::string, FileInfo>::const_iterator manifest_it = manifest_map.find(filename);
 
@@ -548,6 +684,8 @@ void deserialise_database(
         }
         unsigned long long nblocks = (filesize + 511ULL) >> 9;
 
+        // Calculate padding bytes
+        unsigned long long padding_bytes = (nblocks << 9) - filesize;
 
         // If this is an .lrl file then we have to read it into memory and
         // then rewrite it to disk.  In getting the extension it is important
@@ -601,6 +739,7 @@ void deserialise_database(
         }
 
         std::unique_ptr<fdostream> of_ptr;
+        bool direct;
 
         if(is_text) {
             text.reserve(filesize);
@@ -634,14 +773,15 @@ void deserialise_database(
                 throw Error("Stream contains files for data directory before data dir is known");
             }
 
-            bool direct = false;
+            direct = false;
 
             if (manifest_it != manifest_map.end() && manifest_it->second.get_type() == FileInfo::BERKDB_FILE)
                 direct = 1;
 
             std::string outfilename(datadestdir + "/" + filename);
             fullpath = outfilename;
-            of_ptr = output_file(outfilename, false, direct);
+
+            //of_ptr = output_file(outfilename, false, direct);
             extracted_files.insert(outfilename);
         }
 
@@ -661,8 +801,10 @@ void deserialise_database(
         }
         size_t bufsize = pagesize;
 
-        while((bufsize << 1) <= MAX_BUF_SIZE) {
-            bufsize <<= 1;
+        if (!file_is_sparse) {
+            while((bufsize << 1) <= MAX_BUF_SIZE) {
+                bufsize <<= 1;
+            }
         }
 
 
@@ -685,170 +827,50 @@ void deserialise_database(
         bool checksum_failure = false;
 
         unsigned long long readbytes = 0;
-        while(bytesleft > 0)
-        {
-            readbytes = bytesleft;
 
-            if(bytesleft > bufsize)
+        if (!is_text) {
+            do_write(filename, datadestdir, bytesleft, bufsize,
+                file_is_sparse, padding_bytes, percent_full, direct);
+        } else {
+            while(bytesleft > 0)
             {
-               readbytes = bufsize;
-            }
-
-            if (file_is_sparse) {
-                readbytes = pagesize;
-            }
-            if (readbytes > bytesleft)
                 readbytes = bytesleft;
 
-            if(readall(0, &buf[0], readbytes) != readbytes)
-            {
-               std::ostringstream ss;
+                if(bytesleft > bufsize)
+                    readbytes = bufsize;
 
-               if (filename == "FLUFF")
-                  return;
+                if (readbytes > bytesleft)
+                    readbytes = bytesleft;
 
-               ss << "Error reading " << readbytes << " bytes for file "
-                  << filename << " after "
-                  << (filesize - bytesleft) << " bytes, with "
-                  << bytesleft << " bytes left to read:"
-                  << errno << " " << strerror(errno);
-               throw Error(ss);
-            }
-
-
-            if(is_text)
-            {
-               text.append((char*) &buf[0], readbytes);
-            }
-            else if (file_is_sparse &&
-               (readbytes == pagesize) && (bytesleft > readbytes) )
-            {
-               if (memcmp(empty_page, &buf[0], pagesize) == 0)
-               {
-                  skipped_bytes += pagesize;
-                  /* This data won't be counted towards file size.*/
-                  recheck_count += readbytes;
-               }
-               else
-               {
-                  if (skipped_bytes)
-                  {
-                     if((of_ptr->skip(skipped_bytes)))
-                     {
-                        std::ostringstream ss;
-
-                        if (filename == "FLUFF")
-                           return;
-
-                        ss << "Error skipping " << filename << " after "
-                           << (filesize - bytesleft) << " bytes";
-                        throw Error(ss);
-                     }
-                     skipped_bytes = 0;
-                  }
-                  if (!of_ptr->write((char*) buf, pagesize))
-                  {
-                     std::ostringstream ss;
-
-                     if (filename == "FLUFF")
-                        return;
-
-                     ss << "Error Writing " << filename << " after "
-                        << (filesize - bytesleft) << " bytes";
-                     throw Error(ss);
-                  }
-               }
-            }
-            else
-            {
-                uint64_t off = 0;
-                uint64_t nwrites = 0;
-                uint64_t bytes = readbytes;
-
-                if (file_is_sparse && skipped_bytes)
+                if(readall(0, &buf[0], readbytes) != readbytes)
                 {
-                    if((of_ptr->skip(skipped_bytes)))
-                    {
-                        std::ostringstream ss;
+                    std::ostringstream ss;
 
-                        if (filename == "FLUFF")
-                            return;
-
-                        ss << "Error skipping " << filename << " after "
-                           << (filesize - bytesleft) << " bytes";
-                        throw Error(ss);
-                    }
-                    skipped_bytes = 0;
+                    ss << "Error reading " << readbytes << " bytes for file "
+                        << filename << " after "
+                        << (filesize - bytesleft) << " bytes, with "
+                        << bytesleft << " bytes left to read:"
+                        << errno << " " << strerror(errno);
+                    throw Error(ss);
                 }
 
-                while (bytes > 0)
-                {
-                    int lim;
-                    if (bytes < write_size)
-                        lim = bytes;
-                    else
-                        lim = write_size;
-                    if (!of_ptr->write((char*) &buf[off], lim))
-                    {
-                        std::ostringstream ss;
 
-                        if (filename == "FLUFF")
-                            return;
+                text.append((char*) &buf[0], readbytes);
 
-                            ss << "Error Writing " << filename << " after "
-                               << (filesize - bytesleft) << " bytes";
-                            throw Error(ss);
-                    }
-                    nwrites++;
-                    off += lim;
-                    bytes -= lim;
+                bytesleft -= readbytes;
+                recheck_count -= readbytes;
+
+
+            }
+            // Read and discard the null padding
+            if(padding_bytes) {
+                if(readall(0, &buf[0], padding_bytes) != padding_bytes) {
+                    std::ostringstream ss;
+    
+                    ss << "Error reading padding after " << filename
+                        << ": " << errno << " " << strerror(errno);
+                    throw Error(ss);
                 }
-                // std::cerr << "wrote " << readbytes << " bytes in " << nwrites << " chunks" << std::endl;
-            }
-            bytesleft -= readbytes;
-            recheck_count -= readbytes;
-
-            // don't fill the fs - copied & massaged from above
-            if( recheck_count <= 0 )
-            {
-	            struct statvfs stfs;
-	            int rc = statvfs(datadestdir.c_str(), &stfs);
-	            if(rc == -1) {
-	                std::ostringstream ss;
-	                ss << "Error running statvfs on " << datadestdir
-	                    << ": " << strerror(errno);
-	                throw Error(ss);
-	            }
-
-	            // Calculate how full the file system would be if we were to
-	            // add this file to it.
-	            fsblkcnt_t fsblocks = bytesleft / stfs.f_bsize;
-	            double percent_free = 100.00 * ((double)(stfs.f_bavail - fsblocks) / (double)stfs.f_blocks);
-	            if(100.00 - percent_free >= percent_full) {
-	                is_disk_full = true;
-	                std::ostringstream ss;
-	                ss << "Not enough space to deserialise remaining part of " << filename
-	                    << " (" << bytesleft << " bytes) - would leave only "
-	                    << percent_free << "% free space";
-	                throw Error(ss);
-	            }
-
-                recheck_count = FS_PERIODIC_CHECK;
-            }
-        }
-
-        // Read and discard the null padding
-        unsigned long long padding_bytes = (nblocks << 9) - filesize;
-        if(padding_bytes) {
-            if(readall(0, &buf[0], padding_bytes) != padding_bytes) {
-                std::ostringstream ss;
-
-                if (filename == "FLUFF")
-                   return;
-
-                ss << "Error reading padding after " << filename
-                    << ": " << errno << " " << strerror(errno);
-                throw Error(ss);
             }
         }
 
@@ -976,17 +998,86 @@ void deserialise_database(
     unlink(fluff_file.c_str());
 }
 
-void deserialize_file(const std::string &filename, off_t filesize, bool write_file, bool dryrun, bool do_direct_io) {
-    /* must be a multiple of 512! */
 #define DESERIALIZE_BUFSIZE 1024*1024
+#define THDS 10
+
+void threaded_write(const std::string &filename, std::mutex *lk, off_t filesize,
+        off_t *current_offset, bool do_direct_io, int tdnum)
+{
+    static char buf[DESERIALIZE_BUFSIZE];
+    const int bufsz = DESERIALIZE_BUFSIZE;
+    int rb;
+    off_t my_write_offset;
+    int amount_to_write;
+    bool done = false;
+    off_t amount_left = filesize;
+    std::unique_ptr<fdostream> out;
+
+    std::cout << "thread " << tdnum << " writing " <<  filename << std::endl;
+
+    out = output_existing_file(filename, do_direct_io);
+    while(done == false) {
+        (*lk).lock();
+
+        my_write_offset = (*current_offset);
+        if ((filesize - (*current_offset)) < DESERIALIZE_BUFSIZE) {
+            amount_to_write = (filesize - (*current_offset));
+            done = true;
+        } else {
+            amount_to_write = DESERIALIZE_BUFSIZE;
+        }
+        if (amount_to_write > 0) {
+            rb = readall(0, buf, amount_to_write);
+            (*current_offset) += amount_to_write;
+            if (rb != amount_to_write) {
+                std::ostringstream ss;
+                ss << "Unexpected eof reading " << filename;
+                throw Error(ss.str());
+            }
+        }
+
+        (*lk).unlock();
+
+        if (amount_to_write > 0) {
+            out->skip(my_write_offset);
+            out->write(buf, amount_to_write);
+        }
+    }
+}
+
+/* Easiest remedy on the planet: have x threads reading and writing concurrently */
+
+void deserialize_file(const std::string &filename, off_t filesize,
+        bool write_file, bool dryrun, bool do_direct_io) {
+    /* must be a multiple of 512! */
     static char buf[DESERIALIZE_BUFSIZE];
     int rb; // read bytes
     const int bufsz = DESERIALIZE_BUFSIZE;
+    off_t current_offset = 0;
+    std::thread thds[THDS];
+    std::mutex *lk;
 
     std::unique_ptr<fdostream> out;
+    //fdostream out = output_file(filename, false, do_direct_io);
+
     if (write_file && !dryrun)
         out = output_file(filename, false, do_direct_io);
 
+    if (write_file && !dryrun) {
+        lk = new std::mutex();
+
+        for (int i = 0; i < THDS; i++) {
+            thds[i] = std::thread(threaded_write, filename, lk, filesize, &current_offset, do_direct_io, i);
+        }
+        for (int i = 0; i < THDS; i++) {
+            thds[i].join();
+        }
+
+        delete(lk);
+    }
+
+
+/*
     for (int i = 0; i < filesize / sizeof(buf); i++) {
         rb = readall(0, buf, sizeof(buf));
         if (rb != sizeof(buf)) {
@@ -1022,6 +1113,7 @@ void deserialize_file(const std::string &filename, off_t filesize, bool write_fi
             }
         }
     }
+    */
 }
 
 void restore_partials(

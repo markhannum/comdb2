@@ -56,6 +56,7 @@ const char *help_text[] = {
 "  -r/R         do/do-not run full recovery after extracting",
 "  -u \%       do not allow disk usage to exceed this percentage",
 "  -f           force deserialisation even if checksums fail",
+"  -n thds      set deserialization thread count",
 "  -O           legacy mode, does not delete old format files",
 "  -D           turn off directio",
 "  -E dbname    create replicant with dbname",
@@ -94,6 +95,7 @@ int main(int argc, char *argv[])
 
     int c;
 
+    int deserialization_threads  = 10;
     bool disable_log_deletion = true;
     bool support_files_only = false;
     bool strip_cluster_info = false;
@@ -127,7 +129,7 @@ int main(int argc, char *argv[])
     ss << root << "/bin/comdb2";
     std::string comdb2_task(ss.str());
 
-    while((c = getopt(argc, argv, "hsSLC:I:b:x:u:rRSkKfODE:T:")) != EOF) {
+    while((c = getopt(argc, argv, "hsSLC:I:b:x:u:rRSkKfODE:T:n:")) != EOF) {
         switch(c) {
             case 'O':
                 legacy_mode = true;
@@ -230,6 +232,13 @@ int main(int argc, char *argv[])
                 new_type = std::string(optarg);
                 break;
 
+            case 'n':
+                deserialization_threads  = std::atoi(optarg);
+                if (deserialization_threads < 0) 
+                    deserialization_threads = 0;
+                if (deserialization_threads > 100) 
+                    deserialization_threads = 100;
+                break;
             case '?':
                 std::cerr << "Unrecognised option: -" << (char)c << std::endl;
                 usage();
@@ -346,6 +355,7 @@ int main(int argc, char *argv[])
              force_mode,
              legacy_mode,
              is_disk_full,
+             deserialization_threads,
              run_with_done_file,
              incr_ex,
              dryrun

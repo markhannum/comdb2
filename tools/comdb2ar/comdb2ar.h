@@ -90,6 +90,13 @@ std::unique_ptr<fdostream> output_file(
   bool make_sav, bool direct
 );
 
+
+std::unique_ptr<fdostream> output_existing_file(
+  const std::string& filename,
+  bool direct
+);
+
+
 void make_dirs(const std::string& dirname);
 
 void remove_all_old_files(std::string& datadir);
@@ -131,6 +138,7 @@ void deserialise_database(
   bool force_mode,
   bool legacy_mode,
   bool& is_disk_full,
+  int deserialization_threads,
   bool run_with_done_file,
   bool incr_mode,
   bool dryrun
