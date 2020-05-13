@@ -43,6 +43,7 @@ class fdostream : public std::ostream {
 public:
     fdostream(int fd);
     int skip(unsigned long long size);
+    int setoffset(unsigned long long offset);
 };
 
 #endif // INCLUDED_FDOSTREAM

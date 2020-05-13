@@ -313,12 +313,9 @@ reopen:
     return std::unique_ptr<fdostream>(new fdostream(fd));
 }
 
-        
-
-
 std::unique_ptr<fdostream> output_file(
         const std::string& filename,
-        bool make_sav, bool direct)
+        bool make_sav, bool direct, bool truncate)
 // Create an output file stream ready to receive the data for a file.
 // This will also make any intermediate directories needed.
 // If make_sav is true and the file already exists then the old file will be
@@ -341,13 +338,18 @@ std::unique_ptr<fdostream> output_file(
         }
 
         // unlink the existing file (fix for unable to overwrite a readonly file)
-        if(unlink(filename.c_str()) == -1 && errno != ENOENT) {
-            std::cerr << "Cannot unlink " << filename << ": "
-                    << errno << " " << strerror(errno) << std::endl;
-        }
+        if (truncate) {
+            if(unlink(filename.c_str()) == -1 && errno != ENOENT) {
+                std::cerr << "Cannot unlink " << filename << ": "
+                        << errno << " " << strerror(errno) << std::endl;
+            }
+            }
     }
 
-    int flags = O_WRONLY | O_CREAT | O_TRUNC;
+    int flags = O_WRONLY | O_CREAT; 
+    if (truncate) {
+        flags |= O_TRUNC;
+    }
 
 #if defined(__sun) || defined(__APPLE__)
     int fd = open(filename.c_str(), flags, 0666);

@@ -381,16 +381,19 @@ static bool check_dest_dir(const std::string& dir)
 
 #define write_size (1000*1024)
 
-void do_write(const std::string filename, const std::string destdir,
-                unsigned long long bytesleft, size_t bufsize,
-                bool file_is_sparse, unsigned long long padding_bytes,
+void do_write_thd(const std::string filename, std::mutex *lk,
+                const std::string destdir, unsigned long long *current_offset,
+                unsigned long long filesize, size_t bufsize,
+                bool file_is_sparse, unsigned long long *padding_bytes,
                 unsigned percent_full, bool direct)
 {
     uint8_t *buf;
     unsigned long long recheck_count = FS_PERIODIC_CHECK;
     unsigned long long readbytes = 0;
     unsigned long long skipped_bytes = 0;
-    unsigned long long filesize = bytesleft;
+    unsigned long long padding;
+    off_t my_offset;
+    //unsigned long long last
     std::string outfilename(destdir + "/" + filename);
 
     void *empty_page = malloc(65536);
@@ -398,7 +401,7 @@ void do_write(const std::string filename, const std::string destdir,
     
     std::unique_ptr<fdostream> of_ptr;
 
-    of_ptr = output_file(outfilename, false, direct);
+    of_ptr = output_file(outfilename, false, direct, false);
 #if defined _HP_SOURCE || defined _SUN_SOURCE
     buf = (uint8_t*) memalign(512, bufsize);
 #else
@@ -407,8 +410,10 @@ void do_write(const std::string filename, const std::string destdir,
 #endif
     RIIA_malloc free_guard(buf);
 
-
-    while (bytesleft > 0) {
+    while (true) {
+        (*lk).lock();
+        my_offset = (*current_offset);
+        unsigned long long bytesleft = filesize - my_offset;
 
         /* Set amount to read */
         readbytes = (bytesleft > bufsize) ? bufsize : bytesleft;
@@ -424,8 +429,14 @@ void do_write(const std::string filename, const std::string destdir,
                 << errno << " " << strerror(errno);
             throw Error(ss);
         }
+
+        (*current_offset) += readbytes;
+        (*lk).unlock();
         
         bytesleft -= readbytes;
+        if (bytesleft == 0) {
+            break;
+        }
 
         /* Skipping sparse bytes */
         if (file_is_sparse && (readbytes == bufsize) && memcmp(empty_page,
@@ -436,21 +447,10 @@ void do_write(const std::string filename, const std::string destdir,
 
         recheck_count -= readbytes;
 
-        /* Increment file */
-        if (skipped_bytes) {
-            if((of_ptr->skip(skipped_bytes)))
-            {
-                std::ostringstream ss;
-
-                ss << "Error skipping " << filename << " after "
-                    << (filesize - bytesleft) << " bytes";
-                throw Error(ss);
-            }
-            skipped_bytes = 0;
-        }
-
         uint64_t bytes = readbytes;
         uint64_t off = 0;
+        //int fd = of_ptr
+        of_ptr->setoffset(my_offset);
 
         /* Write out in a loop */
         while (bytes > 0) {
@@ -474,8 +474,15 @@ void do_write(const std::string filename, const std::string destdir,
         }
     }
 
-    if (padding_bytes) {
-        if(readall(0, &buf[0], padding_bytes) != padding_bytes) {
+
+    (*lk).lock();
+    padding = *padding_bytes;
+    (*padding_bytes) = 0;
+    (*lk).unlock();
+
+
+    if (padding) {
+        if(readall(0, &buf[0], padding) != padding) {
             std::ostringstream ss;
     
             ss << "Error reading padding after " << filename
@@ -485,6 +492,34 @@ void do_write(const std::string filename, const std::string destdir,
     }
 
     free(empty_page);
+}
+
+void thd_test(unsigned long long *num) {
+    return;
+}
+
+void do_write(const std::string filename, const std::string destdir,
+                unsigned long long bytesleft, size_t bufsize,
+                bool file_is_sparse, unsigned long long padding_bytes,
+                unsigned percent_full, bool direct, int deserialization_threads)
+{
+    unsigned long long current_offset = 0;
+    std::mutex *lk = new std::mutex();;
+    std::thread *thds = { new std::thread[deserialization_threads]{} };
+    /*
+    for (int i = 0; i < deserialization_threads; i++) {
+        thds[i] = std::thread(thd_test, current_offset);
+    }
+    */
+    for (int i = 0; i < deserialization_threads; i++) {
+        thds[i] = std::thread(do_write_thd, filename, lk, destdir,
+                &current_offset, bytesleft, bufsize, file_is_sparse,
+                &padding_bytes, percent_full, direct);
+    }
+
+    for (int i = 0; i < deserialization_threads; i++) {
+        thds[i].join();
+    }
 }
 
 void deserialise_database(
@@ -830,8 +865,15 @@ void deserialise_database(
 
         if (!is_text) {
             do_write(filename, datadestdir, bytesleft, bufsize,
-                file_is_sparse, padding_bytes, percent_full, direct);
+                file_is_sparse, padding_bytes, percent_full, direct,
+                deserialization_threads);
         } else {
+
+/*
+            check_remaining_space(datadestdir, percent_full, filename,
+                filesize);
+*/
+
             while(bytesleft > 0)
             {
                 readbytes = bytesleft;
@@ -859,8 +901,6 @@ void deserialise_database(
 
                 bytesleft -= readbytes;
                 recheck_count -= readbytes;
-
-
             }
             // Read and discard the null padding
             if(padding_bytes) {
@@ -881,7 +921,6 @@ void deserialise_database(
            std::clog << " SPARSE ";
         else
            std::clog << " not sparse ";
-
 
         std::clog << std::endl;
 
@@ -998,86 +1037,17 @@ void deserialise_database(
     unlink(fluff_file.c_str());
 }
 
-#define DESERIALIZE_BUFSIZE 1024*1024
-#define THDS 10
-
-void threaded_write(const std::string &filename, std::mutex *lk, off_t filesize,
-        off_t *current_offset, bool do_direct_io, int tdnum)
-{
-    static char buf[DESERIALIZE_BUFSIZE];
-    const int bufsz = DESERIALIZE_BUFSIZE;
-    int rb;
-    off_t my_write_offset;
-    int amount_to_write;
-    bool done = false;
-    off_t amount_left = filesize;
-    std::unique_ptr<fdostream> out;
-
-    std::cout << "thread " << tdnum << " writing " <<  filename << std::endl;
-
-    out = output_existing_file(filename, do_direct_io);
-    while(done == false) {
-        (*lk).lock();
-
-        my_write_offset = (*current_offset);
-        if ((filesize - (*current_offset)) < DESERIALIZE_BUFSIZE) {
-            amount_to_write = (filesize - (*current_offset));
-            done = true;
-        } else {
-            amount_to_write = DESERIALIZE_BUFSIZE;
-        }
-        if (amount_to_write > 0) {
-            rb = readall(0, buf, amount_to_write);
-            (*current_offset) += amount_to_write;
-            if (rb != amount_to_write) {
-                std::ostringstream ss;
-                ss << "Unexpected eof reading " << filename;
-                throw Error(ss.str());
-            }
-        }
-
-        (*lk).unlock();
-
-        if (amount_to_write > 0) {
-            out->skip(my_write_offset);
-            out->write(buf, amount_to_write);
-        }
-    }
-}
-
-/* Easiest remedy on the planet: have x threads reading and writing concurrently */
-
-void deserialize_file(const std::string &filename, off_t filesize,
-        bool write_file, bool dryrun, bool do_direct_io) {
+void deserialize_file(const std::string &filename, off_t filesize, bool write_file, bool dryrun, bool do_direct_io) {
     /* must be a multiple of 512! */
+#define DESERIALIZE_BUFSIZE 1024*1024
     static char buf[DESERIALIZE_BUFSIZE];
     int rb; // read bytes
     const int bufsz = DESERIALIZE_BUFSIZE;
-    off_t current_offset = 0;
-    std::thread thds[THDS];
-    std::mutex *lk;
 
     std::unique_ptr<fdostream> out;
-    //fdostream out = output_file(filename, false, do_direct_io);
-
     if (write_file && !dryrun)
         out = output_file(filename, false, do_direct_io);
 
-    if (write_file && !dryrun) {
-        lk = new std::mutex();
-
-        for (int i = 0; i < THDS; i++) {
-            thds[i] = std::thread(threaded_write, filename, lk, filesize, &current_offset, do_direct_io, i);
-        }
-        for (int i = 0; i < THDS; i++) {
-            thds[i].join();
-        }
-
-        delete(lk);
-    }
-
-
-/*
     for (int i = 0; i < filesize / sizeof(buf); i++) {
         rb = readall(0, buf, sizeof(buf));
         if (rb != sizeof(buf)) {
@@ -1113,7 +1083,6 @@ void deserialize_file(const std::string &filename, off_t filesize,
             }
         }
     }
-    */
 }
 
 void restore_partials(

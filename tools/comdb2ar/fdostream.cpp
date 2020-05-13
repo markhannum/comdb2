@@ -36,6 +36,15 @@ int fdoutbuf::getfd()
     return m_fd;
 }
 
+int fdostream::setoffset(unsigned long long offset)
+{
+  int fd = buf.getfd();
+  unsigned long long new_ptr = lseek(fd, offset, SEEK_SET);
+  if (new_ptr == offset)
+     return 0;
+  return -1;
+}
+
 int fdostream::skip(unsigned long long size)
 {
   int fd = buf.getfd();

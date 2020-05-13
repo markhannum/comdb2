@@ -87,7 +87,8 @@ bool read_octal_ull(const char *str, size_t len, unsigned long long& number);
 
 std::unique_ptr<fdostream> output_file(
   const std::string& filename,
-  bool make_sav, bool direct
+  bool make_sav, bool direct,
+  bool truncate = true
 );
 
 
