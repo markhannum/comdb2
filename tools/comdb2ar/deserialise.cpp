@@ -383,7 +383,7 @@ static bool check_dest_dir(const std::string& dir)
 
 void do_write_thd(const std::string filename, std::mutex *lk,
                 const std::string destdir, unsigned long long *current_offset,
-                unsigned long long filesize, size_t bufsize,
+                int *did_unlink, unsigned long long filesize, size_t bufsize,
                 bool file_is_sparse, unsigned long long *padding_bytes,
                 unsigned percent_full, bool direct)
 {
@@ -401,7 +401,15 @@ void do_write_thd(const std::string filename, std::mutex *lk,
     
     std::unique_ptr<fdostream> of_ptr;
 
-    of_ptr = output_file(outfilename, false, direct, false);
+    (*lk).lock();
+    if (*did_unlink == 0) {
+        *did_unlink = 1;
+        of_ptr = output_file(outfilename, false, direct, true);
+        (*lk).unlock();
+    } else {
+        (*lk).unlock();
+        of_ptr = output_file(outfilename, false, direct, false);
+    }
 #if defined _HP_SOURCE || defined _SUN_SOURCE
     buf = (uint8_t*) memalign(512, bufsize);
 #else
@@ -434,9 +442,6 @@ void do_write_thd(const std::string filename, std::mutex *lk,
         (*lk).unlock();
         
         bytesleft -= readbytes;
-        if (bytesleft == 0) {
-            break;
-        }
 
         /* Skipping sparse bytes */
         if (file_is_sparse && (readbytes == bufsize) && memcmp(empty_page,
@@ -449,7 +454,6 @@ void do_write_thd(const std::string filename, std::mutex *lk,
 
         uint64_t bytes = readbytes;
         uint64_t off = 0;
-        //int fd = of_ptr
         of_ptr->setoffset(my_offset);
 
         /* Write out in a loop */
@@ -471,6 +475,10 @@ void do_write_thd(const std::string filename, std::mutex *lk,
         if (recheck_count <= 0) {
             check_remaining_space(destdir, percent_full, filename, bytesleft);
             recheck_count = FS_PERIODIC_CHECK;
+        }
+
+        if (bytesleft == 0) {
+            break;
         }
     }
 
@@ -504,6 +512,7 @@ void do_write(const std::string filename, const std::string destdir,
                 unsigned percent_full, bool direct, int deserialization_threads)
 {
     unsigned long long current_offset = 0;
+    int unlink = 0;
     std::mutex *lk = new std::mutex();;
     std::thread *thds = { new std::thread[deserialization_threads]{} };
     /*
@@ -511,9 +520,15 @@ void do_write(const std::string filename, const std::string destdir,
         thds[i] = std::thread(thd_test, current_offset);
     }
     */
+    if (deserialization_threads == 1) {
+        do_write_thd(filename, lk, destdir,
+            &current_offset, &unlink, bytesleft, bufsize, file_is_sparse,
+            &padding_bytes, percent_full, direct);
+        return;
+    }
     for (int i = 0; i < deserialization_threads; i++) {
         thds[i] = std::thread(do_write_thd, filename, lk, destdir,
-                &current_offset, bytesleft, bufsize, file_is_sparse,
+                &current_offset, &unlink, bytesleft, bufsize, file_is_sparse,
                 &padding_bytes, percent_full, direct);
     }
 
