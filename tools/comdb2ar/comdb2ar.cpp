@@ -31,10 +31,12 @@ const char *help_text[] = {
 "     comdb2ar c -I create -b /bb/bin/increment [opts] /bb/bin/mydb.lrl > output",
 "  Then, create an increment-",
 "     comdb2ar c -I inc -b /bb/bin/increment [opts] /bb/bin/mydb.lrl > output",
-"",
 "  Database mydb is serialised into tape archive format on to stdout.",
 "  -s   serialise support files only (lrl, csc2 etc, no data or log files)",
 "  -L   do not disable log file deletion (dangerous)",
+"To serialise a db in segmented mode:",
+"     comdb2ar c -S -b /bb/data/segments [opts] /bb/bin/mydb.lrl",
+"  Database mydb is serialised to multiple files in /bb/data/segments.",
 "",
 "To deserialise a db: comdb2ar.tsk [opts] x [/bb/bin /bb/data/mydb] < input",
 "To deserialise a db incrementally:",
@@ -56,7 +58,8 @@ const char *help_text[] = {
 "  -r/R         do/do-not run full recovery after extracting",
 "  -u \%       do not allow disk usage to exceed this percentage",
 "  -f           force deserialisation even if checksums fail",
-"  -n thds      set deserialization thread count",
+//"  -n thds      set deserialization thread count",
+"  -S size      set segment size in Gb.",
 "  -O           legacy mode, does not delete old format files",
 "  -D           turn off directio",
 "  -E dbname    create replicant with dbname",
@@ -102,6 +105,8 @@ int main(int argc, char *argv[])
     bool strip_consumer_info = false;
     bool run_full_recovery = true;
     bool run_with_done_file = false;
+    bool is_increment = false;
+    bool is_segment = false;
     bool force_mode = false;
     unsigned percent_full = 95;
     bool legacy_mode = false;
@@ -197,6 +202,12 @@ int main(int argc, char *argv[])
                 break;
 
             case 'I':
+                if (is_segment == true) {
+                    std::cerr << "Segmented incremental backup unsupported" << optarg
+                        << std::endl;
+                    std::exit(2);
+                }
+                is_increment = true;
                 if(std::strcmp(optarg, "create") == 0) {
                     incr_create = true;
                 } else if(std::strcmp(optarg, "inc") == 0) {
