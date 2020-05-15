@@ -31,6 +31,7 @@ FileInfo::FileInfo(
         const std::string& abspath,
         const std::string& dbdir,
         size_t pagesize,
+        size_t filesize,
         bool checksums,
 	bool crypto,
         bool sparse,
@@ -39,12 +40,12 @@ FileInfo::FileInfo(
     m_type(type),
     m_filepath(abspath),
     m_pagesize(pagesize),
+    m_filesize(filesize),
     m_checksums(checksums),
     m_crypto(crypto),
     m_sparse(sparse),
     m_do_direct_io(do_direct_io),
-    m_swapped(swapped),
-    m_filesize(0)
+    m_swapped(swapped)
 {
     // If file name is within the dbdir then just strip dbdir
     if(type != SUPPORT_FILE
@@ -77,6 +78,7 @@ FileInfo& FileInfo::operator=(const FileInfo& rhs)
         m_filepath = rhs.m_filepath;
         m_filename = rhs.m_filename;
         m_pagesize = rhs.m_pagesize;
+        m_filesize = rhs.m_filesize;
         m_checksums = rhs.m_checksums;
         m_sparse = rhs.m_sparse;
         m_do_direct_io = rhs.m_do_direct_io;
@@ -94,6 +96,7 @@ void FileInfo::reset()
     m_checksums = false;
     m_sparse = false;
     m_pagesize = 0;
+    m_filesize = 0;
     m_swapped = false;
 }
 

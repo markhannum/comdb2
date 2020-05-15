@@ -18,6 +18,8 @@ public:
 
     size_t get_pagesize() const;
 
+    size_t get_filesize() const;
+
     bool get_checksums() const;
 
     bool get_crypto() const;

@@ -353,6 +353,7 @@ reopen:
         bytesleft -= bytesread;
     }
 
+    // Replace stat value with actual copied
     file.set_filesize(filesize);
 
     if (num_waits)
@@ -762,6 +763,8 @@ void serialise_database(
   bool incr_create,
   bool incr_gen,
   bool copy_physical,
+  bool is_segmented,
+  unsigned long long segment_size,
   const std::string& incr_path
 )
 // Serialise a database into tape archive format and write it to stdout.
@@ -1130,13 +1133,14 @@ void serialise_database(
             try {
                 DB_Wrap db(abspath);
                 size_t pagesize = db.get_pagesize();
+                size_t filesize = db.get_filesize();
                 bool checksums = db.get_checksums();
                 bool crypto = db.get_crypto();
                 bool sparse = db.get_sparse();
                 bool swapped = db.get_swapped();
 
                 data_files.push_back(FileInfo(FileInfo::BERKDB_FILE,
-                      abspath, dbdir, pagesize, checksums, crypto, sparse, do_direct_io, swapped));
+                      abspath, dbdir, pagesize, filesize, checksums, crypto, sparse, do_direct_io, swapped));
 
                 // Look for queue extents in the txn directory, which will
                 // all have the same page size as the parent queue file.

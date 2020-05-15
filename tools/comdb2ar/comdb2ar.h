@@ -118,6 +118,8 @@ void serialise_database(
   bool incr_create,
   bool incr_gen,
   bool copy_physical,
+  bool is_segment,
+  unsigned long long segmentsize,
   const std::string& incr_path
 );
 // Serialise a database into tape archive format and write it to stdout.

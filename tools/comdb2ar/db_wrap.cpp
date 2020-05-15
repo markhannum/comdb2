@@ -88,6 +88,24 @@ bool DB_Wrap::get_checksums() const
 	return m_metaflags & DBMETA_CHKSUM;
 }
 
+size_t DB_Wrap::get_filesize() const
+{
+   int rc;
+   struct stat statbuf;
+
+   rc = stat(m_filename.c_str(), &statbuf);
+
+   if (rc != 0)
+   {
+      std::ostringstream ss;
+      ss << "stat failed on " << m_filename;
+      throw Error(ss);
+   }
+
+   return (statbuf.st_blocks * statbuf.st_blksize);
+
+}
+
 bool DB_Wrap::get_sparse() const
 {
    int rc;

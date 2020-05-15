@@ -50,6 +50,9 @@ private:
     size_t m_pagesize;
     // The recommended page size for this file, or 0 if it doesn't matter
 
+    size_t m_filesize;
+    // The size of this file
+
     bool m_checksums;
     // true if checksums are enabled on this Berkeley file
 
@@ -64,7 +67,7 @@ private:
     bool m_swapped;
     // true if checksum needs to be swapped
 
-    int64_t m_filesize;
+    //int64_t m_filesize;
     // file size as recorded in manifest
 public:
 
@@ -78,6 +81,7 @@ public:
             const std::string& abspath,
             const std::string& dbdir,
             size_t pagesize = 4096,
+            size_t filesize = 0,
        bool checksums = false,
        bool crypto = false,
        bool sparse = false,
@@ -106,7 +110,7 @@ public:
     // get_type_string() method.  If the string is not recognised then the
     // type will be set to unknown.
 
-    void set_filesize(int64_t filesize) { m_filesize = filesize; }
+    void set_filesize(size_t filesize) { m_filesize = filesize; }
 
     void set_sparse(bool sparse = true)
     {

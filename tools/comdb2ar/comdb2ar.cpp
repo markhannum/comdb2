@@ -59,7 +59,7 @@ const char *help_text[] = {
 "  -u \%       do not allow disk usage to exceed this percentage",
 "  -f           force deserialisation even if checksums fail",
 //"  -n thds      set deserialization thread count",
-"  -S size      set segment size in Gb.",
+"  -z size      set segment size in Mb.",
 "  -O           legacy mode, does not delete old format files",
 "  -D           turn off directio",
 "  -E dbname    create replicant with dbname",
@@ -107,6 +107,10 @@ int main(int argc, char *argv[])
     bool run_with_done_file = false;
     bool is_increment = false;
     bool is_segment = false;
+    // Default to 100 Gb segmentsize
+    //unsigned long long segmentSize = 100000;
+    // Keep 1mb for testing
+    unsigned long long segmentsize = 1;
     bool force_mode = false;
     unsigned percent_full = 95;
     bool legacy_mode = false;
@@ -189,6 +193,9 @@ int main(int argc, char *argv[])
                 // as last file, then blocks on stdin for string "DONE"
                 // deserialize writes "DONE" to stdout when it recieves the
                 // DONE file.
+            case 'z':
+                segmentsize = std::atoll(optarg);
+                break;
             case 'S':
                 run_with_done_file = true;
                 break;
@@ -327,6 +334,8 @@ int main(int argc, char *argv[])
                 incr_create,
                 incr_gen,
                 copy_physical,
+                is_segment,
+                segmentsize,
                 incr_path
             );
         } catch(std::exception& e) {
