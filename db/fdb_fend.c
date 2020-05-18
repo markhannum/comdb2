@@ -2149,6 +2149,126 @@ static int _fdb_remote_reconnect(fdb_t *fdb, SBUF2 **psb, char *host, int use_ca
     return FDB_NOERR;
 }
 
+static int _fdb_send_open_retries_with_cdb2api(struct sqlclntstate *clnt, fdb_t *fdb,
+                                  fdb_cursor_t *fdbc, int source_rootpage,
+                                  fdb_tran_t *trans, int flags, int version,
+                                  fdb_msg_t *msg, int use_ssl, cdb2_hndl_tp *hndl)
+{
+    char *host;
+    int rc = FDB_ERR_CONNECT_CLUSTER;
+    SBUF2 **psb = NULL;
+    int i=0;
+    int tran_flags = 0;
+    int num_hosts = num_hosts_from_handle(hndl);
+    Host *hosts = hosts_from_handle(hndl);
+    if(!num_hosts){ // if no hosts are connected
+        clnt->fdb_state.preserve_err = 1;
+        clnt->fdb_state.xerr.errval = FDB_ERR_REGISTER_NONODES;
+        snprintf(clnt->fdb_state.xerr.errstr,
+                 sizeof(clnt->fdb_state.xerr.errstr),
+                 "%s: no available rescpu nodes", __func__);
+        logmsg(LOGMSG_ERROR, "%s:%d No availale nodes\n",__func__,__LINE__);
+
+        return clnt->fdb_state.xerr.errval;
+    }
+
+    for(i=0;i<num_hosts;i++){
+        // Try to connect to host i
+        host = hosts[i];
+        if(!host){
+            // TODO: send back error ? Try to create new cdb2_hndl?
+            // For now, just try next host
+            continue;  
+        }
+        if (fdbc) {
+            psb = &fdbc->fcon.sock.sb;
+        } else {
+            psb = &trans->sb;
+        }
+
+        if ((rc = _fdb_remote_reconnect(fdb, psb, host, (fdbc)?1:0)) == FDB_NOERR) {
+            if (fdbc) {
+                fdbc->streaming = FDB_CUR_IDLE;
+
+                rc =
+                    fdb_send_open(msg, fdbc->cid, trans, source_rootpage, flags,
+                                  version, fdbc->isuuid, fdbc->fcon.sock.sb);
+
+                /* cache the node info */
+                fdbc->node = host;
+            } else {
+
+                if (fdb->server_version >= FDB_VER_WR_NAMES)
+                    tran_flags = FDB_MSG_TRAN_TBLNAME;
+                else
+                    tran_flags = 0;
+
+                rc = fdb_send_begin(msg, trans, clnt->dbtran.mode, tran_flags,
+                                    clnt->osql.rqid == OSQL_RQID_USE_UUID,
+                                    trans->sb);
+                if (rc == FDB_NOERR) {
+                    trans->host = host;
+                }
+            }
+        }
+
+        if (rc == FDB_NOERR) {
+            /* successfull connection */
+            logmsg(LOGMSG_USER,"%s:%d connection was succesful!\n",__func__,__LINE__);
+#if WITH_SSL
+            if (use_ssl) {
+                rc = sbuf2flush(*psb);
+                if (rc != FDB_NOERR)
+                    goto failed;
+                rc = sbuf2getc(*psb);
+                if (rc != 'Y')
+                    goto failed;
+                rc = FDB_NOERR;
+                /*fprintf(stderr, "READ Y\n");*/
+
+                if (sslio_connect(*psb, gbl_ssl_ctx, fdb->ssl, NULL,
+                                  gbl_nid_dbname, 1) != 1) {
+                failed:
+                    sbuf2close(*psb);
+                    *psb = NULL;
+                    /* don't retry other nodes if SSL configuration is bad */
+                    clnt->fdb_state.preserve_err = 1;
+                    clnt->fdb_state.xerr.errval = FDB_ERR_CONNECT_CLUSTER;
+                    snprintf(clnt->fdb_state.xerr.errstr,
+                             sizeof(clnt->fdb_state.xerr.errstr),
+                             "SSL config error to %s", host);
+                    logmsg(LOGMSG_ERROR, "%s:%d SSL config erro to %s\n",__func__, __LINE__, host);
+                    return FDB_ERR_SSL;
+                }
+            }
+#endif
+            break;
+        }
+
+        /* send failed, close sbuf */
+        logmsg(LOGMSG_USER,"%s:%d send failed on host %s. Trying next host\n",__func__, __LINE__, host);
+        if (*psb) {
+            sbuf2close(*psb);
+            *psb = NULL;
+        }
+    }
+    if (!(*psb)) {
+        logmsg(LOGMSG_ERROR, "%s: failed to connect after %d nodes checked\n",
+                __func__, i);
+        clnt->fdb_state.preserve_err = 1;
+        clnt->fdb_state.xerr.errval = FDB_ERR_CONNECT_CLUSTER;
+        snprintf(clnt->fdb_state.xerr.errstr,
+                 sizeof(clnt->fdb_state.xerr.errstr),
+                 "failed to connect to cluster %d nodes", i);
+
+        rc = clnt->fdb_state.xerr.errval;
+    } else {
+        assert(rc == FDB_NOERR);
+    }
+    return rc;
+}
+
+
 /**
  * Used to either open a remote transaction or cursor (fdbc==NULL-> transaction
  *begin)
@@ -2361,7 +2481,7 @@ static int _fdb_send_open_retries(struct sqlclntstate *clnt, fdb_t *fdb,
 static fdb_cursor_if_t *_fdb_cursor_open_remote(struct sqlclntstate *clnt,
                                                 fdb_t *fdb, int source_rootpage,
                                                 fdb_tran_t *trans, int flags,
-                                                int version, int use_ssl)
+                                                int version, int use_ssl,cdb2_hndl_tp *hndl)
 {
     fdb_cursor_if_t *fdbc_if;
     fdb_cursor_t *fdbc;
@@ -2440,8 +2560,14 @@ static fdb_cursor_if_t *_fdb_cursor_open_remote(struct sqlclntstate *clnt,
     fdbc->intf = fdbc_if;
 
     /* NOTE: expect x_retries to fill in clnt error fields, if any */
-    rc = _fdb_send_open_retries(clnt, fdb, fdbc, source_rootpage, trans, flags,
+    if(hndl){ // we have a valid cdb2_hndl
+        rc = _fdb_send_open_retries_with_cdb2api(clnt, fdb, fdbc, source_rootpage, trans, flags,
+                                version, fdbc->msg, use_ssl,hndl);
+    }
+    else { 
+        rc = _fdb_send_open_retries(clnt, fdb, fdbc, source_rootpage, trans, flags,
                                 version, fdbc->msg, use_ssl);
+    }
     if (rc) {
         free(fdbc_if);
         fdbc_if = NULL;
@@ -2480,7 +2606,7 @@ fdb_cursor_if_t *fdb_cursor_open(struct sqlclntstate *clnt, BtCursor *pCur,
     int flags;
     char *db_name;
     const char *db_location;
-    cdb2_hndl_tp *db;
+    cdb2_hndl_tp *hndl = pCur->cdb2_hndl;
     assert(pCur->bt->is_remote);
 
     flags = CDB2_REMSQL; 
@@ -2498,8 +2624,10 @@ fdb_cursor_if_t *fdb_cursor_open(struct sqlclntstate *clnt, BtCursor *pCur,
     }
     assert(db_location!=NULL);
 
-    // call cdb2_open() to establish connection to remote db
-    rc = cdb2_open(&db, db_name,db_location,CDB2_REMSQL); 
+    if(!hndl){
+        // call cdb2_open() to establish connection to remote db
+        rc = cdb2_open(&hndl, db_name,db_location,CDB2_REMSQL); 
+    }
 
     if (pCur->fdbc) {
         logmsg(LOGMSG_ERROR, "%s: fdb cursor already opened, refreshing\n",
@@ -2565,7 +2693,7 @@ fdb_cursor_if_t *fdb_cursor_open(struct sqlclntstate *clnt, BtCursor *pCur,
         /* NOTE: we expect x_remote to fill in the error, if any */
         pCur->fdbc = fdbc_if = _fdb_cursor_open_remote(
             clnt, fdb, source_rootpage, trans, flags,
-            (ent) ? fdb_table_version(ent->tbl->version) : 0, use_ssl);
+            (ent) ? fdb_table_version(ent->tbl->version) : 0, use_ssl,hndl);
 
         if (!fdbc_if) {
             logmsg(LOGMSG_ERROR, "%s: failed to open fdb cursor\n", __func__);

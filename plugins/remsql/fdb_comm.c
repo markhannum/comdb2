@@ -250,7 +250,7 @@ union fdb_msg {
 
 typedef struct remsql_header {
     int type;
-    int size;
+    long size;
 } remsql_hdr;
 
 enum { FD_MSG_TYPE = 0x0fff, FD_MSG_FLAGS_ISUUID = 0x1000 };
@@ -544,6 +544,9 @@ int fdb_send_run_sql(fdb_msg_t *msg, char *cid, int sqllen, char *sql,
     if (rc) {
         logmsg(LOGMSG_ERROR, "%s: failed fdbc run sql rc=%d\n", __func__, rc);
         goto done;
+    }
+    else{
+        logmsg(LOGMSG_ERROR, "%s: successful fdbc run sql rc=%d\n", __func__, rc);
     }
 
     if (gbl_fdb_track) {
@@ -885,14 +888,15 @@ int fdb_msg_read_message(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags)
 
     // Read the header first
     remsql_hdr hdr = {0};
-    rc = sbuf2fread((char *)&hdr, 1, sizeof(hdr),sb);
-    if(rc){
+    rc = sbuf2fread((char *)&hdr,sizeof(hdr),1,sb);
+    if(rc!=1){
         logmsg(LOGMSG_USER,"%s:%d failed to read reqmsql header, rc: %d\n", __func__, __LINE__, rc);
         return -1;
     }
     hdr.type = ntohl(hdr.type);
     hdr.size = ntohl(hdr.size);
 
+    logmsg(LOGMSG_USER,"%s:%d remsql_hdr.type:%d remsql_hdr.size:%ld\n",__func__,__LINE__, hdr.type, hdr.size);
     int bytes = hdr.size;
     if(bytes<=0){
         logmsg(LOGMSG_USER,"%s:%d Junk message with %d bytes\n", __func__, __LINE__, bytes);
@@ -908,7 +912,7 @@ int fdb_msg_read_message(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags)
     }
 
     // Read the protobuf packet
-    rc = sbuf2fread(p, bytes, 1, sb);
+    rc = sbuf2fread(p,bytes,1,sb);
     if(rc != 1){
         logmsg(LOGMSG_USER,"%s:%d sbuf2fread error rc:%d\n", __func__, __LINE__, rc);
         free(p);
@@ -1011,6 +1015,7 @@ int fdb_msg_read_message(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags)
         break;
 
     case FDB_MSG_CURSOR_OPEN:
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_cursor_open\n",__func__, __LINE__);
 
         msg->co.cid = remsql_msg->cid;
         /*rc = sbuf2fread(msg->co.cid, 1, idsz, sb);
@@ -1108,6 +1113,7 @@ int fdb_msg_read_message(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags)
 
     case FDB_MSG_CURSOR_CLOSE: {
         int haveid = 0;
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_cursor_close\n",__func__, __LINE__);
 
         msg->cc.cid = remsql_msg->cid;
         /*rc = sbuf2fread(msg->cc.cid, 1, idsz, sb);
@@ -1150,6 +1156,7 @@ int fdb_msg_read_message(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags)
         break;
 
     case FDB_MSG_DATA_ROW:
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_data_row\n",__func__, __LINE__);
 
         msg->dr.cid = remsql_msg->cid;
         /*rc = sbuf2fread(msg->dr.cid, 1, idsz, sb);
@@ -1239,6 +1246,7 @@ int fdb_msg_read_message(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags)
         break;
 
     case FDB_MSG_RUN_SQL:
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_run_sql\n",__func__, __LINE__);
 
         /*fprintf(stderr, "%d XYXY calling sbuf2fread %llu\n", __LINE__,
          * osql_log_time());*/
@@ -2063,7 +2071,7 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         break;
 
     case FDB_MSG_CURSOR_OPEN:
-
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_cursor_open\n",__func__,__LINE__);
         remsql_msg.cid = msg->co.cid;
         /*rc = sbuf2fwrite((char *)msg->co.cid, 1, idsz, sb);
         if (rc != idsz)
@@ -2143,6 +2151,7 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         break;
 
     case FDB_MSG_CURSOR_CLOSE: {
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_cursor_close\n",__func__,__LINE__);
         remsql_msg.cid = msg->cc.cid;
         /*rc = sbuf2fwrite(msg->cc.cid, 1, idsz, sb);
         if (rc != idsz)
@@ -2179,6 +2188,7 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         break;
 
     case FDB_MSG_DATA_ROW:
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_data_row\n",__func__,__LINE__);
 
         remsql_msg.cid = msg->dr.cid;
         /*rc = sbuf2fwrite(msg->dr.cid, 1, idsz, sb);
@@ -2241,6 +2251,7 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         break;
 
     case FDB_MSG_RUN_SQL:
+        logmsg(LOGMSG_USER,"%s:%d under fdb_msg_run_sql\n",__func__,__LINE__);
         remsql_msg.cid = msg->sq.cid;
         /*rc = sbuf2fwrite(msg->sq.cid, 1, idsz, sb);
         if (rc != idsz)
@@ -2609,11 +2620,13 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
      */
     // get the length of the packet msg
     int len = cdb2__remsql__msg__get_packed_size(&remsql_msg);
+    logmsg(LOGMSG_USER,"%s:%d length of remsql_msg is %d\n",__func__,__LINE__,len);
     unsigned char *buf;
     buf = malloc(len+1);
     cdb2__remsql__msg__pack(&remsql_msg, buf);
-    remsql_hdr hdr = {.type = ntohl(1),
-                        .size = ntohl(len)};
+    remsql_hdr hdr = {.type = htonl(1),
+                        .size = htonl(len)};
+    logmsg(LOGMSG_USER,"%s:%d remsql_hdr.type:%d remsql_hdr.size:%ld\n",__func__, __LINE__, hdr.type, hdr.size);
     rc = sbuf2write((char *)&hdr,sizeof(hdr),sb);
     if(rc != sizeof(hdr)){
         logmsg(LOGMSG_USER,"%s:%d sbuf2write error rc:%d\n",__func__, __LINE__, rc);
@@ -2627,25 +2640,36 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         free(buf);
         return FDB_ERR_WRITE_IO;
     }
+    rc = sbuf2flush(sb);
+    if (rc <= 0) {
+        /*
+           fprintf(stderr, "Ugh?\n");
+        */
+        free(buf);
+        logmsg(LOGMSG_USER,"%s:%d sbuf2flush error rc:%d\n",__func__,__LINE__, rc);
+        return FDB_ERR_WRITE_IO;
+    }
 
     /*unsigned long long t = osql_log_time();*/
-    if (flush /*&& (msg->hd.type != FDB_MSG_RUN_SQL)*/) {
+    //if (flush /*&& (msg->hd.type != FDB_MSG_RUN_SQL)*/) {
         /*
         fprintf(stderr, "Flushing %llu\n", t);
         */
-        rc = sbuf2flush(sb);
-        if (rc <= 0) {
+      //  rc = sbuf2flush(sb);
+      //  if (rc <= 0) {
             /*
                fprintf(stderr, "Ugh?\n");
             */
-            logmsg(LOGMSG_USER,"%s:%d sbuf2flush error rc:%d\n",__func__,__LINE__, rc);
-            return FDB_ERR_WRITE_IO;
-        }
-    }
+       //     free(buf);
+       //     logmsg(LOGMSG_USER,"%s:%d sbuf2flush error rc:%d\n",__func__,__LINE__, rc);
+       //     return FDB_ERR_WRITE_IO;
+       // }
+   // }
 
     /*
      t = osql_log_time();
      fprintf(stderr, "Done %s %llu\n", __func__, t);*/
+    free(buf);
     return 0;
 }
 
