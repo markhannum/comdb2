@@ -18,6 +18,7 @@ add_executable(comdb2ar
   serialiseerror.cpp
   tar_header.cpp
   util.cpp
+  ${PROJECT_SOURCE_DIR}/util/fsnapf.c
   ${PROJECT_SOURCE_DIR}/util/sbuf2.c
 )
 include_directories(
@@ -32,6 +33,8 @@ target_link_libraries(comdb2ar
   ${ZLIB_LIBRARIES}
   ${CMAKE_DL_LIBS}
 )
+
+
 if(COMDB2_BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
 endif()
@@ -39,4 +42,5 @@ add_definitions(
   -DSBUF2_SERVER=0
   -DBUILDING_TOOLS
 )
+add_dependencies(comdb2ar util)
 install(TARGETS comdb2ar RUNTIME DESTINATION bin)

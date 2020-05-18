@@ -1,6 +1,7 @@
 set(src
   cdb2api.c
   ${PROJECT_SOURCE_DIR}/util/sbuf2.c
+  ${PROJECT_SOURCE_DIR}/util/fsnapf.c
   ${PROJECT_BINARY_DIR}/protobuf/sqlquery.pb-c.c
   ${PROJECT_BINARY_DIR}/protobuf/sqlresponse.pb-c.c
 )
