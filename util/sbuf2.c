@@ -31,6 +31,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "locks_wrap.h"
+#include <fsnapf.h>
 
 #if SBUF2_SERVER
 #  ifndef SBUF2_DFL_SIZE
@@ -487,6 +488,11 @@ ssl_downgrade:
             continue;
         }
         break;
+    }
+
+    if(sb->flags & SBUF2_DUMP_READ){
+        //logmsg(LOGMSG_USER,"printing fsnapf\n");
+        fsnapf(stdout, ptr, size*nitems);
     }
     return nitems;
 }

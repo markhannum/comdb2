@@ -56,7 +56,9 @@ enum SBUF2_FLAGS {
     /* sbuf2close() will not flush the underlying fd */
     SBUF2_NO_FLUSH = 8,
     /* adjust read/write calls to write on non-blocking socket */
-    SBUF2_NO_BLOCK = 16
+    SBUF2_NO_BLOCK = 16,
+    /* Dump the contents while reading */
+    SBUF2_DUMP_READ = 32
 };
 
 typedef int (*sbuf2readfn)(SBUF2 *sb, char *buf, int nbytes);
