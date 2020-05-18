@@ -1033,6 +1033,7 @@ struct BtCursor {
 
     /* remotes */
     fdb_cursor_if_t *fdbc;
+    cdb2_hndl_tp *cdb2_hndl;
 
     /* cursor access range */
     CurRange *range;

@@ -8179,6 +8179,7 @@ int sqlite3BtreeCursor(
     if (debug_switch_cursor_deadlock())
         return SQLITE_DEADLOCK;
 
+    cur->cdb2_hndl = NULL;
     return rc;
 }
 
