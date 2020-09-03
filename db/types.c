@@ -827,7 +827,6 @@ TYPES_INLINE int cstrlenlimflipped(const unsigned char *s, int lim)
 TYPES_INLINE int validate_cstr(const char *s, int lim)
 {
     int len = 0;
-    const char *begin = s;
 
     while (len < lim) {
         /* stop walking when we hit a null */

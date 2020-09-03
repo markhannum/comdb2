@@ -105,6 +105,7 @@
 #include "sc_util.h"
 #include "comdb2_query_preparer.h"
 #include <portmuxapi.h>
+#include <tohex.h>
 
 int gbl_delay_sql_lock_release_sec = 5;
 
