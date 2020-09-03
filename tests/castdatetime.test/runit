@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+function run_test
+{
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a datetime)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index idx1 on t1(a)"
+
+    for (( x = 0 ; x < 20 ; ++x )) ; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1(a) values(now())"
+    done
+    x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "select cast(a as long) from t1 order by a")
+    echo "$x"
+}
+
+run_test
+echo "Testcase passed."
