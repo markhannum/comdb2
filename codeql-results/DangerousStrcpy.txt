@@ -1,0 +1,34 @@
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap","/bdb/bdb_net.c","392","67","392","72"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap","/bdb/file.c","1300","25","1300","30"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap","/bdb/file.c","1309","25","1309","30"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap
+strcpy with untrusted source from dtap","/berkdb/qam/qam_files.c","673","23","673","25"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from p","/datetime/localtimedb.c","2259","47","2259","50"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from p","/datetime/localtimedb.c","2197","17","2197","20"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcat with untrusted source from p","/datetime/localtimedb.c","1938","36","1938","39"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcat with untrusted source from p","/lua/lobject.c","209","19","209","24"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcat with untrusted source from p","/lua/lobject.c","221","21","221","26"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from p","/lua/ltypes.c","746","33","746","38"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from p","/lua/ltypes.c","110","29","110","34"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from p","/lua/ltypes.c","93","29","93","34"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcat with untrusted source from buff","/net/event.c","383","17","383","20"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from p","/plugins/newsql/newsql.c","795","33","795","38"
+"Dangerous strcpy","Calling strcpy with an untrusted string as the source could cause a buffer overflow.","warning","strcpy with untrusted source from p
+strcpy with untrusted source from sql","/util/string_ref.c","54","22","54","24"
