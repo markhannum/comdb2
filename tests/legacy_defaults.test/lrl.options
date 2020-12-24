@@ -1,1 +1,3 @@
 noenv_messages off
+logmsg level info
+legacy_defaults on

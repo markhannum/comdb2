@@ -3651,11 +3651,17 @@ int bdb_latest_commit_is_durable(void *in_bdb_state)
     seqnum_type ss = {{0}};
     int timeoutms;
     int needwait = 0;
-    int rc = 0;
+    int rc;
     uint32_t durable_gen;
     uint32_t latest_gen;
     DB_LSN durable_lsn;
     DB_LSN latest_lsn;
+    int elect_highest_committed_gen;
+
+    rc = bdb_berkdb_get_attr(bdb_state, "elect_highest_committed_gen", NULL, &elect_highest_committed_gen);
+    if (rc == 0 && elect_highest_committed_gen == 0) {
+        return 1;
+    }
 
     bdb_get_rep_master(bdb_state, &master, NULL, NULL);
     bdb_latest_commit(bdb_state, &latest_lsn, &latest_gen);
