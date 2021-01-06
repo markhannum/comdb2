@@ -638,6 +638,7 @@ __memp_fopen(dbmfp, mfp, path, flags, mode, pagesize)
 	size_t pagesize;
 {
 	DB_ENV *dbenv;
+	MPOOLFILE *tmp;
 	DB_MPOOL *dbmp;
 	DB_MPOOLFILE *tmp_dbmfp;
 	MPOOL *mp;
@@ -645,7 +646,9 @@ __memp_fopen(dbmfp, mfp, path, flags, mode, pagesize)
 	size_t maxmap;
 	u_int32_t mbytes, bytes, oflags;
 	int refinc, ret, i;
+	int found = 0;
 	char *rpath, *recp_path, *recp_ext;
+	struct __fileid_mpf *fileid_mpf;
 	void *p;
 
 	dbenv = dbmfp->dbenv;
@@ -799,8 +802,10 @@ __memp_fopen(dbmfp, mfp, path, flags, mode, pagesize)
 	 * create a new entry for the current request.
 	 */
 	R_LOCK(dbenv, dbmp->reginfo);
-	for (mfp = SH_TAILQ_FIRST(&mp->mpfq, __mpoolfile);
-	    mfp != NULL; mfp = SH_TAILQ_NEXT(mfp, q, __mpoolfile)) {
+	fileid_mpf = hash_find(mp->mpfhash, dbmfp->fileid);
+	if (!fileid_mpf)
+		goto hashmiss;
+	LISTC_FOR_EACH_SAFE(&fileid_mpf->mpflist, mfp, tmp, lnk) {
 		/* Skip dead files and temporary files. */
 		if (mfp->deadfile || F_ISSET(mfp, MP_TEMP))
 			continue;
@@ -873,11 +878,13 @@ __memp_fopen(dbmfp, mfp, path, flags, mode, pagesize)
 		if (dbmfp->ftype != 0)
 			mfp->ftype = dbmfp->ftype;
 
+		found = 1;
 		break;
 	}
+hashmiss:
 	R_UNLOCK(dbenv, dbmp->reginfo);
 
-	if (mfp != NULL)
+	if (mfp != NULL && found)
 		goto check_map;
 
 alloc:	/* Allocate and initialize a new MPOOLFILE. */
@@ -979,9 +986,8 @@ alloc:	/* Allocate and initialize a new MPOOLFILE. */
 		memcpy(p, path, strlen(path) + 1);
 
 		/* Copy the file identification string into shared memory. */
-		if ((ret = __memp_alloc(dbmp, dbmp->reginfo,
-		    NULL, DB_FILE_ID_LEN, &mfp->fileid_off, &p)) != 0)
-			goto err;
+        p = mfp->fileid;
+        mfp->fileid_off = (R_OFFSET(dbmp->reginfo, mfp->fileid));
 		memcpy(p, dbmfp->fileid, DB_FILE_ID_LEN);
 	}
 
@@ -1003,8 +1009,17 @@ alloc:	/* Allocate and initialize a new MPOOLFILE. */
 	R_LOCK(dbenv, dbmp->reginfo);
 	ret = __db_mutex_setup(dbenv, dbmp->reginfo, &mfp->mutex,
 	    MUTEX_NO_RLOCK);
-	if (ret == 0)
+	if (ret == 0) {
 		SH_TAILQ_INSERT_HEAD(&mp->mpfq, mfp, q, __mpoolfile);
+		fileid_mpf = hash_find(mp->mpfhash, dbmfp->fileid);
+		if (fileid_mpf == NULL) {
+			fileid_mpf = calloc(1, sizeof(*fileid_mpf));
+			memcpy(fileid_mpf->fileid, dbmfp->fileid, DB_FILE_ID_LEN);
+			listc_init(&fileid_mpf->mpflist, offsetof(struct __mpoolfile, lnk));
+			hash_add(mp->mpfhash, fileid_mpf);
+		}
+		listc_abl(&fileid_mpf->mpflist, mfp);
+	}
 	R_UNLOCK(dbenv, dbmp->reginfo);
 	if (ret != 0)
 		goto err;
@@ -1408,7 +1423,9 @@ __memp_mf_discard(dbmp, mfp)
 	MPOOLFILE *mfp;
 {
 	DB_ENV *dbenv;
+	MPOOLFILE *fnd, *tmp;
 	DB_MPOOL_STAT *sp;
+	struct __fileid_mpf *fileid_mpf;
 	MPOOL *mp;
 	int ret;
 
@@ -1440,6 +1457,17 @@ __memp_mf_discard(dbmp, mfp)
 	/* Delete from the list of MPOOLFILEs. */
 	R_LOCK(dbenv, dbmp->reginfo);
 	SH_TAILQ_REMOVE(&mp->mpfq, mfp, q, __mpoolfile);
+	if ((fileid_mpf = hash_find(mp->mpfhash, mfp->fileid)) != NULL) {
+		LISTC_FOR_EACH_SAFE(&fileid_mpf->mpflist, fnd, tmp, lnk) {
+			if (fnd == mfp) {
+				listc_rfl(&fileid_mpf->mpflist, fnd);
+				if (listc_size(&fileid_mpf->mpflist) == 0) {
+					hash_del(mp->mpfhash, fileid_mpf);
+					free(fileid_mpf);
+				}
+			}
+		}
+	}
 
 	/* Copy the statistics into the region. */
 	sp = &mp->stat;
@@ -1464,9 +1492,6 @@ __memp_mf_discard(dbmp, mfp)
 	if (mfp->path_off != 0)
 		__db_shalloc_free(dbmp->reginfo[0].addr,
 		    R_ADDR(dbmp->reginfo, mfp->path_off));
-	if (mfp->fileid_off != 0)
-		__db_shalloc_free(dbmp->reginfo[0].addr,
-		    R_ADDR(dbmp->reginfo, mfp->fileid_off));
 	if (mfp->pgcookie_off != 0)
 		__db_shalloc_free(dbmp->reginfo[0].addr,
 		    R_ADDR(dbmp->reginfo, mfp->pgcookie_off));
