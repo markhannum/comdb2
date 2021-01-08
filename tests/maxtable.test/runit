@@ -5,6 +5,12 @@ bash -n "$0" | exit 1
 
 [[ $debug == "1" ]] && set -x
 
+export do_downgrade_test=0
+if [[ $DBNAME == *"downgrade"* ]] ; then
+    max_table_override=100
+    do_downgrade_test=1
+fi
+
 function write_prompt
 {
     typeset func=$1
@@ -17,22 +23,29 @@ function failexit
     typeset func="failexit"
     typeset f=$1
     write_prompt $func "$f failed: $2"
-    touch ${DBNAME}.failexit # runtestcase script looks for this file
+    touch ${DBNAME}.failexit
     exit -1
 }
 
 function max_table
 {
     max_table=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select value from comdb2_limits where name='max_tables'" 2>&1)
+    [[ -n "$max_table_override" ]] && max_table=$max_table_override
     cnt=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from comdb2_tables" 2>&1)
     target=$(( max_table - cnt ))
     for ((i=0;i<$target;++i)); do
-        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t$i(a int)" >/dev/null
+        if [[ "$do_downgrade_test" = "1" ]]; then
+            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t$i(a int, b1 blob, b2 blob, b3 blob, b4 blob, b5 blob, b6 blob, b7 blob, b8 blob, b9 blob, b10 blob, b11 blob, b12 blob, b13 blob, b14 blob, b15 blob)" >/dev/null
+        else
+            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t$i(a int)" >/dev/null
+        fi
         [[ $? != 0 ]] && failexit "failed to create table t$i"
         echo "Created table t$i"
     done
-    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table betterfail(a int)" >/dev/null
-    [[ $? == 0 ]] && failexit "should have failed to create table"
+    if [[ -z "$max_table_override" ]]; then
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table betterfail(a int)" >/dev/null
+        [[ $? == 0 ]] && failexit "should have failed to create table"
+    fi
 }
 
 function rebuild
@@ -85,7 +98,23 @@ function max_view
     [[ $? == 0 ]] && failexit "should have failed to create view"
 }
 
-function run_tests
+function downgradecluster
+{
+    for x in $CLUSTER ; do
+        $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME --host $x "exec procedure sys.cmd.send(\"downgrade\")" >/dev/null 2>&1
+    done
+}
+
+function downgrade
+{
+    for ((i=0;i<5;++i)); do
+        echo "Downgrading Master"
+        downgradecluster
+        sleep 60
+    done
+}
+
+function maxtable_test
 {
     max_table
     rebuild
@@ -93,6 +122,23 @@ function run_tests
     rebuild
     max_view
     rebuild
+    return 0
+}
+
+function downgrade_test
+{
+    max_table
+    downgrade
+    return 0
+}
+
+function run_tests
+{
+    if [[ "$do_downgrade_test" == "1" ]]; then
+        downgrade_test
+    else
+        max_table
+    fi
     return 0
 }
 

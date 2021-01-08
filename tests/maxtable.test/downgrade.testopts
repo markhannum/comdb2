@@ -1,0 +1,6 @@
+# Look inside of runit to see how this changes the test's behavior
+dtastripe 16
+blobstripe
+pagesizedta 512
+pagesizeix 512
+pagesizeblob 512
