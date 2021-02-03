@@ -507,6 +507,7 @@ int trans_abort_shadow(void **trans, int *bdberr)
 static int trans_commit_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
                                    struct ireq *iq, void *trans,
                                    db_seqnum_type *seqnum, int logical,
+                                   uint32_t *logbytes,
                                    void *blkseq, int blklen, void *blkkey,
                                    int blkkeylen)
 {
@@ -549,7 +550,14 @@ static int trans_commit_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
 int trans_commit_seqnum(struct ireq *iq, void *trans, db_seqnum_type *seqnum)
 {
     bdb_state_type *bdb_handle = thedb->bdb_env;
-    return trans_commit_seqnum_int(bdb_handle, thedb, iq, trans, seqnum, 0,
+    return trans_commit_seqnum_int(bdb_handle, thedb, iq, trans, seqnum, 0, NULL,
+                                   NULL, 0, NULL, 0);
+}
+
+int trans_commit_seqnum_len(struct ireq *iq, void *trans, uint32_t *logbytes, db_seqnum_type *seqnum)
+{
+    bdb_state_type *bdb_handle = thedb->bdb_env;
+    return trans_commit_seqnum_int(bdb_handle, thedb, iq, trans, seqnum, 0, logbytes,
                                    NULL, 0, NULL, 0);
 }
 
@@ -719,7 +727,7 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
 
     memset(&ss, -1, sizeof(ss));
 
-    rc = trans_commit_seqnum_int(bdb_handle, thedb, iq, trans, &ss, logical,
+    rc = trans_commit_seqnum_int(bdb_handle, thedb, iq, trans, &ss, logical, NULL,
                                  blkseq, blklen, blkkey, blkkeylen);
 
     if (gbl_extended_sql_debug_trace && IQ_HAS_SNAPINFO(iq)) {
