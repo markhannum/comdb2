@@ -572,6 +572,48 @@ static int prepare_and_verify_newdb_record(struct convert_record_data *data,
     return 0;
 }
 
+u_int32_t gbl_sc_logbytes_per_second = 0;
+static pthread_mutex_t sc_bps_lk = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t sc_bps_cd = PTHREAD_COND_INITIALIZER;
+static u_int32_t sc_bytes_this_second;
+static time_t sc_current_second;
+
+static void throttle_sc_logbytes()
+{
+    if (gbl_sc_logbytes_per_second == 0)
+        return;
+
+    Pthread_mutex_lock(&sc_bps_lk);
+    do
+    {
+        time_t now = time(NULL);
+        if (sc_current_second != now) {
+            sc_current_second = now;
+            sc_bytes_this_second = 0;
+        }
+        if (gbl_sc_logbytes_per_second > 0 && sc_bytes_this_second > gbl_sc_logbytes_per_second) {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += 1;
+            pthread_cond_timedwait(&sc_bps_cd, &sc_bps_lk, &ts);
+        }
+    } 
+    while ((gbl_sc_logbytes_per_second > 0) && (sc_bytes_this_second > gbl_sc_logbytes_per_second));
+    Pthread_mutex_unlock(&sc_bps_lk);
+}
+
+static void increment_sc_logbytes(u_int32_t bytes)
+{
+    Pthread_mutex_lock(&sc_bps_lk);
+    time_t now = time(NULL);
+    if (sc_current_second != now) {
+        sc_current_second = now;
+        sc_bytes_this_second = 0;
+    }
+    sc_bytes_this_second += bytes;
+    Pthread_mutex_unlock(&sc_bps_lk);
+}
+
 /* converts a single record and prepares for the next one
  * should be called from a while loop
  * param data: pointer to all the state information
