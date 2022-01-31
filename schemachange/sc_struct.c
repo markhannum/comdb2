@@ -42,6 +42,8 @@ struct schema_change_type *init_schemachange_type(struct schema_change_type *sc)
     sc->instant_sc = -1;
     sc->persistent_seq = -1;
     sc->dbnum = -1; /* -1 = not changing, anything else = set value */
+    sc->force_datastripe_rebuild = -1;
+    sc->force_blobstripe_rebuild = -1;
     sc->original_master_node[0] = 0;
     sc->timepartition_name = NULL;
     sc->partition.type = PARTITION_NONE;

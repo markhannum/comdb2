@@ -3052,6 +3052,8 @@ SQLITE_API int sqlite3_set_authorizer(
 #define SQLITE_DROP_LUA_TRIGGER    178   /* NULL            NULL            */
 #define SQLITE_CREATE_LUA_CONSUMER 179   /* NULL            NULL            */
 #define SQLITE_DROP_LUA_CONSUMER   180   /* NULL            NULL            */
+#define SQLITE_REBUILD_DATASTRIPE  181   /* NULL            NULL            */
+#define SQLITE_REBUILD_BLOBSTRIPE  182   /* NULL            NULL            */
 #endif /* defined(SQLITE_BUILDING_FOR_COMDB2) */
 
 /*

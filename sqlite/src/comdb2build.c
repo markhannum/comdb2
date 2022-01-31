@@ -649,7 +649,7 @@ int comdb2SendBpfunc(OpFunc *f)
 
 /**************************** Function prototypes ***************************/
 
-static void comdb2Rebuild(Parse *p, Token* nm, Token* lnm, int opt);
+static void comdb2Rebuild(Parse *p, Token* nm, Token* lnm, int blob, int stripe, int opt);
 
 /************************** Function definitions ****************************/
 
@@ -829,7 +829,7 @@ out:
     free_schema_change_type(sc);
 }
 
-static inline void comdb2Rebuild(Parse *pParse, Token* nm, Token* lnm, int opt)
+static inline void comdb2Rebuild(Parse *pParse, Token* nm, Token* lnm, int blob, int stripe, int opt)
 {
     Vdbe *v  = sqlite3GetVdbe(pParse);
 
@@ -856,6 +856,14 @@ static inline void comdb2Rebuild(Parse *pParse, Token* nm, Token* lnm, int opt)
     if (OPT_ON(opt, REBUILD_BLOB)) {
         sc->force_dta_rebuild = 1;
         sc->force_blob_rebuild = 1;
+    }
+
+    if (OPT_ON(opt, REBUILD_DATASTRIPE))
+        sc->force_datastripe_rebuild = stripe;
+
+    if (OPT_ON(opt, REBUILD_BLOBSTRIPE)) {
+        sc->force_blobstripe_rebuild = blob;
+        sc->force_datastripe_rebuild = stripe;
     }
 
     if (!sc->force_rebuild)
@@ -907,9 +915,43 @@ void comdb2RebuildFull(Parse* p, Token* nm,Token* lnm, int opt)
     }
 #endif
 
-    comdb2Rebuild(p, nm,lnm, REBUILD_ALL + REBUILD_DATA + REBUILD_BLOB + opt);
+    comdb2Rebuild(p, nm,lnm, -1, -1, REBUILD_ALL + REBUILD_DATA + REBUILD_BLOB + opt);
 }
 
+void comdb2RebuildDataStripe(Parse* p, Token* nm, Token* lnm, int stripe, int opt)
+{
+    if (comdb2IsPrepareOnly(p))
+        return;
+
+#ifndef SQLITE_OMIT_AUTHORIZATION
+    {
+        if( sqlite3AuthCheck(p, SQLITE_REBUILD_DATASTRIPE, 0, 0, 0) ){
+            setError(p, SQLITE_AUTH, COMDB2_NOT_AUTHORIZED_ERRMSG);
+            return;
+        }
+    }
+#endif
+
+    comdb2Rebuild(p, nm, lnm, stripe, -1, REBUILD_DATASTRIPE + opt);
+}
+
+void comdb2RebuildBlobStripe(Parse* p, Token* nm, Token* lnm, Token* blob, int stripe, int opt)
+{
+    if (comdb2IsPrepareOnly(p))
+        return;
+
+#ifndef SQLITE_OMIT_AUTHORIZATION
+    {
+        if( sqlite3AuthCheck(p, SQLITE_REBUILD_BLOBSTRIPE, 0, 0, 0) ){
+            setError(p, SQLITE_AUTH, COMDB2_NOT_AUTHORIZED_ERRMSG);
+            return;
+        }
+    }
+#endif
+
+    int blobno = -1; //GETBLOBNOFROMNAME;
+    comdb2Rebuild(p, nm, lnm, stripe, blobno, REBUILD_BLOBSTRIPE + opt);
+}
 
 void comdb2RebuildData(Parse* p, Token* nm, Token* lnm, int opt)
 {
@@ -925,7 +967,7 @@ void comdb2RebuildData(Parse* p, Token* nm, Token* lnm, int opt)
     }
 #endif
 
-    comdb2Rebuild(p,nm,lnm,REBUILD_DATA + opt);
+    comdb2Rebuild(p,nm,lnm,-1,-1,REBUILD_DATA + opt);
 }
 
 void comdb2RebuildDataBlob(Parse* p,Token* nm, Token* lnm, int opt)
@@ -942,7 +984,7 @@ void comdb2RebuildDataBlob(Parse* p,Token* nm, Token* lnm, int opt)
     }
 #endif
 
-    comdb2Rebuild(p, nm, lnm, REBUILD_BLOB + opt);
+    comdb2Rebuild(p, nm, lnm,-1,-1,REBUILD_BLOB + opt);
 }
 
 void comdb2Truncate(Parse* pParse, Token* nm, Token* lnm)

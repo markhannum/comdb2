@@ -318,9 +318,9 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
   REINDEX RENAME CTIME_KW IF
 %ifdef SQLITE_BUILDING_FOR_COMDB2
   ADD AGGREGATE ALIAS ANALYZEEXPERT ANALYZESQLITE AUTHENTICATION
-  BLOBFIELD BULKIMPORT
+  BLOBFIELD BLOBSTRIPE BULKIMPORT
   CHECK COMMITSLEEP CONSUMER CONVERTSLEEP COUNTER COVERAGE CRLE
-  DATA DATABLOB DATACOPY DBPAD DEFERRABLE DETERMINISTIC DISABLE 
+  DATA DATABLOB DATACOPY DATASTRIPE DBPAD DEFERRABLE DETERMINISTIC DISABLE 
   DISTRIBUTION DRYRUN ENABLE EXEC EXECUTE FUNCTION GENID48 GET 
   GRANT INCREMENT IPU ISC KW LUA LZ4 NONE
   ODH OFF OP OPTION OPTIONS
@@ -2228,6 +2228,14 @@ rebuild ::= REBUILD DATA nm(T) dbnm(X) comdb2opt(O). {
     comdb2RebuildData(pParse, &T, &X, O);
 }
 
+rebuild ::= REBUILD DATASTRIPE nm(T) dbnm(Y) comdb2stripe(X) comdb2opt(O). {
+    comdb2RebuildDataStripe(pParse, &T, &Y, X, O);
+}
+
+rebuild ::= REBUILD BLOBSTRIPE nm(T) dbnm(Y) nm(X) comdb2stripe(Z) comdb2opt(O). {
+    comdb2RebuildBlobStripe(pParse, &T, &Y, &X, Z, O);
+}
+
 rebuild ::= REBUILD DATABLOB nm(N) dbnm(X) comdb2opt(O). {
     comdb2RebuildDataBlob(pParse,&N, &X, O);
 }
@@ -2377,7 +2385,8 @@ analyze_sumthds(A) ::= SUMMARIZE INTEGER(X). {
 }
 
 //////////////////////////////// REBUILD TABLE ////////////////////////////////
-
+%type comdb2stripe {int}
+comdb2stripe(A) ::= STRIPE comdb2stripe(X). {A = X;}
 %type comdb2opt {int}
 comdb2opt(A) ::= . {A = 0;}
 comdb2opt(A) ::= OPTIONS comdb2optlist(X). {A = X;}

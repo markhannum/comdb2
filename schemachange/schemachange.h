@@ -118,6 +118,8 @@ struct schema_change_type {
     int force_rebuild; /* force full rebuild of table */
     int force_dta_rebuild;
     int force_blob_rebuild;
+    int force_datastripe_rebuild;
+    int force_blobstripe_rebuild;
     int force; /* force schema change even if not ready */
     int headers; /* Add ondisk headers? -1 for no change*/
     int header_change;

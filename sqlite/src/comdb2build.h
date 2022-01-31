@@ -30,9 +30,11 @@
 #define PAGE_ORDER    0x4000
 #define READ_ONLY     0x8000
 
-#define REBUILD_ALL     1
-#define REBUILD_DATA    2
-#define REBUILD_BLOB    4
+#define REBUILD_ALL         1
+#define REBUILD_DATA        2
+#define REBUILD_BLOB        4
+#define REBUILD_DATASTRIPE  8
+#define REBUILD_BLOBSTRIPE 16
 
 #define OPT_ON(opt, val) (val & opt)
 
@@ -100,6 +102,8 @@ void comdb2RebuildFull(Parse*,Token*,Token*,int opt);
 void comdb2RebuildIndex(Parse*, Token*, Token*, Token*,int opt);
 void comdb2RebuildData(Parse*, Token*, Token*,int opt);
 void comdb2RebuildDataBlob(Parse*,Token*, Token*,int opt);
+void comdb2RebuildDataStripe(Parse* p, Token* nm, Token* lnm, int stripe, int opt);
+void comdb2RebuildBlobStripe(Parse* p, Token* nm, Token* lnm, Token* blob, int stripe, int opt);
 void comdb2Truncate(Parse*, Token*, Token*);
 
 void comdb2SchemachangeControl(Parse*, int, Token*, Token *);
