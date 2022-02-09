@@ -183,6 +183,19 @@ function stat_tables_loop
     done
 }
 
+# Hammer comdb2_metrics
+function hammer_metrics_loop
+{
+    [[ $debug == "1" ]] && set -x
+    let count=0
+    while [[ ! -f $STOP_TABLES_TEST_TOUCHFILE ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "SELECT * FROM COMDB2_METRICS" >/dev/null 2>&1
+        [[ $? != 0 ]] && failexit hammer_metrics_loop
+        let count=count+1
+        [[ $(( count % 1000 )) == 0 ]] && echo "Completed $count hammer_metrics_loop"
+    done
+}
+
 function check_all_nodes
 {
     if [[ -z "$CLUSTER" ]]; then
@@ -206,6 +219,8 @@ function run_test
     pid=$!
     write_tables_loop &
     writepid=$!
+    hammer_metrics_loop &
+    hammerpid=$!
     for (( i = 0; i < TESTITERS; ++i )); do
         create_triggers
         create_tables
