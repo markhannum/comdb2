@@ -1,0 +1,19 @@
+nowatch
+logmsg level info
+init_with_genid48
+decoupled_logputs off
+verbose_set_sc_in_progress on
+setattr REP_PROCESSORS 0
+setattr REP_WORKERS 0
+cache 512 mb
+dtastripe 16
+blobstripe
+enable_sql_stmt_caching
+off schemachange_perms
+sql_tranlevel_default block
+sql_tranlevel_default blocksock
+sql_tranlevel_default blocksock
+enable_good_sql_return_codes
+old_column_names 1
+osql_verify_retry_max 5
+maxretries 2

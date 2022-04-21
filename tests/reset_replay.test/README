@@ -1,0 +1,5 @@
+This testcase reproduces a replay case where the replay flag is incorrectly
+reset to REPLAY_NONE, which causes the database to abort when it attempts to
+enque something in its history after a COMMIT.  My strategy is to produce a
+verify-error heavy workload which may fail on a constraint violation during
+replay.

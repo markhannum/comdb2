@@ -47,6 +47,6 @@ function create_unique_index
     write_prompt $func "Running $func"
     typeset table=${1:-t1}
     typeset column=${2:-a}
-    typeset ixname=${2:-uniqix1}
+    typeset ixname=${3:-uniqix1}
     $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "create unique index $ixname on $table($column)" 
 }
