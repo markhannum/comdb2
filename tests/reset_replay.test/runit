@@ -82,10 +82,12 @@ function runthread
         typeset r3=$(( ( RANDOM % maxrecord ) + 1 ))
         typeset er=$(( ( RANDOM % 100 ) ))
 
-        if [[ "$err" == 0 ]]; then
+        if [[ "$er" == 0 ]]; then
             echo "begin" >&"${COPROC[1]}"
             echo "update t1 set a = $r1 where a = $r2" >&"${COPROC[1]}"
             echo "insert into t2(a) values($r3)" >&"${COPROC[1]}"
+            # intentionally leave txn open & issue a begin
+            echo "begin" >&"${COPROC[1]}"
         fi
 
         echo "begin" >&"${COPROC[1]}"
