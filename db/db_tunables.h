@@ -540,6 +540,10 @@ REGISTER_TUNABLE("init_with_ondisk_header",
                  "Initialize tables with on-disk header. (Default: on)",
                  TUNABLE_BOOLEAN, &gbl_init_with_odh, READONLY | NOARG, NULL,
                  NULL, NULL, NULL);
+REGISTER_TUNABLE("ondisk_header_version",
+                 "Set default odh version", TUNABLE_INTEGER,
+                 &gbl_init_with_odh_version, READONLY | NOZERO, NULL, NULL,
+                 NULL, NULL);
 REGISTER_TUNABLE("init_with_queue_ondisk_header",
                  "Initialize tables with on-disk header. (Default: on)",
                  TUNABLE_BOOLEAN, &gbl_init_with_queue_odh, READONLY | NOARG,

@@ -99,6 +99,7 @@ struct schema_change_type {
     int force_blob_rebuild;
     int force; /* force schema change even if not ready */
     int headers; /* Add ondisk headers? -1 for no change*/
+    int header_version; /* change header version */
     int header_change;
     int compress;       /* new compression algorithm or -1 for no change */
     int compress_blobs; /* new blob com algorithm or -1 for no change */

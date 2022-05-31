@@ -960,6 +960,7 @@ struct bdb_state_tag {
     signed char sanc_ok;
 
     signed char ondisk_header; /* boolean: give each record an ondisk header? */
+    int ondisk_header_version; /* integer: ondisk_header version */
     signed char compress;      /* boolean: compress data? */
     signed char compress_blobs; /*boolean: compress blobs? */
 

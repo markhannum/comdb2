@@ -4055,8 +4055,11 @@ static int init_odh_lrl(struct dbtable *d, int *compr, int *compr_blobs,
         gbl_init_with_compr_blobs = 0;
         gbl_init_with_ipu = 0;
         gbl_init_with_instant_sc = 0;
+        gbl_init_with_odh_version = 0;
     }
     if (put_db_odh(d, NULL, gbl_init_with_odh) != 0)
+        return -1;
+    if (put_db_odh_version(d, NULL, gbl_init_with_odh_version) != 0)
         return -1;
     if (put_db_compress(d, NULL, gbl_init_with_compr) != 0)
         return -1;
@@ -4107,12 +4110,14 @@ static int init_odh_llmeta(struct dbtable *d, int *compr, int *compr_blobs,
         *compr = 0;
         *compr_blobs = 0;
         d->odh = 0;
+        d->odh_version = 0;
         d->inplace_updates = 0;
         d->instant_schema_change = 0;
         *datacopy_odh = 0;
         return 0;
     }
 
+    get_db_odh_version_tran(d, &d->odh_version, tran);
     get_db_compress_tran(d, compr, tran);
     get_db_compress_blobs_tran(d, compr_blobs, tran);
     get_db_instant_schema_change_tran(d, &d->instant_schema_change, tran);
@@ -4334,7 +4339,7 @@ int backend_open_tran(struct dbenv *dbenv, tran_type *tran, uint32_t flags)
 
         /* now tell bdb what the flags are - CRUCIAL that this is done
          * before any records are read/written from/to these tables. */
-        set_bdb_option_flags(d, d->odh, d->inplace_updates,
+        set_bdb_option_flags(d, d->odh, d->odh_version, d->inplace_updates,
                              d->instant_schema_change, d->schema_version,
                              compress, compress_blobs, datacopy_odh);
 
@@ -4750,6 +4755,7 @@ get_put_db(datacopy_odh, META_DATACOPY_ODH)
 get_put_db(bthash, META_BTHASH)
 get_put_db(queue_odh, META_QUEUE_ODH)
 get_put_db(queue_compress, META_QUEUE_COMPRESS)
+get_put_db(odh_version, META_ODH_VERSION)
 
 static int put_meta_int(const char *table, void *tran,
         int rrn, int key, int value)
@@ -5798,13 +5804,18 @@ void print_tableparams()
 }
 
 int set_meta_odh_flags_tran(struct dbtable *db, tran_type *tran, int odh,
-                            int compress, int compress_blobs, int ipupdates)
+                            int odh_version, int compress, int compress_blobs, int ipupdates)
 {
     int rc;
     int overall = 0;
     rc = put_db_odh(db, tran, odh);
     if (rc) {
         logmsg(LOGMSG_ERROR, "Unable to set meta ODH option\n");
+        overall |= rc;
+    }
+    rc = put_db_odh_version(db, tran, odh_version);
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "Unable to set meta ODH-version option\n");
         overall |= rc;
     }
     rc = put_db_compress(db, tran, compress);
@@ -5825,10 +5836,10 @@ int set_meta_odh_flags_tran(struct dbtable *db, tran_type *tran, int odh,
     return overall;
 }
 
-int set_meta_odh_flags(struct dbtable *db, int odh, int compress, int compress_blobs,
-                       int ipupdates)
+int set_meta_odh_flags(struct dbtable *db, int odh, int odh_version, int compress,
+                       int compress_blobs, int ipupdates)
 {
-    return set_meta_odh_flags_tran(db, NULL, odh, compress, compress_blobs,
+    return set_meta_odh_flags_tran(db, NULL, odh, odh_version, compress, compress_blobs,
                                    ipupdates);
 }
 
@@ -6244,6 +6255,7 @@ int rename_table_options(void *tran, struct dbtable *db, const char *newname)
     char *oldname;
     int rc;
     int odh;
+    int odh_version;
     int compress;
     int compress_blobs;
     int ipu;
@@ -6255,6 +6267,14 @@ int rename_table_options(void *tran, struct dbtable *db, const char *newname)
     rc = get_db_odh_tran(db, &odh, tran);
     if (rc)
         return rc;
+    rc = get_db_odh_version_tran(db, &odh_version, tran);
+    if (rc) {
+        if (rc == IX_NOTFND) {
+            odh_version = 1;
+        } else {
+            return rc;
+        }
+    }
     rc = get_db_compress_tran(db, &compress, tran);
     if (rc)
         return rc;
@@ -6279,6 +6299,9 @@ int rename_table_options(void *tran, struct dbtable *db, const char *newname)
     db->tablename = (char *)newname;
 
     rc = put_db_odh(db, tran, odh);
+    if (rc)
+        goto done;
+    rc = put_db_odh_version(db, tran, odh_version);
     if (rc)
         goto done;
     rc = put_db_compress(db, tran, compress);

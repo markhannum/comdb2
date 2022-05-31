@@ -365,8 +365,8 @@ int set_header_and_properties(void *tran, struct dbtable *newdb,
     int rc;
 
     /* set the meta and set the ODH/compression flags */
-    if ((rc = set_meta_odh_flags_tran(newdb, tran, s->headers, s->compress,
-                                      s->compress_blobs, s->ip_updates))) {
+    if ((rc = set_meta_odh_flags_tran(newdb, tran, s->headers, s->header_version,
+                                      s->compress, s->compress_blobs, s->ip_updates))) {
         sc_errf(s, "Failed to set on disk headers\n");
         return SC_TRANSACTION_FAILED;
     }
@@ -1092,7 +1092,7 @@ void set_odh_options_tran(struct dbtable *db, tran_type *tran)
     get_db_compress_blobs_tran(db, &blob_compr, tran);
     db->schema_version = get_csc2_version_tran(db->tablename, tran);
 
-    set_bdb_option_flags(db, db->odh, db->inplace_updates,
+    set_bdb_option_flags(db, db->odh, db->odh_version, db->inplace_updates,
                          db->instant_schema_change, db->schema_version, compr,
                          blob_compr, datacopy_odh);
 

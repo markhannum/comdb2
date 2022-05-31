@@ -1,5 +1,5 @@
 /*
-   Copyright 2015 Bloomberg Finance L.P.
+   Copyright 2022 Bloomberg Finance L.P.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ static void read_odh(const void *buf, struct odh *odh);
 static void write_odh(void *buf, const struct odh *odh, uint8_t flags);
 
 /*
- * Map of the 7-byte on disk header:
+ * Map of the 7-byte on disk header for odh:
  *
  *    fieldname       bit  byte-boundry
  * _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
@@ -110,6 +110,144 @@ static void write_odh(void *buf, const struct odh *odh, uint8_t flags);
  *                      .
  *                      ._ _ _ _ _ _ _ _
  *                      . idx 6, byte 7
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+
+
+ odh version 2 is similar: we are expanding the updateid field to 2 full bytes,
+ increasing the length field to a full word
+ *    fieldname       bit  byte-boundry
+ * _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+ *    flags             . idx 0, byte 1
+ *                      .
+ *                      .
+ *                      . 
+ *                      . 2 -+
+ *                      . 1  |- Compress
+ *                      . 0 _+
+ * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+ *    csc2vers          . idx 1, byte 2
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+ *    updateid          . idx 2, byte 3
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 3, byte 4
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+ *    length            . idx 4, byte 5
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 5, byte 6
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 6, byte 7
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 7, byte 8
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+
+
+
+   _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+ * insert-commit-genid  . idx 7, byte 8
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 8, byte 9
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 9, byte 10
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 10, byte 11
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+ * delete-commit-genid  . idx 11, byte 12
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 12, byte 13
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 13, byte 14
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      ._ _ _ _ _ _ _ _
+ *                      . idx 14, byte 15
  *                      .
  *                      .
  *                      .
@@ -1308,14 +1446,15 @@ void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
     bdb_state->compress = compression;
 }
 
-void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
-                         int blob_compression)
+void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int odh_version,
+                         int compression, int blob_compression)
 {
     print(bdb_state,
           "BDB options set: ODH %d compression %d blob_compression %d\n", odh,
           compression, blob_compression);
 
     bdb_state->ondisk_header = odh;
+    bdb_state->ondisk_header_version = odh_version;
     bdb_state->compress = compression;
     bdb_state->compress_blobs = blob_compression;
 }

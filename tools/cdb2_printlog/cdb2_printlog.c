@@ -260,6 +260,7 @@ int tool_cdb2_printlog_main(argc, argv)
 
 	/* Default to 1. */
 	st.ondisk_header = 1;
+    st.ondisk_header_version = 1;
 	Pthread_mutex_init(&st.gblcontext_lock, NULL);
 
 	gbl_bdb_state = &st;
