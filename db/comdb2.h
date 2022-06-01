@@ -463,7 +463,8 @@ enum DB_METADATA {
     META_INPLACE_UPDATES = -12,
     META_BTHASH = -13,
     META_QUEUE_ODH = -14,
-    META_QUEUE_COMPRESS = -15
+    META_QUEUE_COMPRESS = -15,
+    META_MVCC = -16,
 };
 
 enum CONSTRAINT_FLAGS {
@@ -813,6 +814,7 @@ typedef struct dbtable {
 
     struct dbstore dbstore[MAXCOLUMNS];
     int odh;
+    int mvcc;
     /* csc2 schema version increased on instantaneous schemachange */
     int schema_version;
     int instant_schema_change;
@@ -1729,6 +1731,7 @@ extern int gbl_selectv_rangechk;
 extern int gbl_init_with_rowlocks;
 extern int gbl_init_with_genid48;
 extern int gbl_init_with_odh;
+extern int gbl_init_with_mvcc;
 extern int gbl_init_with_queue_odh;
 extern int gbl_init_with_ipu;
 extern int gbl_init_with_instant_sc;
@@ -2406,6 +2409,9 @@ int put_schema_version(const char *table, void *tran, int version);
 int put_db_odh(struct dbtable *db, tran_type *, int odh);
 int get_db_odh(struct dbtable *db, int *odh);
 int get_db_odh_tran(struct dbtable *, int *odh, tran_type *);
+int put_db_mvcc(struct dbtable *db, tran_type *, int mvcc);
+int get_db_mvcc(struct dbtable *db, int *mvcc);
+int get_db_mvcc_tran(struct dbtable *, int *mvcc, tran_type *);
 int put_db_queue_odh(struct dbtable *db, tran_type *, int odh);
 int get_db_queue_odh(struct dbtable *db, int *odh);
 int get_db_queue_odh_tran(struct dbtable *, int *odh, tran_type *);
@@ -3537,7 +3543,7 @@ extern int gbl_check_wrong_db;
 
 extern int gbl_debug_sql_opcodes;
 
-void set_bdb_option_flags(struct dbtable *, int odh, int ipu, int isc, int ver,
+void set_bdb_option_flags(struct dbtable *, int odh, int mvcc, int ipu, int isc, int ver,
                           int compr, int blob_compr, int datacopy_odh);
 
 void set_bdb_queue_option_flags(struct dbtable *, int odh, int compr);

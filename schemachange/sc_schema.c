@@ -1092,7 +1092,7 @@ void set_odh_options_tran(struct dbtable *db, tran_type *tran)
     get_db_compress_blobs_tran(db, &blob_compr, tran);
     db->schema_version = get_csc2_version_tran(db->tablename, tran);
 
-    set_bdb_option_flags(db, db->odh, db->inplace_updates,
+    set_bdb_option_flags(db, db->odh, db->mvcc, db->inplace_updates,
                          db->instant_schema_change, db->schema_version, compr,
                          blob_compr, datacopy_odh);
 

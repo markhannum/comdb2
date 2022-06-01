@@ -4061,6 +4061,8 @@ static int init_odh_lrl(struct dbtable *d, int *compr, int *compr_blobs,
         gbl_init_with_ipu = 0;
         gbl_init_with_instant_sc = 0;
     }
+    if (put_db_mvcc(d, NULL, gbl_init_with_mvcc) != 0)
+        return -1;
     if (put_db_odh(d, NULL, gbl_init_with_odh) != 0)
         return -1;
     if (put_db_compress(d, NULL, gbl_init_with_compr) != 0)
@@ -4072,6 +4074,7 @@ static int init_odh_lrl(struct dbtable *d, int *compr, int *compr_blobs,
     if (put_db_instant_schema_change(d, NULL, gbl_init_with_instant_sc) != 0)
         return -1;
     d->odh = gbl_init_with_odh;
+    d->mvcc = gbl_init_with_mvcc;
     *compr = gbl_init_with_compr;
     *compr_blobs = gbl_init_with_compr_blobs;
     d->inplace_updates = gbl_init_with_ipu;
@@ -4107,6 +4110,8 @@ static int init_queue_odh_llmeta(struct dbtable *d, int *compr, tran_type *tran)
 static int init_odh_llmeta(struct dbtable *d, int *compr, int *compr_blobs,
                            int *datacopy_odh, tran_type *tran)
 {
+    get_db_mvcc_tran(d, &d->mvcc, tran);
+
     if (get_db_odh_tran(d, &d->odh, tran) != 0 || d->odh == 0) {
         // couldn't find odh in llmeta or odh off
         *compr = 0;
@@ -4339,18 +4344,19 @@ int backend_open_tran(struct dbenv *dbenv, tran_type *tran, uint32_t flags)
 
         /* now tell bdb what the flags are - CRUCIAL that this is done
          * before any records are read/written from/to these tables. */
-        set_bdb_option_flags(d, d->odh, d->inplace_updates,
+        set_bdb_option_flags(d, d->odh, d->mvcc, d->inplace_updates,
                              d->instant_schema_change, d->schema_version,
                              compress, compress_blobs, datacopy_odh);
 
         ctrace("Table %s  "
                "ver %d  "
                "odh %s  "
+               "mvcc %s  "
                "isc %s  "
                "odh_datacopy %s  "
                "ipu %s",
                d->tablename, d->schema_version, d->odh ? "yes" : "no",
-               d->instant_schema_change ? "yes" : "no",
+               d->mvcc ? "yes" : "no", d->instant_schema_change ? "yes" : "no",
                datacopy_odh ? "yes" : "no", d->inplace_updates ? "yes" : "no");
     }
 
@@ -4748,6 +4754,7 @@ int get_blobstripe_genid(struct dbtable *db, unsigned long long *genid)
 
 get_put_db(odh, META_ONDISK_HEADER_RRN) get_put_db(inplace_updates,
                                                    META_INPLACE_UPDATES)
+get_put_db(mvcc, META_MVCC)
 get_put_db(compress, META_COMPRESS_RRN)
 get_put_db(compress_blobs, META_COMPRESS_BLOBS_RRN)
 get_put_db(instant_schema_change, META_INSTANT_SCHEMA_CHANGE)
@@ -5725,19 +5732,19 @@ uint64_t calc_table_size(struct dbtable *db, int skip_blobs)
 void compr_print_stats()
 {
     int ii;
-    int odh, compr, blob_compr;
+    int odh, mvcc, compr, blob_compr;
 
     logmsg(LOGMSG_USER, "COMPRESSION FLAGS\n");
     logmsg(LOGMSG_USER, "These apply to new records only!\n");
 
     for (ii = 0; ii < thedb->num_dbs; ii++) {
         struct dbtable *db = thedb->dbs[ii];
-        bdb_get_compr_flags(db->handle, &odh, &compr, &blob_compr);
+        bdb_get_compr_flags(db->handle, &odh, &mvcc, &compr, &blob_compr);
 
         logmsg(LOGMSG_USER, "[%-16s] ", db->tablename);
-        logmsg(LOGMSG_USER, "ODH: %3s Compress: %-8s Blob compress: %-8s  in-place updates: "
+        logmsg(LOGMSG_USER, "ODH: %3s Mvcc: %3s Compress: %-8s Blob compress: %-8s  in-place updates: "
                "%-3s  instant schema change: %-3s",
-               odh ? "yes" : "no", bdb_algo2compr(compr),
+               odh ? "yes" : "no", mvcc ? "yes" : "no", bdb_algo2compr(compr),
                bdb_algo2compr(blob_compr), db->inplace_updates ? "yes" : "no",
                db->instant_schema_change ? "yes" : "no");
 

@@ -215,6 +215,7 @@ err:
 static inline void set_empty_options(struct schema_change_type *s)
 {
     if (s->headers == -1) s->headers = gbl_init_with_odh;
+    if (s->mvcc == -1) s->mvcc = gbl_init_with_mvcc;
     if (s->compress == -1) s->compress = gbl_init_with_compr;
     if (s->compress_blobs == -1) s->compress_blobs = gbl_init_with_compr_blobs;
     if (s->ip_updates == -1) s->ip_updates = gbl_init_with_ipu;
@@ -254,6 +255,7 @@ int do_add_table(struct ireq *iq, struct schema_change_type *s,
     iq->usedb = s->db = db = s->newdb;
     db->sc_to = db;
     db->odh = s->headers;
+    db->mvcc = s->mvcc;
     db->inplace_updates = s->ip_updates;
     db->schema_version = 1;
     if (local_lock)
@@ -261,7 +263,7 @@ int do_add_table(struct ireq *iq, struct schema_change_type *s,
 
     /* compression algorithms set to 0 for new table - this
        will have to be changed manually by the operator */
-    set_bdb_option_flags(db, s->headers, s->ip_updates, s->instant_sc,
+    set_bdb_option_flags(db, s->headers, s->mvcc, s->ip_updates, s->instant_sc,
                          db->schema_version, s->compress, s->compress_blobs, 1);
 
     return 0;

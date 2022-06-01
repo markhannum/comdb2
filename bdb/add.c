@@ -132,7 +132,7 @@ static int bdb_prim_addkey_int(bdb_state_type *bdb_state, tran_type *tran,
             uint32_t recsize = 0;
             void *freeptr = NULL;
             init_odh(bdb_state, &odh, dta, dtalen, 0);
-            bdb_pack(bdb_state, &odh, iptr + 2,
+            bdb_pack_datacopy_index(bdb_state, &odh, iptr + 2,
                      keydata_len - sizeof(unsigned long long), &rec, &recsize,
                      &freeptr);
             /* freeptr cannot be set. Provided buffer as big as rec.

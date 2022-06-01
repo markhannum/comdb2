@@ -55,6 +55,18 @@
 
 static void read_odh(const void *buf, struct odh *odh);
 static void write_odh(void *buf, const struct odh *odh, uint8_t flags);
+/*
+ * Mvcc tables will have 2 'commit-genids' which preceed the record.  The first
+ * corresponds to the record's logical insert time, and the second corresponds
+ * to the record's logical delete time.  If a record currently exists, we use
+ * MAXLONGLONG for this second field.
+ *
+ * Mvcc indexes will extend the key with the 8-byte delete time.  As currently
+ * existing records will always have MAXLONGLONG for that field, we can continue
+ * to use Berkley to enforce uniqueness.  The first 8-bytes of an index will 
+ * contain it's logical-insert-time-commit-genid, and the rest of the record 
+ * will be identical to any other index.
+ */
 
 /*
  * Map of the 7-byte on disk header:
@@ -293,12 +305,17 @@ void init_odh(bdb_state_type *bdb_state, struct odh *odh, void *rec,
  *
  * Note: recsize is a uint32_t* so that we can point to a DBT->size field.
  */
-int bdb_pack(bdb_state_type *bdb_state, const struct odh *odh, void *to,
+static int bdb_pack(bdb_state_type *bdb_state, const struct odh *odh, void *to,
              size_t tolen, void **recptr, uint32_t *recsize, void **freeptr)
 {
     int rc;
 
     *freeptr = NULL;
+
+    if (bdb_state->mvcc && !bdb_state->ondisk_header) {
+        if (to) {
+        }
+    }
 
     if (bdb_state->ondisk_header) {
         void *mallocmem = NULL;
@@ -442,6 +459,14 @@ int bdb_pack(bdb_state_type *bdb_state, const struct odh *odh, void *to,
     return 0;
 }
 
+
+int bdb_pack_datacopy_index(bdb_state_type *bdb_state, const struct odh *odh, void *to,
+             size_t tolen, void **recptr, uint32_t *recsize, void **freeptr)
+{
+    return bdb_pack(bdb_state, odh, to, tolen, recptr, recsize, freeptr);
+}
+
+
 /* Unpack a data or blob record and read back the ODH.
  *
  * Input:
@@ -485,6 +510,21 @@ static int bdb_unpack_updateid(bdb_state_type *bdb_state, const void *from, size
 
     if (freeptr) {
         *freeptr = NULL;
+    }
+
+    if (bdb_state->mvcc) {
+        if (fromlen < MVCC_SIZE) {
+            logmsg(LOGMSG_ERROR, "%s:ERROR: data size %u too small for MVCC\n",
+                    __func__, (unsigned)fromlen);
+            return DB_ODH_CORRUPT;
+        }
+        const uint64_t *in = from;
+        odh->mvcc_insert = in[0];
+        odh->mvcc_delete = in[1];
+        from += MVCC_SIZE;
+        fromlen -= MVCC_SIZE;
+    } else {
+        odh->mvcc_insert = odh->mvcc_delete = 0;
     }
 
     if (bdb_state->ondisk_header || force_odh) {
@@ -626,6 +666,8 @@ static int bdb_unpack_updateid(bdb_state_type *bdb_state, const void *from, size
         odh->updateid = 0;
         odh->csc2vers = 0;
         odh->flags = 0;
+        odh->mvcc_insert = 0;
+        odh->mvcc_delete = 0;
         odh->recptr = (void *)from;
     }
 
@@ -1195,6 +1237,20 @@ int bdb_put(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data,
     return rc;
 }
 
+int bdb_cget_index(bdb_state_type *bdb_state, DBC *dbcp, DBT *dbt_key, DBT *dbt_data, uint32_t flags)
+{
+    return dbcp->c_get(dbcp, dbt_key, dbt_data, flags);
+}
+
+//int bdb_cput_index()
+
+int bdb_put_index(bdb_state_type *bdb_state, int ixnum, tran_type *tran,
+                  DBT *dbt_key, DBT *dbt_data, u_int32_t flags)
+{
+    return bdb_state->dbp_ix[ixnum]->put(bdb_state->dbp_ix[ixnum], tran->tid,
+                                         dbt_key, dbt_data, flags);
+}
+
 int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, DB_TXN *tid,
                  DBT *key, DBT *data, u_int32_t flags, int odhready)
 {
@@ -1308,7 +1364,7 @@ void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
     bdb_state->compress = compression;
 }
 
-void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
+void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int mvcc, int compression,
                          int blob_compression)
 {
     print(bdb_state,
@@ -1316,6 +1372,7 @@ void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
           compression, blob_compression);
 
     bdb_state->ondisk_header = odh;
+    bdb_state->mvcc = mvcc;
     bdb_state->compress = compression;
     bdb_state->compress_blobs = blob_compression;
 }
@@ -1377,10 +1434,11 @@ int bdb_validate_compression_alg(int alg)
     return -1;
 }
 
-inline void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *compr,
+inline void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *mvcc, int *compr,
                                 int *blob_compr)
 {
     *odh = bdb_state->ondisk_header;
+    *mvcc = bdb_state->mvcc;
     *compr = bdb_state->compress;
     *blob_compr = bdb_state->compress_blobs;
 }

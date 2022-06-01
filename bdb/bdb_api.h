@@ -1095,13 +1095,13 @@ void bdb_set_blobstripe_genid(bdb_state_type *bdb_state,
                               unsigned long long genid);
 
 /* set various options for the ondisk header. */
-void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
+void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int mvcc, int compression,
                          int blob_compression);
 
 void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
                                int compression);
 
-void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *compr,
+void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *mvcc, int *compr,
                          int *blob_compr);
 
 /* delete a table from disk.  must already be closed but NOT freed */

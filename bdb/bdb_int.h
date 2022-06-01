@@ -65,6 +65,9 @@ enum {
     ODH_SIZE = 7, /* We may extend for larger headers in the future,
                      but the minimum size shall always be 7 bytes. */
 
+    MVCC_INSERT = 8,
+    MVCC_DELETE = 8,
+    MVCC_SIZE = 16,
     ODH_SIZE_RESERVE = 7, /* Callers wishing to provide a buffer into which
                              a record will be packed should allow this many
                              bytes on top of the record size for the ODH.
@@ -91,6 +94,9 @@ struct odh {
 
     void *recptr; /* Some functions set this to point to the
                      decompressed record data. */
+
+    uint64_t mvcc_insert; /* mvcc insert time */
+    uint64_t mvcc_delete; /* mvcc delete time */
 };
 
 #ifndef MIN
@@ -964,6 +970,7 @@ struct bdb_state_tag {
     signed char ondisk_header; /* boolean: give each record an ondisk header? */
     signed char compress;      /* boolean: compress data? */
     signed char compress_blobs; /*boolean: compress blobs? */
+    signed char mvcc;           /*boolean: give each record an mvcc timestamp? */
 
     signed char got_gblcontext;
     signed char need_to_upgrade;
@@ -1242,10 +1249,12 @@ int bdb_get_unpack(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key,
                    DBT *data, uint8_t *ver, u_int32_t flags);
 int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, DB_TXN *tid,
                  DBT *key, DBT *data, u_int32_t flags, int odhready);
-
+int bdb_put_index(bdb_state_type *bdb_state, int ixnum, tran_type *tran,
+                  DBT *key, DBT *data, u_int32_t flags);
 int bdb_cput_pack(bdb_state_type *bdb_state, int is_blob, DBC *dbcp, DBT *key,
                   DBT *data, u_int32_t flags);
-
+int bdb_cget_index(bdb_state_type *bdb_state, DBC *dbcp, DBT *dbt_key, DBT *dbt_data, uint32_t flags);
+int bdb_cget_index(bdb_state_type *bdb_state, DBC *dbcp, DBT *dbt_key, DBT *dbt_data, uint32_t flags);
 int bdb_put(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data,
             u_int32_t flags);
 
@@ -1262,7 +1271,7 @@ int bdb_cget(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data,
 void init_odh(bdb_state_type *bdb_state, struct odh *odh, void *rec,
               size_t reclen, int dtanum);
 
-int bdb_pack(bdb_state_type *bdb_state, const struct odh *odh, void *to,
+int bdb_pack_datacopy_index(bdb_state_type *bdb_state, const struct odh *odh, void *to,
              size_t tolen, void **recptr, uint32_t *recsize, void **freeptr);
 
 int bdb_unpack(bdb_state_type *bdb_state, const void *from, size_t fromlen,

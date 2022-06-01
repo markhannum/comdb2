@@ -352,6 +352,7 @@ int gbl_schedule = 0;
 int gbl_init_with_rowlocks = 0;
 int gbl_init_with_genid48 = 1;
 int gbl_init_with_odh = 1;
+int gbl_init_with_mvcc = 0;
 int gbl_init_with_queue_odh = 1;
 int gbl_init_with_queue_compr = BDB_COMPRESS_LZ4;
 int gbl_init_with_ipu = 1;

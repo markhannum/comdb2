@@ -1369,7 +1369,7 @@ int do_setcompr(struct ireq *iq, const char *rec, const char *blob)
 
     if (rec) ra = bdb_compr2algo(rec);
     if (blob) ba = bdb_compr2algo(blob);
-    bdb_set_odh_options(db->handle, db->odh, ra, ba);
+    bdb_set_odh_options(db->handle, db->odh, db->mvcc, ra, ba);
     if ((rc = put_db_compress(db, tran, ra)) != 0) goto out;
     if ((rc = put_db_compress_blobs(db, tran, ba)) != 0) goto out;
     if ((rc = trans_commit(iq, tran, gbl_mynode)) == 0) {
