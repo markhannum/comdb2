@@ -372,6 +372,11 @@ static void fillTableOption(struct schema_change_type* sc, int opt)
     else if (OPT_ON(opt, REC_LZ4))
         sc->compress = BDB_COMPRESS_LZ4;
 
+    if (OPT_ON(opt, MVCC_ON))
+        sc->mvcc = 1;
+    else
+        sc->mvcc = 0;
+
     if (OPT_ON(opt, FORCE_REBUILD))
         sc->force_rebuild = 1;
     else
@@ -3937,12 +3942,14 @@ static int retrieve_table_options(struct dbtable *table)
 {
     int table_options = 0;
     int odh;
+    int mvcc = 0;
     int inplace_updates;
     int instant_schema_change;
     int compr;
     int compr_blobs;
 
     get_db_odh(table, &odh);
+    get_db_mvcc(table, &mvcc);
     get_db_inplace_updates(table, &inplace_updates);
     get_db_instant_schema_change(table, &instant_schema_change);
     get_db_compress(table, &compr);
@@ -3951,6 +3958,12 @@ static int retrieve_table_options(struct dbtable *table)
     switch (odh) {
     case 0: table_options |= ODH_OFF; break;
     case 1: break;
+    default: assert(0);
+    }
+
+    switch(mvcc) {
+    case 1: table_options |= MVCC_ON; break;
+    case 0: break;
     default: assert(0);
     }
 

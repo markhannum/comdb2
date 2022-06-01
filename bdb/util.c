@@ -53,6 +53,7 @@ int bdb_maybe_use_genid_for_key(
                                unsigned long long genid, int isnull,
                                void **ppKeyMaxBuf)
 {
+    uint64_t ullmax = ULLONG_MAX;
     int rc = 0;
 
     assert(ppKeyMaxBuf);
@@ -66,6 +67,8 @@ int bdb_maybe_use_genid_for_key(
 
     if (bdb_keycontainsgenid(bdb_state, ixnum)) {
         unsigned long long tmpgenid;
+        int extend = sizeof(unsigned long long) +
+                    (bdb_state->mvcc ? sizeof(unsigned long long) : 0);
 
         tmpgenid = get_search_genid(bdb_state, genid);
 
@@ -77,7 +80,7 @@ int bdb_maybe_use_genid_for_key(
 
         assert(bdb_state->ixlen[ixnum] <= BDB_KEY_MAX);
 
-        *ppKeyMaxBuf = malloc(BDB_KEY_MAX + sizeof(unsigned long long));
+        *ppKeyMaxBuf = malloc(BDB_KEY_MAX + extend);
         memcpy(*ppKeyMaxBuf, ixdta, bdb_state->ixlen[ixnum]);
 
         p_dbt_key->data = *ppKeyMaxBuf;
@@ -85,13 +88,29 @@ int bdb_maybe_use_genid_for_key(
 
         memcpy(*ppKeyMaxBuf + bdb_state->ixlen[ixnum], &tmpgenid,
                sizeof(unsigned long long));
+
         p_dbt_key->size += sizeof(unsigned long long);
+        if (bdb_state->mvcc) {
+            memcpy(*ppKeyMaxBuf + bdb_state->ixlen[ixnum] + sizeof(unsigned long long),
+                   &ullmax, sizeof(unsigned long long));
+            p_dbt_key->size += sizeof(unsigned long long);
+        }
     } else {
         /* in place if we dont have dups */
-        *ppKeyMaxBuf = 0;
+        if (bdb_state->mvcc) {
+            *ppKeyMaxBuf = malloc(BDB_KEY_MAX + sizeof(unsigned long long));
+            memcpy(*ppKeyMaxBuf, ixdta, bdb_state->ixlen[ixnum]);
+            p_dbt_key->data = *ppKeyMaxBuf;
+            p_dbt_key->size = bdb_state->ixlen[ixnum];
+            memcpy(*ppKeyMaxBuf + bdb_state->ixlen[ixnum], &ullmax,
+                sizeof(unsigned long long));
+            p_dbt_key->size += sizeof(unsigned long long);
+        } else {
+            *ppKeyMaxBuf = 0;
 
-        p_dbt_key->data = ixdta;
-        p_dbt_key->size = bdb_state->ixlen[ixnum];
+            p_dbt_key->data = ixdta;
+            p_dbt_key->size = bdb_state->ixlen[ixnum];
+        }
     }
 
     assert(rc == 0 || *ppKeyMaxBuf != 0);
@@ -100,6 +119,9 @@ int bdb_maybe_use_genid_for_key(
 #endif
     assert(rc == 0 || 0 == memcmp(*ppKeyMaxBuf + bdb_state->ixlen[ixnum],
                                   &test_genid, sizeof(unsigned long long)));
+
+    /* MVCC tables have an additional 'delete-time' added to the end */
+
     return rc;
 }
 

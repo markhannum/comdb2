@@ -738,14 +738,17 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
                __func__, __LINE__, rc);
     }
 
-    if (release_schema_lk && iq->sc_locked) {
-        unlock_schema_lk();
-        iq->sc_locked = 0;
-    }
-
-    /* release_schema_lk == parent-tran */
-    if (release_schema_lk && iq->jsph && gbl_javasp_early_release) {
-        javasp_trans_release(iq->jsph);
+    if (release_schema_lk) {
+        if (iq->sc_locked) {
+            unlock_schema_lk();
+            iq->sc_locked = 0;
+        }
+        if (iq->jsph && gbl_javasp_early_release) {
+            javasp_trans_release(iq->jsph);
+        }
+        if (bdb_mvcc_has_commit_lock(trans)) {
+            bdb_mvcc_commit_unlock(trans);
+        }
     }
 
     if (rc != 0) {
@@ -3784,6 +3787,8 @@ static int init_odh_lrl(struct dbtable *d, int *compr, int *compr_blobs,
         gbl_init_with_ipu = 0;
         gbl_init_with_instant_sc = 0;
     }
+    if (put_db_mvcc(d, NULL, gbl_init_with_mvcc) != 0)
+        return -1;
     if (put_db_odh(d, NULL, gbl_init_with_odh) != 0)
         return -1;
     if (put_db_compress(d, NULL, gbl_init_with_compr) != 0)
@@ -3795,6 +3800,7 @@ static int init_odh_lrl(struct dbtable *d, int *compr, int *compr_blobs,
     if (put_db_instant_schema_change(d, NULL, gbl_init_with_instant_sc) != 0)
         return -1;
     d->odh = gbl_init_with_odh;
+    d->mvcc = gbl_init_with_mvcc;
     *compr = gbl_init_with_compr;
     *compr_blobs = gbl_init_with_compr_blobs;
     d->inplace_updates = gbl_init_with_ipu;
@@ -3844,6 +3850,8 @@ static int init_queue_odh_llmeta(struct dbtable *d, int *compr, int *persist,
 static int init_odh_llmeta(struct dbtable *d, int *compr, int *compr_blobs,
                            int *datacopy_odh, tran_type *tran)
 {
+    get_db_mvcc_tran(d, &d->mvcc, tran);
+
     if (get_db_odh_tran(d, &d->odh, tran) != 0 || d->odh == 0) {
         // couldn't find odh in llmeta or odh off
         *compr = 0;
@@ -4073,19 +4081,20 @@ int backend_open_tran(struct dbenv *dbenv, tran_type *tran, uint32_t flags)
 
         /* now tell bdb what the flags are - CRUCIAL that this is done
          * before any records are read/written from/to these tables. */
-        set_bdb_option_flags(tbl, tbl->odh, tbl->inplace_updates,
+        set_bdb_option_flags(tbl, tbl->odh, tbl->mvcc, tbl->inplace_updates,
                              tbl->instant_schema_change, tbl->schema_version,
                              compress, compress_blobs, datacopy_odh);
 
         ctrace("Table %s  "
                "ver %d  "
                "odh %s  "
+               "mvcc %s  "
                "isc %s  "
                "odh_datacopy %s  "
                "ipu %s "
                "alias %s",
                tbl->tablename, tbl->schema_version, tbl->odh ? "yes" : "no",
-               tbl->instant_schema_change ? "yes" : "no",
+               tbl->mvcc ? "yes" : "no", tbl->instant_schema_change ? "yes" : "no",
                datacopy_odh ? "yes" : "no", tbl->inplace_updates ? "yes" : "no",
                tbl->sqlaliasname ? tbl->sqlaliasname : "<none>");
     }
@@ -4528,6 +4537,9 @@ get_put_db(odh, META_ONDISK_HEADER_RRN)
 // get_db_inplace_updates, get_db_inplace_updates_tran,
 // put_db_inplace_updates
 get_put_db(inplace_updates, META_INPLACE_UPDATES)
+
+// get_db_mvcc, get_db_mvcc_tran, put_db_mvcc
+get_put_db(mvcc, META_MVCC)
 
 // get_db_compress, get_db_compress_tran, put_db_compress
 get_put_db(compress, META_COMPRESS_RRN)
@@ -5541,19 +5553,19 @@ uint64_t calc_table_size(struct dbtable *db, int skip_blobs)
 void compr_print_stats()
 {
     int ii;
-    int odh, compr, blob_compr;
+    int odh, mvcc, compr, blob_compr;
 
     logmsg(LOGMSG_USER, "COMPRESSION FLAGS\n");
     logmsg(LOGMSG_USER, "These apply to new records only!\n");
 
     for (ii = 0; ii < thedb->num_dbs; ii++) {
         struct dbtable *db = thedb->dbs[ii];
-        bdb_get_compr_flags(db->handle, &odh, &compr, &blob_compr);
+        bdb_get_compr_flags(db->handle, &odh, &mvcc, &compr, &blob_compr);
 
         logmsg(LOGMSG_USER, "[%-16s] ", db->tablename);
-        logmsg(LOGMSG_USER, "ODH: %3s Compress: %-8s Blob compress: %-8s  in-place updates: "
+        logmsg(LOGMSG_USER, "ODH: %3s Mvcc: %3s Compress: %-8s Blob compress: %-8s  in-place updates: "
                "%-3s  instant schema change: %-3s",
-               odh ? "yes" : "no", bdb_algo2compr(compr),
+               odh ? "yes" : "no", mvcc ? "yes" : "no", bdb_algo2compr(compr),
                bdb_algo2compr(blob_compr), db->inplace_updates ? "yes" : "no",
                db->instant_schema_change ? "yes" : "no");
 
@@ -5619,7 +5631,7 @@ void print_tableparams()
 }
 
 int set_meta_odh_flags_tran(struct dbtable *db, tran_type *tran, int odh,
-                            int compress, int compress_blobs, int ipupdates)
+                            int mvcc, int compress, int compress_blobs, int ipupdates)
 {
     int rc;
     int overall = 0;
@@ -5646,10 +5658,10 @@ int set_meta_odh_flags_tran(struct dbtable *db, tran_type *tran, int odh,
     return overall;
 }
 
-int set_meta_odh_flags(struct dbtable *db, int odh, int compress, int compress_blobs,
-                       int ipupdates)
+int set_meta_odh_flags(struct dbtable *db, int odh, int mvcc, int compress,
+                       int compress_blobs, int ipupdates)
 {
-    return set_meta_odh_flags_tran(db, NULL, odh, compress, compress_blobs,
+    return set_meta_odh_flags_tran(db, NULL, odh, mvcc, compress, compress_blobs,
                                    ipupdates);
 }
 

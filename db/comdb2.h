@@ -416,7 +416,8 @@ enum DB_METADATA {
     META_QUEUE_ODH = -14,
     META_QUEUE_COMPRESS = -15,
     META_QUEUE_PERSISTENT_SEQ = -16,
-    META_QUEUE_SEQ = -17
+    META_QUEUE_SEQ = -17,
+    META_MVCC = -18
 };
 
 enum CONSTRAINT_FLAGS {
@@ -750,6 +751,7 @@ typedef struct dbtable {
 
     struct dbstore dbstore[MAXCOLUMNS];
     int odh;
+    int mvcc;
     /* csc2 schema version increased on instantaneous schemachange */
     int schema_version;
     int instant_schema_change;
@@ -1707,6 +1709,7 @@ extern int gbl_selectv_rangechk;
 extern int gbl_init_with_rowlocks;
 extern int gbl_init_with_genid48;
 extern int gbl_init_with_odh;
+extern int gbl_init_with_mvcc;
 extern int gbl_init_with_queue_odh;
 extern int gbl_init_with_queue_persistent_seq;
 extern int gbl_init_with_ipu;
@@ -2396,6 +2399,9 @@ int put_schema_version(const char *table, void *tran, int version);
 int put_db_odh(struct dbtable *db, tran_type *, int odh);
 int get_db_odh(struct dbtable *db, int *odh);
 int get_db_odh_tran(struct dbtable *, int *odh, tran_type *);
+int put_db_mvcc(struct dbtable *db, tran_type *, int mvcc);
+int get_db_mvcc(struct dbtable *db, int *mvcc);
+int get_db_mvcc_tran(struct dbtable *, int *mvcc, tran_type *);
 int put_db_queue_odh(struct dbtable *db, tran_type *, int odh);
 int get_db_queue_odh(struct dbtable *db, int *odh);
 int get_db_queue_odh_tran(struct dbtable *, int *odh, tran_type *);
@@ -2428,10 +2434,10 @@ int put_db_instant_schema_change(struct dbtable *db, tran_type *tran, int isc);
 int get_db_instant_schema_change(struct dbtable *db, int *isc);
 int get_db_instant_schema_change_tran(struct dbtable *, int *isc, tran_type *tran);
 
-int set_meta_odh_flags(struct dbtable *db, int odh, int compress, int compress_blobs,
-                       int ipupates);
+int set_meta_odh_flags(struct dbtable *db, int odh, int mvcc, int compress,
+                       int compress_blobs, int ipupates);
 int set_meta_odh_flags_tran(struct dbtable *db, tran_type *tran, int odh,
-                            int compress, int compress_blobs, int ipupdates);
+                            int mvcc, int compress, int compress_blobs, int ipupdates);
 
 int get_csc2_version(const char *table);
 int get_csc2_version_tran(const char *table, tran_type *);
@@ -3422,7 +3428,7 @@ extern int gbl_check_wrong_db;
 
 extern int gbl_debug_sql_opcodes;
 
-void set_bdb_option_flags(struct dbtable *, int odh, int ipu, int isc, int ver,
+void set_bdb_option_flags(struct dbtable *, int odh, int mvcc, int ipu, int isc, int ver,
                           int compr, int blob_compr, int datacopy_odh);
 
 int init_table_sequences(struct ireq *iq, tran_type *tran, struct dbtable *);

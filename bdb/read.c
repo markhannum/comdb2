@@ -167,7 +167,7 @@ static int bdb_find_edge_genid_int(bdb_state_type *bdb_state, tran_type *tran,
     dbt_data.ulen = maxlen;
     dbt_data.flags = DB_DBT_USERMEM;
 
-    ixrc = bdb_cget_unpack(bdb_state, cur, &dbt_key, &dbt_data, ver,
+    ixrc = bdb_cget_unpack(bdb_state, tran, cur, &dbt_key, &dbt_data, ver,
                            (direction) ? DB_LAST : DB_FIRST);
     if (ixrc == 0)
         *reclen = dbt_data.size;

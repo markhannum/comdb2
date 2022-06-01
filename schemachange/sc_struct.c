@@ -36,6 +36,7 @@ struct schema_change_type *init_schemachange_type(struct schema_change_type *sc)
     sc->add_state = SC_NOT_ADD;
     /* default values: no change */
     sc->headers = -1;
+    sc->mvcc = -1;
     sc->compress = -1;
     sc->compress_blobs = -1;
     sc->ip_updates = -1;
@@ -155,7 +156,7 @@ size_t schemachange_packed_size(struct schema_change_type *s)
         sizeof(s->scanmode) + sizeof(s->delay_commit) +
         sizeof(s->force_rebuild) + sizeof(s->force_dta_rebuild) +
         sizeof(s->force_blob_rebuild) + sizeof(s->force) + sizeof(s->headers) +
-        sizeof(s->header_change) + sizeof(s->compress) +
+        sizeof(s->mvcc) + sizeof(s->header_change) + sizeof(s->compress) +
         sizeof(s->compress_blobs) + sizeof(s->persistent_seq) +
         sizeof(s->ip_updates) + sizeof(s->instant_sc) + sizeof(s->preempted) +
         sizeof(s->use_plan) + sizeof(s->commit_sleep) +
@@ -247,6 +248,8 @@ void *buf_put_schemachange(struct schema_change_type *s, void *p_buf,
     p_buf = buf_put(&s->force, sizeof(s->force), p_buf, p_buf_end);
 
     p_buf = buf_put(&s->headers, sizeof(s->headers), p_buf, p_buf_end);
+
+    p_buf = buf_put(&s->mvcc, sizeof(s->mvcc), p_buf, p_buf_end);
 
     p_buf =
         buf_put(&s->header_change, sizeof(s->header_change), p_buf, p_buf_end);
@@ -455,8 +458,9 @@ void *buf_get_schemachange(struct schema_change_type *s, void *p_buf,
 
     p_buf = (uint8_t *)buf_get(&s->force, sizeof(s->force), p_buf, p_buf_end);
 
-    p_buf =
-        (uint8_t *)buf_get(&s->headers, sizeof(s->headers), p_buf, p_buf_end);
+    p_buf = (uint8_t *)buf_get(&s->headers, sizeof(s->headers), p_buf, p_buf_end);
+
+    p_buf = (uint8_t *)buf_get(&s->mvcc, sizeof(s->mvcc), p_buf, p_buf_end);
 
     p_buf = (uint8_t *)buf_get(&s->header_change, sizeof(s->header_change),
                                p_buf, p_buf_end);
@@ -800,6 +804,7 @@ void set_schemachange_options_tran(struct schema_change_type *s, struct dbtable 
 
     /* Set schema_change_type properties */
     if (s->headers == -1) s->headers = db->odh;
+    if (s->mvcc == -1) s->mvcc = db->mvcc;
 
     if (s->compress == -1) s->compress = scinfo->olddb_compress;
 

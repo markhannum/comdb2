@@ -545,6 +545,7 @@ int fastinit_table(struct dbenv *dbenvin, char *table)
     s->kind = SC_TRUNCATETABLE;
     s->same_schema = 1;
     s->headers = -1;
+    s->mvcc = -1;
     s->compress = -1;
     s->compress_blobs = -1;
     s->ip_updates = -1;
@@ -603,6 +604,7 @@ int do_dryrun(struct schema_change_type *s)
     set_sc_flgs(s);
 
     newdb->odh = s->headers;
+    newdb->mvcc = s->mvcc;
     newdb->instant_schema_change = newdb->odh && s->instant_sc;
 
     if (dryrun_int(s, db, newdb, &scinfo)) {
@@ -666,23 +668,23 @@ int live_sc_post_delete(struct ireq *iq, void *trans, unsigned long long genid,
     return rc;
 }
 
-/* If the schema change is to 1) remove ODH, 2) change the compression
-   algorithm, 3) or alter a field from or to vutf8, unpack the blobs. */
+/* If the schema change is to 1) remove ODH, 2) remove MVCC, 3) change the compression
+   algorithm, 4) or alter a field from or to vutf8, unpack the blobs. */
 static int unodhfy_if_necessary(struct ireq *iq, blob_buffer_t *blobs,
                                 int maxblobs)
 {
-    int i, rc, oldodh, newodh, reccompr, oldcompr, newcompr, fromidx, blobidx;
+    int i, rc, oldodh, newodh, oldmvcc, newmvcc, reccompr, oldcompr, newcompr, fromidx, blobidx;
     struct schema *from, *to;
 
-    bdb_get_compr_flags(iq->usedb->sc_from->handle, &oldodh, &reccompr,
+    bdb_get_compr_flags(iq->usedb->sc_from->handle, &oldodh, &oldmvcc, &reccompr,
                         &oldcompr);
-    bdb_get_compr_flags(iq->usedb->sc_to->handle, &newodh, &reccompr,
+    bdb_get_compr_flags(iq->usedb->sc_to->handle, &newodh, &newmvcc, &reccompr,
                         &newcompr);
     (void)reccompr;
 
     /* If we're removing the ODH, or changing the compression algorithm,
        unpack the blobs. */
-    if ((oldodh && !newodh) || oldcompr != newcompr) {
+    if ((oldodh && !newodh) || oldcompr != newcompr || oldmvcc != newmvcc) {
         for (i = 0, rc = 0; i != maxblobs; ++i) {
             rc = unodhfy_blob_buffer(iq->usedb->sc_to, blobs + i, i);
             if (rc != 0)

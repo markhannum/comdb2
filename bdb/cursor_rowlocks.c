@@ -183,7 +183,7 @@ static inline int cur_cget(bdb_berkdb_t *berkdb, DBT *dbtkey, DBT *dbtdta,
 
     /* Logic for accessing data file */
     if (BDBC_DT == cur->type && !r->use_bulk) {
-        rc = bdb_cget_unpack(bdb_state, r->pagelock_cursor, dbtkey, dbtdta,
+        rc = bdb_cget_unpack(bdb_state, NULL, r->pagelock_cursor, dbtkey, dbtdta,
                              &r->ver, flags);
         if (0 == rc)
             cur->ver = r->ver;

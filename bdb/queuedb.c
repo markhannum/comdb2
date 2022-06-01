@@ -384,7 +384,7 @@ int bdb_queuedb_add(bdb_state_type *bdb_state, tran_type *tran, const void *dta,
     dbt_data.flags = DB_DBT_MALLOC;
 
     /* Lock last page */
-    rc = bdb_cget_unpack(bdb_state, dbcp1, &dbt_key, &dbt_data, &ver,
+    rc = bdb_cget_unpack(bdb_state, tran, dbcp1, &dbt_key, &dbt_data, &ver,
                          DB_LAST | DB_RMW);
 
     if (rc == 0) {
@@ -444,7 +444,7 @@ int bdb_queuedb_add(bdb_state_type *bdb_state, tran_type *tran, const void *dta,
             dbt_data.data = NULL;
             dbt_data.flags = DB_DBT_MALLOC;
 
-            rc2 = bdb_cget_unpack(bdb_state, dbcp2, &dbt_key, &dbt_data, &ver,
+            rc2 = bdb_cget_unpack(bdb_state, tran, dbcp2, &dbt_key, &dbt_data, &ver,
                                   DB_LAST);
 
             if (rc2 == 0) {
@@ -552,7 +552,7 @@ int bdb_queuedb_add(bdb_state_type *bdb_state, tran_type *tran, const void *dta,
             }
 
             /* TODO: rowlocks? */
-            rc = bdb_cput_pack(bdb_state, 0, dbcp1, &dbt_key, &dbt_data,
+            rc = bdb_cput_pack(bdb_state, tran, 0, dbcp1, &dbt_key, &dbt_data,
                                DB_KEYLAST);
             if (rc == DB_LOCK_DEADLOCK) {
                 *bdberr = BDBERR_DEADLOCK;
@@ -665,7 +665,7 @@ int bdb_queuedb_stats(bdb_state_type *bdb_state,
         dbcp2 = dbcp1; /* no second file, use same cursor */
     }
 
-    rc = bdb_cget_unpack(bdb_state, dbcp1, &dbt_key, &dbt_data, &ver, DB_FIRST);
+    rc = bdb_cget_unpack(bdb_state, tran, dbcp1, &dbt_key, &dbt_data, &ver, DB_FIRST);
 
     int did_dbcp2_first = 0;
 chk_db_first_rc:
@@ -676,7 +676,7 @@ chk_db_first_rc:
             goto done;
         } else if (rc == DB_NOTFOUND) {
             if (!did_dbcp2_first && (dbcp2 != dbcp1)) {
-                rc = bdb_cget_unpack(bdb_state, dbcp2, &dbt_key, &dbt_data, &ver,
+                rc = bdb_cget_unpack(bdb_state, tran, dbcp2, &dbt_key, &dbt_data, &ver,
                                      DB_FIRST);
                 did_dbcp2_first = 1; goto chk_db_first_rc;
             } else {
@@ -699,7 +699,7 @@ chk_db_first_rc:
     epoch = qfnd_odh.epoch;
     item_length = dbt_data.size;
 
-    rc = bdb_cget_unpack(bdb_state, dbcp2, &dbt_key, &dbt_data, &ver, DB_LAST);
+    rc = bdb_cget_unpack(bdb_state, tran, dbcp2, &dbt_key, &dbt_data, &ver, DB_LAST);
 
     int did_dbcp2_last = 0;
 chk_db_last_rc:
@@ -710,7 +710,7 @@ chk_db_last_rc:
             goto done;
         } else if (rc == DB_NOTFOUND) {
             if (!did_dbcp2_last && (dbcp2 != dbcp1)) {
-                rc = bdb_cget_unpack(bdb_state, dbcp1, &dbt_key, &dbt_data, &ver,
+                rc = bdb_cget_unpack(bdb_state, tran, dbcp1, &dbt_key, &dbt_data, &ver,
                                      DB_LAST);
                 did_dbcp2_last = 1; goto chk_db_last_rc;
             } else {
@@ -829,14 +829,14 @@ int bdb_queuedb_walk(bdb_state_type *bdb_state, int flags, void *lastitem,
              * we stopped */
             dbt_key.data = lastitem;
             dbt_key.size = sizeof(struct queuedb_key);
-            rc = bdb_cget_unpack(bdb_state, dbcp, &dbt_key, &dbt_data, &ver,
+            rc = bdb_cget_unpack(bdb_state, tran, dbcp, &dbt_key, &dbt_data, &ver,
                                  DB_FIRST);
 
             /* TODO: It seems the BDB_QUEUE_WALK_RESTART flag should only be
              *       honored on the first get operation? */
             flags &= ~BDB_QUEUE_WALK_RESTART;
         } else {
-            rc = bdb_cget_unpack(bdb_state, dbcp, &dbt_key, &dbt_data, &ver,
+            rc = bdb_cget_unpack(bdb_state, tran, dbcp, &dbt_key, &dbt_data, &ver,
                                  DB_SET_RANGE);
         }
         while (rc == 0) {
@@ -871,7 +871,7 @@ int bdb_queuedb_walk(bdb_state_type *bdb_state, int flags, void *lastitem,
                 rc = 0;
                 break;
             }
-            rc = bdb_cget_unpack(bdb_state, dbcp, &dbt_key, &dbt_data, &ver,
+            rc = bdb_cget_unpack(bdb_state, tran, dbcp, &dbt_key, &dbt_data, &ver,
                                  DB_NEXT);
         }
         if (rc) {
@@ -986,7 +986,7 @@ static int bdb_queuedb_get_int(bdb_state_type *bdb_state, tran_type *tran, DB *d
     }
 
     qstate->stats.n_physical_gets++;
-    rc = bdb_cget_unpack(bdb_state, dbcp, &dbt_key, &dbt_data, &ver,
+    rc = bdb_cget_unpack(bdb_state, tran, dbcp, &dbt_key, &dbt_data, &ver,
                          DB_SET_RANGE);
     if (rc) {
         if (rc == DB_LOCK_DEADLOCK) {
@@ -1042,7 +1042,7 @@ static int bdb_queuedb_get_int(bdb_state_type *bdb_state, tran_type *tran, DB *d
         /* case (1) - we found a key that matches the prev key - unconsumed
          * record */
         if (memcmp(&fndkey, key, QUEUEDB_KEY_LEN) == 0) {
-            rc = bdb_cget_unpack(bdb_state, dbcp, &dbt_key, &dbt_data, &ver,
+            rc = bdb_cget_unpack(bdb_state, tran, dbcp, &dbt_key, &dbt_data, &ver,
                                  DB_NEXT);
             if (rc) {
                 if (rc == DB_LOCK_DEADLOCK) {
@@ -1236,7 +1236,7 @@ static int bdb_queuedb_consume_int(bdb_state_type *bdb_state, DB *db,
     }
 
     if (bdb_state->persistent_seq)
-        rc = bdb_cget_unpack(bdb_state, dbcp, &key, &val, &ver, DB_SET);
+        rc = bdb_cget_unpack(bdb_state, tran, dbcp, &key, &val, &ver, DB_SET);
     else
         rc = dbcp->c_get(dbcp, &key, &val, DB_SET);
     if (rc == DB_NOTFOUND) {

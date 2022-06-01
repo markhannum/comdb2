@@ -5740,12 +5740,12 @@ static void update_fld_hints(dbtable *tbl)
     }
 }
 
-void set_bdb_option_flags(dbtable *tbl, int odh, int ipu, int isc, int ver,
+void set_bdb_option_flags(dbtable *tbl, int odh, int mvcc, int ipu, int isc, int ver,
                           int compr, int blob_compr, int datacopy_odh)
 {
     update_fld_hints(tbl);
     bdb_state_type *handle = tbl->handle;
-    bdb_set_odh_options(handle, odh, compr, blob_compr);
+    bdb_set_odh_options(handle, odh, mvcc, compr, blob_compr);
     bdb_set_inplace_updates(handle, ipu);
     bdb_set_instant_schema_change(handle, isc);
     bdb_set_csc2_version(handle, ver);

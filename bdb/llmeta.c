@@ -170,6 +170,7 @@ typedef enum {
     LLMETA_SEQUENCE_VALUE = 53,
     LLMETA_LUA_SFUNC_FLAG = 54,
     LLMETA_NEWSC_REDO_GENID = 55, /* 55 + TABLENAME + GENID -> MAX-LSN */
+    LLMETA_MVCC_TRANID_TO_TIMESTAMP = 56
 } llmetakey_t;
 
 struct llmeta_file_type_key {
@@ -6612,7 +6613,7 @@ int bdb_tbl_access_userschema_delete(bdb_state_type *bdb_state,
                                  ACCESS_USERSCHEMA, bdberr);
 }
 
-int bdb_llmeta_print_record(bdb_state_type *bdb_state, void *key, int keylen,
+int bdb_llmeta_print_record(bdb_state_type *bdb_state, void *mystate, void *key, int keylen,
                             void *data, int datalen, int *bdberr)
 {
     int type = 0;
@@ -6948,7 +6949,7 @@ int bdb_llmeta_list_records(bdb_state_type *bdb_state, int *bdberr)
         return 0;
     }
 
-    rc = bdb_lite_list_records(llmeta_bdb_state, bdb_llmeta_print_record,
+    rc = bdb_lite_list_records(llmeta_bdb_state, NULL, bdb_llmeta_print_record,
                                bdberr);
 
     return rc;
@@ -8056,7 +8057,7 @@ retry:
     return 0;
 }
 
-int bdb_llmeta_print_alias(bdb_state_type *bdb_state, void *key, int keylen,
+int bdb_llmeta_print_alias(bdb_state_type *bdb_state, void *mystate, void *key, int keylen,
                            void *data, int datalen, int *bdberr)
 {
     struct llmeta_tablename_alias_key akey;
@@ -8105,7 +8106,7 @@ void llmeta_list_tablename_alias(void)
         return;
     }
 
-    bdb_lite_list_records(llmeta_bdb_state, bdb_llmeta_print_alias, &bdberr);
+    bdb_lite_list_records(llmeta_bdb_state, NULL, bdb_llmeta_print_alias, &bdberr);
 }
 
 bdb_state_type *bdb_llmeta_bdb_state(void) { return llmeta_bdb_state; }
@@ -10675,4 +10676,106 @@ int bdb_del_view(tran_type *t, const char *view_name)
         logmsg(LOGMSG_INFO, "View '%s' deleted\n", view_name);
     }
     return rc;
+}
+
+/* mvcc key */
+struct llmeta_mvcc_key {
+    int file_type;
+    int padding;
+    uint64_t mvcc_tranid;
+};
+
+int bdb_add_mvcc_mapping(tran_type *t, uint64_t mvcc_tranid, uint64_t timestamp)
+{
+    union {
+        struct llmeta_mvcc_key mvcc;
+        uint8_t buf[LLMETA_IXLEN];
+    } u = {{0}};
+    u.mvcc.file_type = htonl(LLMETA_MVCC_TRANID_TO_TIMESTAMP);
+    u.mvcc.mvcc_tranid = flibc_htonll(mvcc_tranid);
+    uint64_t ts = flibc_htonll(timestamp);
+    int bdberr, rc = kv_put(t, &u, &ts, sizeof(uint64_t), &bdberr);
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "%s error: %d bdberr=%d\n", __func__, rc, bdberr);
+    }
+    return rc;
+}
+
+typedef struct mvcc_func
+{
+    int (*func)(uint64_t, uint64_t);
+} mvcc_func_t;
+
+static int bdb_llmeta_mvcc_callback(bdb_state_type *bdb_state, void *state, void *key, int keylen,
+                                    void *data, int datalen, int *bdberr)
+{
+    struct llmeta_mvcc_key mvcc;
+    uint64_t timestamp = 0;
+    uint8_t *p_buf = key;
+    const uint8_t *p_buf_end = (p_buf + keylen);
+    mvcc_func_t *f = (mvcc_func_t *)state;
+
+    *bdberr = BDBERR_NOERROR;
+
+    p_buf = (uint8_t *)buf_get(&mvcc.file_type, sizeof(mvcc.file_type), p_buf, p_buf_end);
+    assert(mvcc.file_type == LLMETA_MVCC_TRANID_TO_TIMESTAMP);
+    p_buf = (uint8_t *)buf_get(&mvcc.mvcc_tranid, sizeof(mvcc.mvcc_tranid), p_buf, p_buf_end);
+    buf_get(&timestamp, sizeof(timestamp), data, ((char *)data) + datalen);
+
+    return f->func(mvcc.mvcc_tranid, timestamp);
+}
+
+int bdb_all_mvcc_mappings(tran_type *t, int (*func)(uint64_t, uint64_t))
+{
+    int bdberr = 0;
+    union {
+        struct llmeta_mvcc_key mvcc;
+        uint8_t buf[LLMETA_IXLEN];
+    } u = {{0}};
+    mvcc_func_t f = {0};
+    f.func = func;
+    u.mvcc.file_type = htonl(LLMETA_MVCC_TRANID_TO_TIMESTAMP);
+    return bdb_lite_list_records_key(llmeta_bdb_state, &f, &u.mvcc, sizeof(u.mvcc.file_type),
+            sizeof(u), bdb_llmeta_mvcc_callback, &bdberr);
+}
+
+int bdb_del_mvcc_mapping(tran_type *t, uint64_t mvcc_tranid)
+{
+    union {
+        struct llmeta_mvcc_key mvcc;
+        uint8_t buf[LLMETA_IXLEN];
+    } u = {{0}};
+    u.mvcc.file_type = htonl(LLMETA_MVCC_TRANID_TO_TIMESTAMP);
+    u.mvcc.mvcc_tranid = flibc_htonll(mvcc_tranid);
+    int bdberr, rc = kv_del(t, &u, &bdberr);
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "%s error: %d bdberr=%d\n", __func__, rc, bdberr);
+    }
+    return rc;
+}
+
+int bdb_get_mvcc_mapping(tran_type *t, uint64_t mvcc_tranid, uint64_t *timestamp)
+{
+     union {
+        struct llmeta_mvcc_key mvcc;
+        uint8_t buf[LLMETA_IXLEN];
+    } u = {{0}};
+
+    u.mvcc.file_type = htonl(LLMETA_MVCC_TRANID_TO_TIMESTAMP);
+    u.mvcc.mvcc_tranid = flibc_htonll(mvcc_tranid);
+    uint64_t **timestamps = NULL;
+    int rc, bdberr, num = 0;
+    rc = kv_get(t, &u, sizeof(u), (void ***)&timestamps, &num, &bdberr);
+    if (rc == 0) { 
+        if ((num == 1) && timestamps)
+            (*timestamp) = flibc_ntohll(*((timestamps)[0]));
+        else {
+            rc = 1000 + rc;
+        }
+        for (int i = 0; i < num; ++i) {
+            free(timestamps[i]);
+        }
+        free(timestamps);
+    }
+    return rc;   
 }

@@ -97,7 +97,7 @@ static int prepare_changes(struct schema_change_type *s, struct dbtable *db,
 
     /* force change if we need to add/remove headers (or anything else which
      * rebuilds) */
-    if (db->odh != s->headers) {
+    if (db->odh != s->headers || db->mvcc != s->mvcc) {
         changed = SC_TAG_CHANGE;
     }
 
@@ -432,6 +432,7 @@ int do_alter_table(struct ireq *iq, struct schema_change_type *s,
 
     newdb->dtastripe = gbl_dtastripe; // we have only one setting currently
     newdb->odh = s->headers;
+    newdb->mvcc = s->mvcc;
     /* don't lose precious flags like this */
     newdb->instant_schema_change = s->headers && s->instant_sc;
     newdb->inplace_updates = s->headers && s->ip_updates;
@@ -542,7 +543,7 @@ int do_alter_table(struct ireq *iq, struct schema_change_type *s,
        for full operation they also need to be set in the meta tables.
        however the new db gets its meta table assigned further down,
        so we can't set meta options until we're there. */
-    set_bdb_option_flags(newdb, s->headers, s->ip_updates,
+    set_bdb_option_flags(newdb, s->headers, s->mvcc, s->ip_updates,
                          newdb->instant_schema_change, newdb->schema_version,
                          s->compress, s->compress_blobs, datacopy_odh);
 

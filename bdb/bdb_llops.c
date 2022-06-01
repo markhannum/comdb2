@@ -118,7 +118,7 @@ int bdb_llop_add(bdb_state_type *bdb_state, void *trans, int raw, int stripe,
         rc = dbc->c_put(dbc, &dkey, &ddata, DB_KEYFIRST);
     } else {
         if (ix == -1)
-            rc = bdb_put_pack(bdb_state, dtafile > 0 ? 1 : 0, db, txn, &dkey,
+            rc = bdb_put_pack(bdb_state, dtafile > 0 ? 1 : 0, db, t, &dkey,
                               &ddata, 0, 0);
         else {
             int bdberr;
@@ -381,7 +381,7 @@ void *bdb_llop_find(bdb_state_type *bdb_state, void *trans, int raw, int stripe,
         rc = dbc->c_get(dbc, &dkey, &ddata, DB_SET);
     } else {
         uint8_t loc_ver;
-        rc = bdb_cget_unpack(bdb_state, dbc, &dkey, &ddata, &loc_ver, DB_SET);
+        rc = bdb_cget_unpack(bdb_state, t, dbc, &dkey, &ddata, &loc_ver, DB_SET);
     }
     if (rc) {
         *errstr = comdb2_asprintf("find rc %d", rc);

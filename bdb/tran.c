@@ -1078,6 +1078,9 @@ static tran_type *bdb_tran_begin_ll_int(bdb_state_type *bdb_state,
         /*fprintf(stderr, "Pthread_setspecific %x to %x\n", bdb_state, tran);*/
         tran->startlsn.file = 0;
         tran->startlsn.offset = 1;
+
+        tran->mvcc_tranid = (bdb_get_commit_genid(bdb_state, NULL) | GENID_MVCC_TRANID);
+        tran->had_mvcc = 0;
     }
 
     /*fprintf(stderr, "beginning transaction\n");*/
@@ -2620,6 +2623,41 @@ int bdb_add_rep_blob(bdb_state_type *bdb_state, tran_type *tran, int session,
         rc = -1;
     }
     return rc;
+}
+
+static pthread_mutex_t mvcc_commit_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void bdb_mvcc_commit_lock(tran_type *tran)
+{
+    assert(!tran->has_mvcc_commit_lock);
+    Pthread_mutex_lock(&mvcc_commit_lock);
+    tran->has_mvcc_commit_lock = 1;
+}
+
+void bdb_mvcc_commit_unlock(tran_type *tran)
+{
+    assert(tran->has_mvcc_commit_lock);
+    Pthread_mutex_unlock(&mvcc_commit_lock);
+    tran->has_mvcc_commit_lock = 0;
+}
+
+int bdb_mvcc_has_commit_lock(tran_type *tran)
+{
+    return tran->has_mvcc_commit_lock;
+}
+
+unsigned long long bdb_mvcc_tranid(tran_type *tran)
+{
+    if (tran->parent)
+        tran = tran->parent;
+    return tran->mvcc_tranid;
+}
+
+int bdb_had_mvcc(tran_type *tran)
+{
+    if (tran->parent)
+        tran = tran->parent;
+    return tran->had_mvcc;
 }
 
 unsigned long long bdb_get_current_lsn(bdb_state_type *bdb_state,

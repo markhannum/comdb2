@@ -10,25 +10,27 @@
 #define SQLITE_OPEN_DELETEONCLOSE    0x00000008  /* VFS only */
 #define SQLITE_OPEN_EXCLUSIVE        0x00000010
 
-#define ODH_OFF 0x0001
-#define IPU_OFF 0x0002
-#define ISC_OFF 0x0004
+#define ODH_OFF 0x00000001
+#define IPU_OFF 0x00000002
+#define ISC_OFF 0x00000004
 
-#define BLOB_NONE     0x0008
-#define BLOB_RLE      0x0010
-#define BLOB_CRLE     0x0020
-#define BLOB_ZLIB     0x0040
-#define BLOB_LZ4      0x0080
+#define BLOB_NONE     0x00000008
+#define BLOB_RLE      0x00000010
+#define BLOB_CRLE     0x00000020
+#define BLOB_ZLIB     0x00000040
+#define BLOB_LZ4      0x00000080
 
-#define REC_NONE      0x0100
-#define REC_RLE       0x0200
-#define REC_CRLE      0x0400
-#define REC_ZLIB      0x0800
-#define REC_LZ4       0x1000
+#define REC_NONE      0x00000100
+#define REC_RLE       0x00000200
+#define REC_CRLE      0x00000400
+#define REC_ZLIB      0x00000800
+#define REC_LZ4       0x00001000
 
-#define FORCE_REBUILD 0x2000
-#define PAGE_ORDER    0x4000
-#define READ_ONLY     0x8000
+#define FORCE_REBUILD 0x00002000
+#define PAGE_ORDER    0x00004000
+#define READ_ONLY     0x00008000
+
+#define MVCC_ON       0x00010000
 
 #define REBUILD_ALL     1
 #define REBUILD_DATA    2

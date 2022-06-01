@@ -1391,7 +1391,7 @@ static int bdb_berkdb_cget(bdb_berkdb_impl_t *berkdb, int use_bulk, int how,
 
     bt->need_update_shadows = 1;
     if (bt->use_odh && !bt->use_bulk)
-        rc = bdb_cget_unpack(berkdb->cur->state, bt->dbc, &bt->key, &bt->data,
+        rc = bdb_cget_unpack(berkdb->cur->state, NULL, bt->dbc, &bt->key, &bt->data,
                              &bt->ver, how);
     else {
         if (!bt->dbc) {

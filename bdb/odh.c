@@ -55,6 +55,18 @@
 
 static void read_odh(const void *buf, struct odh *odh);
 static void write_odh(void *buf, const struct odh *odh, uint8_t flags);
+/*
+ * Mvcc tables will have 2 'commit-genids' which preceed the record.  The first
+ * corresponds to the record's logical insert time, and the second corresponds
+ * to the record's logical delete time.  If a record currently exists, we use
+ * MAXLONGLONG for this second field.
+ *
+ * Mvcc indexes will extend the key with the 8-byte delete time.  As currently
+ * existing records will always have MAXLONGLONG for that field, we can continue
+ * to use Berkley to enforce uniqueness.  The first 8-bytes of an index will 
+ * contain it's logical-insert-time-commit-genid, and the rest of the record 
+ * will be identical to any other index.
+ */
 
 /*
  * Map of the 7-byte on disk header:
@@ -303,6 +315,11 @@ int bdb_pack(bdb_state_type *bdb_state, const struct odh *odh, void *to,
 
     *freeptr = NULL;
 
+    if (bdb_state->mvcc && !bdb_state->ondisk_header) {
+        if (to) {
+        }
+    }
+
     if (bdb_state->ondisk_header) {
         void *mallocmem = NULL;
         uint8_t flags = odh->flags;
@@ -446,6 +463,14 @@ int bdb_pack(bdb_state_type *bdb_state, const struct odh *odh, void *to,
     return 0;
 }
 
+
+int bdb_pack_datacopy_index(bdb_state_type *bdb_state, const struct odh *odh, void *to,
+             size_t tolen, void **recptr, uint32_t *recsize, void **freeptr, int pd_index)
+{
+    return bdb_pack(bdb_state, odh, to, tolen, recptr, recsize, freeptr, pd_index);
+}
+
+
 /* Unpack a data or blob record and read back the ODH.
  *
  * Input:
@@ -489,6 +514,21 @@ static int bdb_unpack_updateid(bdb_state_type *bdb_state, const void *from, size
 
     if (freeptr) {
         *freeptr = NULL;
+    }
+
+    if (bdb_state->mvcc) {
+        if (fromlen < MVCC_SIZE) {
+            logmsg(LOGMSG_ERROR, "%s:ERROR: data size %u too small for MVCC\n",
+                    __func__, (unsigned)fromlen);
+            return DB_ODH_CORRUPT;
+        }
+        const uint64_t *in = from;
+        odh->mvcc_insert = in[0];
+        odh->mvcc_delete = in[1];
+        from += MVCC_SIZE;
+        fromlen -= MVCC_SIZE;
+    } else {
+        odh->mvcc_insert = odh->mvcc_delete = 0;
     }
 
     if (bdb_state->ondisk_header || force_odh) {
@@ -631,6 +671,8 @@ static int bdb_unpack_updateid(bdb_state_type *bdb_state, const void *from, size
         odh->updateid = 0;
         odh->csc2vers = 0;
         odh->flags = 0;
+        odh->mvcc_insert = 0;
+        odh->mvcc_delete = 0;
         odh->recptr = (void *)from;
     }
 
@@ -805,7 +847,8 @@ static int bdb_unpack_dbt_verify_updateid(bdb_state_type *bdb_state, DBT *data, 
     return rc;
 }
 
-int bdb_update_updateid(bdb_state_type *bdb_state, DBC *dbcp,
+int bdb_update_updateid(bdb_state_type *bdb_state, tran_type *tran,
+                        DBC *dbcp,
                         unsigned long long oldgenid,
                         unsigned long long newgenid)
 {
@@ -860,7 +903,7 @@ int bdb_update_updateid(bdb_state_type *bdb_state, DBC *dbcp,
 }
 
 /* find-with-cursor simply to verify the genid */
-int bdb_cposition(bdb_state_type *bdb_state, DBC *dbcp, DBT *key,
+int bdb_cposition(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key,
                   u_int32_t flags)
 {
     int rc;
@@ -939,8 +982,8 @@ static inline int check_updid(u_int32_t flags)
     }
 }
 
-int bdb_cget(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data,
-             u_int32_t flags)
+int bdb_cget(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key, 
+             DBT *data, u_int32_t flags)
 {
     int rc, updateid = -1, odh_uid = -1, compare_upid = 0,
             ipu = ip_updates_enabled(bdb_state);
@@ -986,7 +1029,8 @@ int bdb_cget(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data,
     return rc;
 }
 
-static int bdb_cget_unpack_int(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data, uint8_t *ver, u_int32_t flags,
+static int bdb_cget_unpack_int(bdb_state_type *bdb_state, tran_type *tran, 
+                               DBC *dbcp, DBT *key, DBT *data, uint8_t *ver, u_int32_t flags,
                                int verify_updateid, void *(*fn_malloc)(int), void (*fn_free)(void *))
 {
     int rc, updateid = -1, ipu = ip_updates_enabled(bdb_state);
@@ -1052,23 +1096,25 @@ static int bdb_cget_unpack_int(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, D
     return rc;
 }
 
-int bdb_cget_unpack(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data,
+int bdb_cget_unpack(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key, DBT *data,
                     uint8_t *ver, u_int32_t flags)
 {
-    return bdb_cget_unpack_int(bdb_state, dbcp, key, data, ver, flags, 1, NULL, NULL);
+    return bdb_cget_unpack_int(bdb_state, tran, dbcp, key, data, ver, flags, 1, NULL, NULL);
 }
 
 /* The updateid-agnostic version of this code. */
-int bdb_cget_unpack_blob(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data, uint8_t *ver, u_int32_t flags,
+int bdb_cget_unpack_blob(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key, DBT *data, uint8_t *ver, u_int32_t flags,
                          void *(*fn_malloc)(int), void (*fn_free)(void *))
 {
-    return bdb_cget_unpack_int(bdb_state, dbcp, key, data, ver, flags, 0, fn_malloc, fn_free);
+    return bdb_cget_unpack_int(bdb_state, tran, dbcp, key, data, ver, flags, 0, fn_malloc, fn_free);
 }
 
 /* as above, but for DB->get instead of DBC->c_get. */
-static int bdb_get_unpack_int(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data, uint8_t *ver,
-                              u_int32_t flags, int verify_updateid, void *(*fn_malloc)(int), void (*fn_free)(void *))
+static int bdb_get_unpack_int(bdb_state_type *bdb_state, DB *db, tran_type *tran, 
+                              DBT *key, DBT *data, uint8_t *ver, u_int32_t flags, 
+                              int verify_updateid, void *(*fn_malloc)(int), void (*fn_free)(void *))
 {
+    DB_TXN *tid = tran ? tran->tid : NULL;
     int rc, updateid = -1, ipu = ip_updates_enabled(bdb_state);
     unsigned long long *genptr = NULL;
 
@@ -1110,20 +1156,20 @@ static int bdb_get_unpack_int(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DB
     return rc;
 }
 
-int bdb_get_unpack(bdb_state_type *bdb_state, DB *db, DB_TXN *tid,
+int bdb_get_unpack(bdb_state_type *bdb_state, DB *db, tran_type *tran,
                    DBT *key, DBT *data, uint8_t *ver, u_int32_t flags)
 {
-    return bdb_get_unpack_int(bdb_state, db, tid, key, data, ver, flags, 1, NULL, NULL);
+    return bdb_get_unpack_int(bdb_state, db, tran, key, data, ver, flags, 1, NULL, NULL);
 }
 
-int bdb_get_unpack_blob(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data, uint8_t *ver,
+int bdb_get_unpack_blob(bdb_state_type *bdb_state, DB *db, tran_type *tran, DBT *key, DBT *data, uint8_t *ver,
                         u_int32_t flags, void *(*fn_malloc)(int), void (*fn_free)(void *))
 {
-    return bdb_get_unpack_int(bdb_state, db, tid, key, data, ver, flags, 0, fn_malloc, fn_free);
+    return bdb_get_unpack_int(bdb_state, db, tran, key, data, ver, flags, 0, fn_malloc, fn_free);
 }
 
-int bdb_prepare_put_pack_updateid(bdb_state_type *bdb_state, int is_blob,
-                                  DBT *data, DBT *data2, int updateid,
+int bdb_prepare_put_pack_updateid(bdb_state_type *bdb_state, tran_type *tran, 
+                                  int is_blob, DBT *data, DBT *data2, int updateid,
                                   void **freeptr, void *stackbuf, int odhready)
 {
     struct odh odh;
@@ -1158,9 +1204,10 @@ int bdb_prepare_put_pack_updateid(bdb_state_type *bdb_state, int is_blob,
 #define ALLOC_STACKBUF(sz) ((sz) < 16 * 1024 ? alloca((sz)) : NULL)
 
 /* rewrite the data with an updated updateid (no compress logic) */
-int bdb_put(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data,
+int bdb_put(bdb_state_type *bdb_state, DB *db, tran_type *tran, DBT *key, DBT *data,
             u_int32_t flags)
 {
+    DB_TXN *tid = tran ? tran->tid : NULL;
     int rc, updateid = -1, ipu = ip_updates_enabled(bdb_state);
     unsigned long long *genptr = NULL;
 
@@ -1200,9 +1247,25 @@ int bdb_put(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data,
     return rc;
 }
 
-int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, DB_TXN *tid,
+int bdb_cget_index(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, 
+                   DBT *dbt_key, DBT *dbt_data, uint32_t flags)
+{
+    return dbcp->c_get(dbcp, dbt_key, dbt_data, flags);
+}
+
+//int bdb_cput_index()
+
+int bdb_put_index(bdb_state_type *bdb_state, int ixnum, tran_type *tran,
+                  DBT *dbt_key, DBT *dbt_data, u_int32_t flags)
+{
+    return bdb_state->dbp_ix[ixnum]->put(bdb_state->dbp_ix[ixnum], tran->tid,
+                                         dbt_key, dbt_data, flags);
+}
+
+int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, tran_type *tran,
                  DBT *key, DBT *data, u_int32_t flags, int odhready)
 {
+    DB_TXN *tid = tran ? tran->tid : NULL;
     DBT data2;
     void *mallocmem;
     int rc, updateid = -1, ipu = ip_updates_enabled(bdb_state);
@@ -1222,12 +1285,12 @@ int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, DB_TXN *tid,
         abort();
     }
 
-    if (!bdb_state->ondisk_header) {
+    if (!bdb_state->ondisk_header && !bdb_state->mvcc) {
         return db->put(db, tid, key, data, flags);
     }
 
     rc = bdb_prepare_put_pack_updateid(
-        bdb_state, is_blob, data, &data2, updateid, &mallocmem,
+        bdb_state, tran, is_blob, data, &data2, updateid, &mallocmem,
         ALLOC_STACKBUF(data->size + ODH_SIZE_RESERVE), odhready);
 
     if (rc == 0) {
@@ -1250,8 +1313,8 @@ int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, DB_TXN *tid,
     return rc;
 }
 
-int bdb_cput_pack(bdb_state_type *bdb_state, int is_blob, DBC *dbcp, DBT *key,
-                  DBT *data, u_int32_t flags)
+int bdb_cput_pack(bdb_state_type *bdb_state, tran_type *tran, int is_blob,
+                  DBC *dbcp, DBT *key, DBT *data, u_int32_t flags)
 {
     DBT data2;
     void *mallocmem;
@@ -1278,7 +1341,7 @@ int bdb_cput_pack(bdb_state_type *bdb_state, int is_blob, DBC *dbcp, DBT *key,
     }
 
     rc = bdb_prepare_put_pack_updateid(
-        bdb_state, is_blob, data, &data2, updateid, &mallocmem,
+        bdb_state, tran, is_blob, data, &data2, updateid, &mallocmem,
         ALLOC_STACKBUF(data->size + ODH_SIZE_RESERVE), 0);
 
     if (rc == 0) {
@@ -1312,11 +1375,12 @@ void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
           "persitent_seq %d\n",
           odh, compression, persistseq);
     bdb_state->ondisk_header = odh;
+    bdb_state->mvcc = 0;
     bdb_state->compress = compression;
     bdb_state->persistent_seq = persistseq;
 }
 
-void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
+void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int mvcc, int compression,
                          int blob_compression)
 {
     print(bdb_state,
@@ -1324,6 +1388,7 @@ void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
           compression, blob_compression);
 
     bdb_state->ondisk_header = odh;
+    bdb_state->mvcc = mvcc;
     bdb_state->compress = compression;
     bdb_state->compress_blobs = blob_compression;
 }
@@ -1385,10 +1450,11 @@ int bdb_validate_compression_alg(int alg)
     return -1;
 }
 
-inline void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *compr,
+inline void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *mvcc, int *compr,
                                 int *blob_compr)
 {
     *odh = bdb_state->ondisk_header;
+    *mvcc = bdb_state->mvcc;
     *compr = bdb_state->compress;
     *blob_compr = bdb_state->compress_blobs;
 }

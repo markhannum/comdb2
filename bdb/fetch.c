@@ -194,7 +194,7 @@ static int bdb_fetch_blobs_by_rrn_and_genid_int_int(
             /* for transactional mode, preserve the path;
                tid will have the needed lockid
                */
-            rc = bdb_get_unpack_blob(bdb_state, dbp, tid, &dbt_key, &dbt_data, &args->ver, 0, args->fn_malloc,
+            rc = bdb_get_unpack_blob(bdb_state, dbp, tran, &dbt_key, &dbt_data, &args->ver, 0, args->fn_malloc,
                                      args->fn_free);
 
         } else {
@@ -362,8 +362,8 @@ static int bdb_fetch_blobs_by_rrn_and_genid_int_int(
                     }
                 }
 
-                rc = bdb_cget_unpack_blob(bdb_state, dbcp, &dbt_key, &dbt_data, &args->ver, DB_SET, args->fn_malloc,
-                                          args->fn_free);
+                rc = bdb_cget_unpack_blob(bdb_state, tran, dbcp, &dbt_key, &dbt_data, &args->ver,
+                                          DB_SET, args->fn_malloc, args->fn_free);
 
                 if ((rc2 = dbcp->c_close(dbcp)) != 0) {
                     logmsg(LOGMSG_ERROR, "bdb_fetch_blobs_by_rrn_and_genid_int_int:"
@@ -534,11 +534,11 @@ int bdb_fetch_blobs_by_rrn_and_genid_tran(
     return rc;
 }
 
-static inline int fetch_cget(bdb_state_type *bdb_state, int ixnum, DBC *dbcp,
+static inline int fetch_cget(bdb_state_type *bdb_state, tran_type *tran, int ixnum, DBC *dbcp,
                              DBT *key, DBT *data, u_int32_t flags)
 {
     if (-1 == ixnum) {
-        return bdb_cget(bdb_state, dbcp, key, data, flags);
+        return bdb_cget(bdb_state, tran, dbcp, key, data, flags);
     } else {
         return dbcp->c_get(dbcp, key, data, flags);
     }
@@ -900,7 +900,7 @@ before_first_lookup:
        ixnum, dbt_key.ulen, dbt_key.size, dbt_data.ulen);
     */
 
-    initial_rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data, flags);
+    initial_rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data, flags);
 
     /*fprintf(stderr, "fetch_cget rc %d\n", rc);*/
 
@@ -943,11 +943,11 @@ before_first_lookup:
             dbt_data.ulen = sizeof(tmp_data);
 
             /* go one past the set */
-            rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+            rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                             DB_SET_RANGE);
             if (rc == DB_NOTFOUND) {
                 /*fprintf(stderr, "one past set is end of data\n");*/
-                rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                 DB_LAST);
                 if ((rc == DB_REP_HANDLE_DEAD) || (rc == DB_LOCK_DEADLOCK)) {
                     *bdberr = BDBERR_DEADLOCK;
@@ -997,7 +997,7 @@ before_first_lookup:
                     dbt_data.size = sizeof(tmp_data);
                     dbt_data.ulen = sizeof(tmp_data);
 
-                    rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                    rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                     DB_PREV);
 
                     if (rc == 0) {
@@ -1026,7 +1026,7 @@ before_first_lookup:
                         dbt_data.size = sizeof(tmp_data);
                         dbt_data.ulen = sizeof(tmp_data);
 
-                        rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key,
+                        rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key,
                                         &dbt_data, DB_CURRENT);
 
                         if (rc != DB_NOTFOUND && rc != 0) {
@@ -1058,7 +1058,7 @@ before_first_lookup:
                     dbt_data.size = sizeof(tmp_data);
                     dbt_data.ulen = sizeof(tmp_data);
 
-                    rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                    rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                     DB_NEXT);
 
                     if (rc != DB_NOTFOUND && rc != 0) {
@@ -1201,7 +1201,7 @@ before_first_lookup:
                 dbt_data.size = sizeof(tmp_data);
                 dbt_data.ulen = sizeof(tmp_data);
 
-                rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                 DB_NEXT);
 
                 if ((rc == DB_REP_HANDLE_DEAD) || (rc == DB_LOCK_DEADLOCK)) {
@@ -1276,7 +1276,7 @@ before_first_lookup:
                     dbt_data.size = sizeof(tmp_data);
                     dbt_data.ulen = sizeof(tmp_data);
 
-                    rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                    rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                     DB_LAST);
 
                     if ((rc == DB_REP_HANDLE_DEAD) ||
@@ -1381,7 +1381,7 @@ before_first_lookup:
                     dbt_data.size = sizeof(tmp_data);
                     dbt_data.ulen = sizeof(tmp_data);
 
-                    rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                    rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                     DB_PREV);
 
                     if ((rc == DB_REP_HANDLE_DEAD) ||
@@ -1426,7 +1426,7 @@ before_first_lookup:
                         dbt_data.size = sizeof(tmp_data);
                         dbt_data.ulen = sizeof(tmp_data);
 
-                        rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key,
+                        rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key,
                                         &dbt_data, DB_FIRST);
 
                         if ((rc == DB_REP_HANDLE_DEAD) ||
@@ -1482,7 +1482,7 @@ before_first_lookup:
                 dbt_data.size = sizeof(tmp_data);
                 dbt_data.ulen = sizeof(tmp_data);
 
-                rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                 DB_PREV);
 
                 if ((rc == DB_REP_HANDLE_DEAD) || (rc == DB_LOCK_DEADLOCK)) {
@@ -1518,7 +1518,7 @@ before_first_lookup:
                     dbt_data.size = sizeof(tmp_data);
                     dbt_data.ulen = sizeof(tmp_data);
 
-                    rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                    rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                     DB_FIRST);
 
                     if ((rc == DB_REP_HANDLE_DEAD) ||
@@ -1606,7 +1606,7 @@ before_first_lookup:
                     dbt_data.size = sizeof(tmp_data);
                     dbt_data.ulen = sizeof(tmp_data);
 
-                    rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                    rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                     DB_NEXT);
 
                     if ((rc == DB_REP_HANDLE_DEAD) ||
@@ -1643,7 +1643,7 @@ before_first_lookup:
                     dbt_data.size = sizeof(tmp_data);
                     dbt_data.ulen = sizeof(tmp_data);
 
-                    rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+                    rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                                     DB_PREV);
 
                     if ((rc == DB_REP_HANDLE_DEAD) ||
@@ -1741,7 +1741,7 @@ before_first_lookup:
             dbt_data.size = sizeof(tmp_data);
             dbt_data.ulen = sizeof(tmp_data);
 
-            rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+            rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                             DB_LAST);
 
             if ((rc == DB_REP_HANDLE_DEAD) || (rc == DB_LOCK_DEADLOCK)) {
@@ -1825,7 +1825,7 @@ before_first_lookup:
             dbt_data.size = sizeof(tmp_data);
             dbt_data.ulen = sizeof(tmp_data);
 
-            rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+            rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                             DB_LAST);
 
             if ((rc == DB_REP_HANDLE_DEAD) || (rc == DB_LOCK_DEADLOCK)) {
@@ -1981,7 +1981,7 @@ err:
             }
 
             rc =
-                fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data, DB_SET);
+                fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data, DB_SET);
 
             if (rc != 0) {
                 /* return DEADLOCK */
@@ -2002,7 +2002,7 @@ err:
             dbt_data.ulen = sizeof(int);
             dbt_data.flags = DB_DBT_USERMEM;
 
-            rc = fetch_cget(bdb_state, ixnum, dbcp, &dbt_key, &dbt_data,
+            rc = fetch_cget(bdb_state, tran, ixnum, dbcp, &dbt_key, &dbt_data,
                             DB_GET_RECNO);
 
             if ((rc == DB_REP_HANDLE_DEAD) || (rc == DB_LOCK_DEADLOCK)) {
@@ -2097,7 +2097,7 @@ err:
                 get_flags |= DB_DIRTY_READ;
 
             /* now get the data */
-            rc = bdb_get_unpack(bdb_state, bdb_state->dbp_data[0][dtafile], tid,
+            rc = bdb_get_unpack(bdb_state, bdb_state->dbp_data[0][dtafile], tran,
                                 &dbt_key, &dbt_data, ver, get_flags);
 
             if (rc == 0) {

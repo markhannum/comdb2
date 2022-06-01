@@ -5468,6 +5468,16 @@ add_blkseq:
                     assert(outrc || iq->sc_running == 0);
                     iq->sc_logical_tran = NULL;
                 } else {
+                    int had_mvcc = bdb_had_mvcc(parent_trans);
+                    if (had_mvcc) {
+                        unsigned long long mvcc_tranid = bdb_mvcc_tranid(parent_trans);
+                        // Released in commit-adaptive
+                        bdb_mvcc_commit_lock(parent_trans);
+                        unsigned long long commit_genid = bdb_get_commit_genid(thedb->bdb_env, NULL);
+                        if (bdb_add_mvcc_mapping(parent_trans, mvcc_tranid, commit_genid) != 0) {
+                            abort();
+                        }
+                    }
                     irc = trans_commit_adaptive(iq, parent_trans, source_host);
                     parent_trans = NULL;
                 }
@@ -5481,6 +5491,7 @@ add_blkseq:
                             "rc=%d\n", irc, rc);
                 }
 
+                // TODO: release before distributed commit
                 if (hascommitlock) {
                     Pthread_rwlock_unlock(&commit_lock);
                     hascommitlock = 0;

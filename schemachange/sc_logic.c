@@ -1414,7 +1414,7 @@ int do_setcompr(struct ireq *iq, const char *rec, const char *blob)
 
     if (rec) ra = bdb_compr2algo(rec);
     if (blob) ba = bdb_compr2algo(blob);
-    bdb_set_odh_options(db->handle, db->odh, ra, ba);
+    bdb_set_odh_options(db->handle, db->odh, db->mvcc, ra, ba);
     if ((rc = put_db_compress(db, tran, ra)) != 0) goto out;
     if ((rc = put_db_compress_blobs(db, tran, ba)) != 0) goto out;
     if ((rc = trans_commit(iq, tran, gbl_myhostname)) == 0) {
@@ -1445,7 +1445,7 @@ int dryrun_int(struct schema_change_type *s, struct dbtable *db, struct dbtable 
     int changed;
     struct scplan plan;
 
-    if (s->headers != db->odh)
+    if (s->headers != db->odh || s->mvcc != db->mvcc)
         s->header_change = s->force_dta_rebuild = s->force_blob_rebuild = 1;
 
     if (scinfo->olddb_inplace_updates && !s->ip_updates && !s->force_rebuild) {

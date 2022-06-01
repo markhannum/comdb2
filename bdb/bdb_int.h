@@ -65,6 +65,9 @@ enum {
     ODH_SIZE = 7, /* We may extend for larger headers in the future,
                      but the minimum size shall always be 7 bytes. */
 
+    MVCC_INSERT = 8,
+    MVCC_DELETE = 8,
+    MVCC_SIZE = 16,
     ODH_SIZE_RESERVE = 7, /* Callers wishing to provide a buffer into which
                              a record will be packed should allow this many
                              bytes on top of the record size for the ODH.
@@ -91,6 +94,9 @@ struct odh {
 
     void *recptr; /* Some functions set this to point to the
                      decompressed record data. */
+
+    uint64_t mvcc_insert; /* mvcc insert time */
+    uint64_t mvcc_delete; /* mvcc delete time */
 };
 
 #ifndef MIN
@@ -289,6 +295,7 @@ struct checkpoint_list {
 struct tran_tag {
     tranclass_type tranclass;
     DB_TXN *tid;
+    u_int64_t mvcc_tranid;
     u_int32_t logical_lid;
     u_int32_t original_lid;
     int is_curtran;
@@ -408,6 +415,9 @@ struct tran_tag {
 
     /* Set if we were created from the replication stream */
     signed char reptxn;
+
+    signed char had_mvcc : 1;
+    signed char has_mvcc_commit_lock : 1;
 
     signed char wrote_begin_record;
     signed char committed_begin_record;
@@ -978,6 +988,7 @@ struct bdb_state_tag {
     signed char compress;      /* boolean: compress data? */
     signed char compress_blobs; /*boolean: compress blobs? */
     signed char persistent_seq; /* boolean: persistent seq for queue? */
+    signed char mvcc;           /* boolean: give records an mvcc timestamp? */
 
     signed char got_gblcontext;
     signed char need_to_upgrade;
@@ -1200,31 +1211,35 @@ void bdb_maybe_compress_data(bdb_state_type *bdb_state, DBT *data, DBT *data2);
 void bdb_maybe_uncompress_data(bdb_state_type *bdb_state, DBT *data,
                                DBT *data2);
 
-int bdb_cget_unpack(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data,
+int bdb_cget_unpack(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key, DBT *data,
                     uint8_t *ver, u_int32_t flags);
-int bdb_cget_unpack_blob(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data, uint8_t *ver, u_int32_t flags,
+int bdb_cget_unpack_blob(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key,
+                         DBT *data, uint8_t *ver, u_int32_t flags,
                          void *(*fn_malloc)(int), void (*fn_free)(void *));
-int bdb_get_unpack_blob(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data, uint8_t *ver,
+int bdb_get_unpack_blob(bdb_state_type *bdb_state, DB *db, tran_type *tran, DBT *key, DBT *data, uint8_t *ver,
                         u_int32_t flags, void *(*fn_malloc)(int), void (*fn_free)(void *));
-int bdb_get_unpack(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key,
+int bdb_get_unpack(bdb_state_type *bdb_state, DB *db, tran_type *tran, DBT *key,
                    DBT *data, uint8_t *ver, u_int32_t flags);
-int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, DB_TXN *tid,
+int bdb_put_pack(bdb_state_type *bdb_state, int is_blob, DB *db, tran_type *tran,
                  DBT *key, DBT *data, u_int32_t flags, int odhready);
-
-int bdb_cput_pack(bdb_state_type *bdb_state, int is_blob, DBC *dbcp, DBT *key,
-                  DBT *data, u_int32_t flags);
-
-int bdb_put(bdb_state_type *bdb_state, DB *db, DB_TXN *tid, DBT *key, DBT *data,
+int bdb_put_index(bdb_state_type *bdb_state, int ixnum, tran_type *tran,
+                  DBT *key, DBT *data, u_int32_t flags);
+int bdb_cput_pack(bdb_state_type *bdb_state, tran_type *tran, int is_blob, DBC *dbcp,
+                  DBT *key, DBT *data, u_int32_t flags);
+int bdb_cget_index(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *dbt_key,
+                   DBT *dbt_data, uint32_t flags);
+int bdb_cget_index(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *dbt_key, DBT *dbt_data, uint32_t flags);
+int bdb_put(bdb_state_type *bdb_state, DB *db, tran_type *tran, DBT *key, DBT *data,
             u_int32_t flags);
 
-int bdb_cposition(bdb_state_type *bdb_state, DBC *dbcp, DBT *key,
+int bdb_cposition(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key,
                   u_int32_t flags);
 
-int bdb_update_updateid(bdb_state_type *bdb_state, DBC *dbcp,
-                        unsigned long long oldgenid,
+int bdb_update_updateid(bdb_state_type *bdb_state, tran_type *tran,
+                        DBC *dbcp, unsigned long long oldgenid,
                         unsigned long long newgenid);
 
-int bdb_cget(bdb_state_type *bdb_state, DBC *dbcp, DBT *key, DBT *data,
+int bdb_cget(bdb_state_type *bdb_state, tran_type *tran, DBC *dbcp, DBT *key, DBT *data,
              u_int32_t flags);
 
 void init_odh(bdb_state_type *bdb_state, struct odh *odh, void *rec,
@@ -1233,6 +1248,9 @@ void init_odh(bdb_state_type *bdb_state, struct odh *odh, void *rec,
 int bdb_pack(bdb_state_type *bdb_state, const struct odh *odh, void *to,
              size_t tolen, void **recptr, uint32_t *recsize, void **freeptr,
              int pd_index);
+
+int bdb_pack_datacopy_index(bdb_state_type *bdb_state, const struct odh *odh, void *to,
+             size_t tolen, void **recptr, uint32_t *recsize, void **freeptr, int pd_index);
 
 int bdb_unpack(bdb_state_type *bdb_state, const void *from, size_t fromlen,
                void *to, size_t tolen, struct odh *odh, void **freeptr);
@@ -1819,8 +1837,16 @@ void handle_ping_timestamp(bdb_state_type *, struct ack_info_t *, char *to);
 unsigned long long bdb_logical_tranid(void *tran);
 
 int bdb_lite_list_records(bdb_state_type *bdb_state,
-                          int (*userfunc)(bdb_state_type *bdb_state, void *key,
-                                          int keylen, void *data, int datalen,
+                          void *mystate,
+                          int (*userfunc)(bdb_state_type *bdb_state, void *mystate,
+                                          void *key, int keylen, void *data, int datalen,
+                                          int *bdberr),
+                          int *bdberr);
+
+int bdb_lite_list_records_key(bdb_state_type *bdb_state,
+                          void *mystate, void *inkey, int inkeylen, int maxkeylen,
+                          int (*userfunc)(bdb_state_type *bdb_state, void *mystate,
+                                          void *key, int keylen, void *data, int datalen,
                                           int *bdberr),
                           int *bdberr);
 
@@ -1858,10 +1884,17 @@ int osql_repository_cancelall(void);
 
 int bdb_list_all_fileids_for_newsi(bdb_state_type *, hash_t *);
 
-int bdb_prepare_put_pack_updateid(bdb_state_type *bdb_state, int is_blob,
-                                  DBT *data, DBT *data2, int updateid,
+int bdb_prepare_put_pack_updateid(bdb_state_type *bdb_state, tran_type *tran,
+                                  int is_blob, DBT *data, DBT *data2, int updateid,
                                   void **freeptr, void *stackbuf, int odhready);
 
 int net_get_lsn_rectype(const void *buf, int buflen, DB_LSN *lsn, int *myrectype);
+
+void bdb_init_mvcc_map(tran_type *t);
+void bdb_add_mvcc_map(uint64_t tran, uint64_t ts);
+void bdb_del_mvcc_map(uint64_t mvcc_tranid);
+
+/* mvcc-tranid -> commit-timestamp */
+uint64_t bdb_mvcc_tranid_to_timestamp(tran_type *t, uint64_t mvcc_tranid);
 
 #endif /* __bdb_int_h__ */

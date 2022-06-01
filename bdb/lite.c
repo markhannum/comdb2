@@ -732,9 +732,10 @@ int bdb_lite_delete(bdb_state_type *bdb_state, tran_type *tran, void *key, int k
     return rc;
 }
 
-int bdb_lite_list_records(bdb_state_type *bdb_state,
-                          int (*userfunc)(bdb_state_type *bdb_state, void *key,
-                                          int keylen, void *data, int datalen,
+int bdb_lite_list_records_key(bdb_state_type *bdb_state,
+                          void *mystate, void *inkey, int inkeylen, int maxkeylen,
+                          int (*userfunc)(bdb_state_type *bdb_state, void *mystate,
+                                          void *key, int keylen, void *data, int datalen,
                                           int *bdberr),
                           int *bdberr)
 {
@@ -757,6 +758,13 @@ int bdb_lite_list_records(bdb_state_type *bdb_state,
     bzero(&data, sizeof(data));
     key.flags = data.flags = DB_DBT_MALLOC;
 
+    if (maxkeylen > 0) {
+        key.flags = DB_DBT_USERMEM;
+        key.ulen = maxkeylen;
+        key.size = inkeylen;
+        key.data = inkey;
+    }
+
     rc = dbcp->c_get(dbcp, &key, &data, DB_FIRST);
     if (rc) {
         logmsg(LOGMSG_ERROR, "%s:%d: failed to get first record rc=%d\n", __FILE__,
@@ -767,7 +775,7 @@ int bdb_lite_list_records(bdb_state_type *bdb_state,
     }
 
     do {
-        rc = userfunc(bdb_state, key.data, key.size, data.data, data.size,
+        rc = userfunc(bdb_state, mystate, key.data, key.size, data.data, data.size,
                       bdberr);
         if (rc) {
             logmsg(LOGMSG_ERROR, "%s:%d: failed userfunc rc=%d bdberr=%d\n",
@@ -786,3 +794,14 @@ done:
     dbcp->c_close(dbcp);
     return rc;
 }
+
+int bdb_lite_list_records(bdb_state_type *bdb_state,
+                          void *mystate,
+                          int (*userfunc)(bdb_state_type *bdb_state, void *mystate,
+                                          void *key, int keylen, void *data, int datalen,
+                                          int *bdberr),
+                          int *bdberr)
+{
+    return bdb_lite_list_records_key(bdb_state, mystate, NULL, 0, 0, userfunc, bdberr);
+}
+

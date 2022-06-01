@@ -119,7 +119,7 @@ static int fix_blobs(bdb_state_type *bdb_state, DB *db, DBC **cdata,
     key.size = sizeof(unsigned long long);
     dta.flags = DB_DBT_MALLOC;
 
-    rc = bdb_cget_unpack(bdb_state, c, &key, &dta, &ver, DB_SET);
+    rc = bdb_cget_unpack(bdb_state, t, c, &key, &dta, &ver, DB_SET);
     if (rc)
         goto done;
 
@@ -141,7 +141,7 @@ static int fix_blobs(bdb_state_type *bdb_state, DB *db, DBC **cdata,
     }
 
     /* write it back */
-    rc = bdb_cput_pack(bdb_state, 0, c, &key, &dta, DB_CURRENT);
+    rc = bdb_cput_pack(bdb_state, t, 0, c, &key, &dta, DB_CURRENT);
     if (rc)
         goto done;
 
@@ -288,7 +288,7 @@ static int bdb_verify_data_stripe(verify_common_t *par, int dtastripe,
         return rc;
     }
     uint8_t ver;
-    rc = bdb_cget_unpack(bdb_state, cdata, &dbt_key, &dbt_data, &ver, DB_FIRST);
+    rc = bdb_cget_unpack(bdb_state, NULL, cdata, &dbt_key, &dbt_data, &ver, DB_FIRST);
     int atstart = comdb2_time_epochms();
     int now = atstart;
     int items = 0;
@@ -387,7 +387,8 @@ static int bdb_verify_data_stripe(verify_common_t *par, int dtastripe,
 
                 DBT dbt_blob_data = {.flags = DB_DBT_MALLOC, .data = NULL};
 
-                rc = bdb_cget_unpack_blob(bdb_state, cblob, &dbt_blob_key, &dbt_blob_data, &ver, DB_SET, NULL, NULL);
+                rc = bdb_cget_unpack_blob(bdb_state, NULL, cblob, &dbt_blob_key,
+                                          &dbt_blob_data, &ver, DB_SET, NULL, NULL);
                 if (rc == DB_NOTFOUND) {
                     realblobsz[blobno] = -1;
                     if (blobsizes[blobno] != -1 && blobsizes[blobno] != -2) {
@@ -556,7 +557,7 @@ static int bdb_verify_data_stripe(verify_common_t *par, int dtastripe,
         dbt_key.ulen = sizeof(keybuf);
         dbt_key.data = keybuf;
 
-        rc = bdb_cget_unpack(bdb_state, cdata, &dbt_key, &dbt_data, &ver,
+        rc = bdb_cget_unpack(bdb_state, NULL, cdata, &dbt_key, &dbt_data, &ver,
                              DB_NEXT);
     }
     if (rc != DB_NOTFOUND) {
@@ -734,7 +735,7 @@ static int bdb_verify_key(verify_common_t *par, int ix, unsigned int lid)
             goto next_key;
         }
         uint8_t ver;
-        rc = bdb_cget_unpack(bdb_state, cdata, &dbt_dta_check_key,
+        rc = bdb_cget_unpack(bdb_state, NULL, cdata, &dbt_dta_check_key,
                              &dbt_dta_check_data, &ver, DB_SET);
         if (rc == DB_NOTFOUND) {
             par->verify_status = 1;
@@ -805,7 +806,7 @@ static int bdb_verify_key(verify_common_t *par, int ix, unsigned int lid)
                     dbt_blob_data.data = NULL;
 
                     rc =
-                        bdb_cget_unpack_blob(bdb_state, cblob, &dbt_blob_key, &dbt_blob_data, &ver, DB_SET, NULL, NULL);
+                        bdb_cget_unpack_blob(bdb_state, NULL, cblob, &dbt_blob_key, &dbt_blob_data, &ver, DB_SET, NULL, NULL);
                     if (rc == DB_NOTFOUND) {
                         realblobsz[blobno] = -1;
                         if (blobsizes[blobno] != -1 &&

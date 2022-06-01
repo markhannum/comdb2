@@ -541,7 +541,7 @@ static int bdb_get_first_data_length_dbp(bdb_state_type *bdb_state, DB *dbp,
         dbt_key.flags = DB_DBT_MALLOC;
         dbt_data.flags = DB_DBT_MALLOC;
 
-        rc = bdb_cget_unpack(bdb_state, dbcp, &dbt_key, &dbt_data, &ver,
+        rc = bdb_cget_unpack(bdb_state, NULL, dbcp, &dbt_key, &dbt_data, &ver,
                              DB_NEXT);
 
         if (rc != 0) {
@@ -941,4 +941,84 @@ int bdb_panic(bdb_state_type *bdb_state)
     __db_panic(bdb_state->dbenv, EINVAL);
     /* this shouldn't return!!! */
     return 0;
+}
+
+typedef struct mvcc_map
+{
+    uint64_t mvcc_tranid;
+    uint64_t timestamp;
+} mvcc_map_t;
+
+static pool_t *mvcc_pool = NULL;
+static pthread_mutex_t mvcc_lk = PTHREAD_MUTEX_INITIALIZER;
+static hash_t *mvcc_hash = NULL;
+
+void bdb_del_mvcc_map(uint64_t mvcc_tranid)
+{
+    assert(mvcc_tranid & GENID_MVCC_TRANID);
+    mvcc_map_t *entry = NULL;
+    Pthread_mutex_lock(&mvcc_lk);
+    entry = hash_find(mvcc_hash, &mvcc_tranid);
+    if (entry) {
+        hash_del(mvcc_hash, entry);
+        pool_relablk(mvcc_pool, entry);
+    }
+    Pthread_mutex_unlock(&mvcc_lk);
+}
+
+void bdb_add_mvcc_map(uint64_t tran, uint64_t ts)
+{
+    assert(tran & GENID_MVCC_TRANID);
+    assert(!(ts & GENID_MVCC_TRANID));
+    mvcc_map_t *entry;
+    Pthread_mutex_lock(&mvcc_lk);
+    entry = hash_find(mvcc_hash, &tran);
+    assert(entry == NULL);
+    entry = pool_getablk(mvcc_pool);
+    entry->mvcc_tranid = tran;
+    entry->timestamp = ts;
+    hash_add(mvcc_hash, entry);
+    Pthread_mutex_unlock(&mvcc_lk);
+}
+
+static int add_mvcc_map(uint64_t tran, uint64_t ts)
+{
+    bdb_add_mvcc_map(tran, ts);
+    return 0;
+}
+
+void bdb_init_mvcc_map(tran_type *t)
+{
+    mvcc_pool = pool_setalloc_init(sizeof(mvcc_map_t), 0, malloc, free);
+    mvcc_hash = hash_init(sizeof(uint64_t));
+    bdb_all_mvcc_mappings(t, add_mvcc_map);
+}
+
+uint64_t bdb_mvcc_tranid_to_timestamp(tran_type *t, uint64_t mvcc_tranid)
+{
+    assert(mvcc_tranid & GENID_MVCC_TRANID);
+    mvcc_map_t *entry = NULL;
+    Pthread_mutex_lock(&mvcc_lk);
+    entry = hash_find(mvcc_hash, &mvcc_tranid);
+    Pthread_mutex_unlock(&mvcc_lk);
+    if (entry == NULL) {
+        uint64_t timestamp;
+        int rc = bdb_get_mvcc_mapping(t, mvcc_tranid, &timestamp);
+        if (rc != 0) {
+            logmsg(LOGMSG_FATAL, "Invalid mvcc_tranid?  %"PRIu64"\n", mvcc_tranid);
+            abort();
+        }
+        Pthread_mutex_lock(&mvcc_lk);
+        entry = hash_find(mvcc_hash, &mvcc_tranid);
+        if (entry) {
+            assert(entry->timestamp == timestamp);
+        } else {
+            entry = pool_getablk(mvcc_pool);
+            entry->mvcc_tranid = mvcc_tranid;
+            entry->timestamp = timestamp;
+            hash_add(mvcc_hash, entry);
+        }
+        Pthread_mutex_unlock(&mvcc_lk);
+    }
+    return entry->timestamp;
 }

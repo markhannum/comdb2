@@ -30,6 +30,7 @@ sqlite3_module systblTablePropertiesModule = {
 typedef struct systable_table_properties {
     char *table_name;
     const char *odh;
+    const char *mvcc;
     const char *compress;
     const char *blob_compress;
     const char *in_place_updates;
@@ -38,16 +39,17 @@ typedef struct systable_table_properties {
 
 int table_properties_systable_collect(void **data, int *nrecords)
 {
-    int odh, compr, blob_compr;
+    int odh, mvcc, compr, blob_compr;
 
     *nrecords = thedb->num_dbs;
     systable_table_properties_t *arr = calloc(*nrecords, sizeof(systable_table_properties_t));
     for (int i = 0; i < *nrecords; i++) {
         struct dbtable *db = thedb->dbs[i];
-        bdb_get_compr_flags(db->handle, &odh, &compr, &blob_compr);
+        bdb_get_compr_flags(db->handle, &odh, &mvcc, &compr, &blob_compr);
 
         arr[i].table_name = strdup(db->tablename);
         arr[i].odh = odh ? "Y" : "N";
+        arr[i].mvcc = mvcc ? "Y" : "N";
         arr[i].compress = bdb_algo2compr(compr);
         arr[i].blob_compress = bdb_algo2compr(blob_compr);
         arr[i].in_place_updates = db->inplace_updates ? "Y" : "N";
@@ -77,6 +79,7 @@ int systblTablePropertiesInit(sqlite3*db)
         sizeof(systable_table_properties_t),
         CDB2_CSTRING, "table_name", -1, offsetof(systable_table_properties_t, table_name),
         CDB2_CSTRING, "odh", -1, offsetof(systable_table_properties_t, odh),
+        CDB2_CSTRING, "mvcc", -1, offsetof(systable_table_properties_t, mvcc),
         CDB2_CSTRING, "compress", -1, offsetof(systable_table_properties_t, compress),
         CDB2_CSTRING, "blob_compress", -1, offsetof(systable_table_properties_t, blob_compress),
         CDB2_CSTRING, "in_place_updates", -1, offsetof(systable_table_properties_t, in_place_updates),

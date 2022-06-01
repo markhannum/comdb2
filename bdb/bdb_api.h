@@ -1144,13 +1144,13 @@ void bdb_set_blobstripe_genid(bdb_state_type *bdb_state,
                               unsigned long long genid);
 
 /* set various options for the ondisk header. */
-void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
+void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int mvcc, int compression,
                          int blob_compression);
 
 void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
                                int compression, int persistseq);
 
-void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *compr,
+void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *mvcc, int *compr,
                          int *blob_compr);
 
 /* delete a table from disk.  must already be closed but NOT freed */
@@ -1434,6 +1434,11 @@ int bdb_get_view_names(tran_type *t, char **names, int *num);
 int bdb_get_view(tran_type *t, const char *view_name, char **view_def);
 int bdb_put_view(tran_type *t, const char *view_name, char *view_def);
 int bdb_del_view(tran_type *t, const char *view_name);
+
+int bdb_add_mvcc_mapping(tran_type *t, uint64_t mvcc_tranid, uint64_t timestamp);
+int bdb_del_mvcc_mapping(tran_type *t, uint64_t mvcc_tranid);
+int bdb_get_mvcc_mapping(tran_type *t, uint64_t mvcc_tranid, uint64_t *timestamp);
+int bdb_all_mvcc_mappings(tran_type *t, int (*func)(uint64_t, uint64_t));
 
 int bdb_append_file_version(char *str_buf, size_t buflen,
                             unsigned long long version_num, int *bdberr);
@@ -1822,6 +1827,12 @@ extern void bdb_dump_active_locks(bdb_state_type *bdb_state, FILE *out);
 
 int bdb_add_rep_blob(bdb_state_type *bdb_state, tran_type *tran, int session,
                      int seqno, void *blob, int sz, int *bdberr);
+
+int bdb_had_mvcc(tran_type *tran);
+unsigned long long bdb_mvcc_tranid(tran_type *tran);
+void bdb_mvcc_commit_lock(tran_type *tran);
+void bdb_mvcc_commit_unlock(tran_type *tran);
+int bdb_mvcc_has_commit_lock(tran_type *tran);
 
 const char *bdb_get_tmpdir(bdb_state_type *bdb_state);
 

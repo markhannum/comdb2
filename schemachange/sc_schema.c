@@ -337,7 +337,7 @@ int set_header_and_properties(void *tran, struct dbtable *newdb,
     int rc;
 
     /* set the meta and set the ODH/compression flags */
-    if ((rc = set_meta_odh_flags_tran(newdb, tran, s->headers, s->compress,
+    if ((rc = set_meta_odh_flags_tran(newdb, tran, s->headers, s->mvcc, s->compress,
                                       s->compress_blobs, s->ip_updates))) {
         sc_errf(s, "Failed to set on disk headers\n");
         return SC_TRANSACTION_FAILED;
@@ -530,7 +530,7 @@ inline int check_option_coherency(struct schema_change_type *s, struct dbtable *
 inline int check_option_queue_coherency(struct schema_change_type *s,
                                         struct dbtable *db)
 {
-    if (s->ip_updates || s->instant_sc || s->compress_blobs) {
+    if (s->ip_updates || s->instant_sc || s->compress_blobs || s->mvcc) {
         sc_errf(s, "unsupported option for queues.\n");
         return SC_INVALID_OPTIONS;
     }
@@ -1040,7 +1040,7 @@ void set_odh_options_tran(struct dbtable *db, tran_type *tran)
     get_db_compress_blobs_tran(db, &blob_compr, tran);
     db->schema_version = get_csc2_version_tran(db->tablename, tran);
 
-    set_bdb_option_flags(db, db->odh, db->inplace_updates,
+    set_bdb_option_flags(db, db->odh, db->mvcc, db->inplace_updates,
                          db->instant_schema_change, db->schema_version, compr,
                          blob_compr, datacopy_odh);
 

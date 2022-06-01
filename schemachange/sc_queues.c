@@ -344,6 +344,7 @@ static inline void set_empty_queue_options(struct schema_change_type *s)
         gbl_init_with_queue_compr = 0;
     if (s->headers == -1)
         s->headers = gbl_init_with_queue_odh;
+    s->mvcc = 0;
     if (s->compress == -1)
         s->compress = gbl_init_with_queue_compr;
     if (s->persistent_seq == -1)
@@ -552,6 +553,7 @@ static int perform_trigger_update_int(struct schema_change_type *sc)
         }
 
         db->odh = sc->headers;
+        db->mvcc = 0;
         bdb_set_queue_odh_options(db->handle, sc->headers, sc->compress,
                                   sc->persistent_seq);
 

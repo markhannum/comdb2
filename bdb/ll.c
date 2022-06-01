@@ -230,7 +230,7 @@ int ll_dta_add(bdb_state_type *bdb_state, unsigned long long genid, DB *dbp,
         }
 
         outrc = bdb_put_pack(bdb_state, dtafile > 0 ? 1 : 0, dbp,
-                             tran ? tran->tid : NULL, dbt_key, dbt_data,
+                             tran, dbt_key, dbt_data,
                              tran_flags, odhready);
 
         if (!outrc && add_snapisol_logging(bdb_state, tran)) {
@@ -417,7 +417,7 @@ int ll_dta_del(bdb_state_type *bdb_state, tran_type *tran, int rrn,
             /* Use the normal genid. */
             dbt_key.data = &genid;
             dbt_key.size = sizeof(genid);
-            rc = bdb_cposition(bdb_state, dbcp, &dbt_key, DB_SET | DB_RMW);
+            rc = bdb_cposition(bdb_state, tran, dbcp, &dbt_key, DB_SET | DB_RMW);
         }
 
         if (rc != 0) {
@@ -540,6 +540,8 @@ int ll_key_del(bdb_state_type *bdb_state, tran_type *tran, int ixnum, void *key,
             goto done;
         }
 
+        // if (bdb_state->mvcc) {
+        //} else
         if (bdb_state->ixdta[ixnum]) {
             dbt_dta.data = keydata;
             dbt_dta.ulen = sizeof(int) * 3;
@@ -577,7 +579,7 @@ int ll_key_del(bdb_state_type *bdb_state, tran_type *tran, int ixnum, void *key,
 
         /* call cget here in favor of bdb_cget_unpack since keys aren't
            packed and unpack routines don't support partial finds. */
-        rc = dbcp->c_get(dbcp, &dbt_key, &dbt_dta, DB_SET | DB_RMW);
+        rc = bdb_cget_index(bdb_state, tran, dbcp, &dbt_key, &dbt_dta, DB_SET | DB_RMW);
         if (rc) {
             crc = dbcp->c_close(dbcp);
             if (crc == DB_LOCK_DEADLOCK)
@@ -678,7 +680,7 @@ int ll_key_upd(bdb_state_type *bdb_state, tran_type *tran, char *table_name,
             void *freeptr = NULL;
             int pd_index = bdb_state->ixdtalen[ixnum] > 0 ? ixnum : -1; // partial datacopy
             init_odh(bdb_state, &odh, dta, dtalen, 0);
-            bdb_pack(bdb_state, &odh, dtacopy_payload + genid_sz,
+            bdb_pack_datacopy_index(bdb_state, &odh, dtacopy_payload + genid_sz,
                      MAXRECSZ + ODH_SIZE_RESERVE, &rec, &recsize, &freeptr, pd_index);
             llog_payload_len = dtacopy_payload_len = recsize + genid_sz;
         } else {
@@ -741,7 +743,8 @@ int ll_key_upd(bdb_state_type *bdb_state, tran_type *tran, char *table_name,
 
         /* call cget here in favor of bdb_cget_unpack since keys aren't
            packed and unpack routines don't support partial finds. */
-        rc = dbcp->c_get(dbcp, &dbt_key, &dbt_dta, DB_SET | DB_RMW);
+        //rc = dbcp->c_get(dbcp, &dbt_key, &dbt_dta, DB_SET | DB_RMW);
+        rc = bdb_cget_index(bdb_state, tran, dbcp, &dbt_key, &dbt_dta, DB_SET | DB_RMW);
         if (rc) {
             crc = dbcp->c_close(dbcp);
             if (crc == DB_LOCK_DEADLOCK)
@@ -857,8 +860,7 @@ int ll_key_add(bdb_state_type *bdb_state, unsigned long long ingenid,
             }
         }
 
-        rc = bdb_state->dbp_ix[ixnum]->put(bdb_state->dbp_ix[ixnum], tran->tid,
-                                           dbt_key, dbt_data, DB_NOOVERWRITE);
+        rc = bdb_put_index(bdb_state, ixnum, tran, dbt_key, dbt_data, DB_NOOVERWRITE);
         if (rc) {
             return rc;
         }
@@ -901,6 +903,8 @@ int ll_key_add(bdb_state_type *bdb_state, unsigned long long ingenid,
     return rc;
 }
 
+/* For mvcc any deletes or updates should fail unless the mvcc-deleteid == -1,
+ * ALSO, there should be a non-0 commit-genid passed down to this */
 static int ll_dta_upd_int(bdb_state_type *bdb_state, int rrn,
                           unsigned long long oldgenid,
                           unsigned long long *newgenid, DB *dbp,
@@ -1023,7 +1027,7 @@ static int ll_dta_upd_int(bdb_state_type *bdb_state, int rrn,
             /* This is a blobs-only optimization. */
             assert(!verify_updateid);
 
-            rc = bdb_update_updateid(bdb_state, dbcp, oldgenid, *newgenid);
+            rc = bdb_update_updateid(bdb_state, tran, dbcp, oldgenid, *newgenid);
             if (rc != 0) {
                 bdb_c_get_error(bdb_state, tran->tid, &dbcp, rc,
                                 BDBERR_RRN_NOTFOUND, &bdberr, "ll_dta_upd");
@@ -1078,6 +1082,8 @@ static int ll_dta_upd_int(bdb_state_type *bdb_state, int rrn,
             /* Grab malloceddta to possibly free later. */
             malloceddta = old_dta_out_lcl.data;
         }
+
+        // if mvcc : XXX
 
         /* Unpack if we need the record to return or verify. */
         if (0 == rc && (verify_updateid || !dta || old_dta_out || verify_dta)) {
@@ -1196,7 +1202,7 @@ static int ll_dta_upd_int(bdb_state_type *bdb_state, int rrn,
 
             /* Format the payload. */
             DBT packeddta;
-            rc = bdb_prepare_put_pack_updateid(bdb_state, is_blob, dta,
+            rc = bdb_prepare_put_pack_updateid(bdb_state, tran, is_blob, dta,
                                                &packeddta, -1, &freedtaptr,
                                                formatted_record, odhready);
             recptr = packeddta.data;
