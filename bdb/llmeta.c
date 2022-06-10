@@ -53,6 +53,8 @@ enum {
         63 /* maximum alias name, must be at least MAXALIASNAME in comdb2.h! */
     ,
     LLMETA_URLLEN = 255 /* maximum target name, format [CLASS_]DBNAME.TBLNAME */
+    ,
+    LLMETA_DELFILELEN = LLMETA_IXLEN - 4 /* maximum delete file keylength - 4 */
 };
 
 /* this enum serves as a header for the llmeta keys */
@@ -171,6 +173,7 @@ typedef enum {
     LLMETA_SCHEMACHANGE_STATUS = 50,
     LLMETA_VIEW = 51,                 /* User defined views */
     LLMETA_SCHEMACHANGE_HISTORY = 52, /* 52 + SEED[8] */
+    LLMETA_DELFILE_LOGREF = 56     /* Store latest reference to a deleted btree */
 } llmetakey_t;
 
 struct llmeta_file_type_key {
@@ -10183,4 +10186,117 @@ done:
         }
     }
     return rc;
+}
+
+
+struct delfile_logref {
+    int file_type;
+    char name[LLMETA_DELFILELEN];
+};
+
+/* This table filenames which we intend to delete.  It's a little larger
+ * than just the size of the tablename.  The maximum size is:
+ *
+ * 'XXX.'           - 4 bytes
+ * MAXTABLELEN      - 32 bytes
+ * VERSION          - 16 bytes
+ * EXTENSION        - 6 bytes ('.index')
+ *
+ * 58 bytes is about half of the total LLMETA_IXLEN- using the rest of
+ * LLMETA_IXLEN for the tablename should be plenty.  */
+BB_COMPILE_TIME_ASSERT(delfile_logref_max_name,
+                       (4 + MAXTABLELEN + 16 + 6) < LLMETA_DELFILELEN);
+
+/* We've made this the maximum llmeta key size */
+BB_COMPILE_TIME_ASSERT(delfile_logref_size,
+                       sizeof(struct delfile_logref) == LLMETA_IXLEN);
+
+/* Get a single file logreference */
+int bdb_llmeta_get_delfile_logref(tran_type *tran, char *name, int *logfile, int *bdberr)
+{
+    struct delfile_logref key = {0};
+    int **lognums = NULL;
+    int num = 0, rc = 1;
+    key.file_type = htonl(LLMETA_DELFILE_LOGREF);
+    strncpy0(key.name, name, LLMETA_DELFILELEN);
+    rc = kv_get(tran, &key, sizeof(key), (void ***)&lognums, &num, bdberr);
+    if (rc == 0) {
+        if (num == 1) {
+            *logfile = ntohl(*lognums[0]);
+        } else {
+            if (num > 1) {
+                logmsg(LOGMSG_ERROR, "%s: multiple delfile refs for '%s'?\n",
+                       __func__, name);
+            }
+            rc = -1;
+        }
+        for (int i = 0; i < num; i++) {
+            free(lognums[i]);
+        }
+        free(lognums);
+    }
+
+    return rc;
+}
+
+/* Retrieve all delete-files & log-references */
+int bdb_llmeta_get_delfile_logrefs(tran_type *tran, char ***files, int **logs, int *num, int *bdberr)
+{
+    void **keys = NULL;
+    char **rnames;
+    int *rlogs = NULL;
+    int nkey = 0, rc = 1;
+    *num = 0;
+
+    int key = htonl(LLMETA_DELFILE_LOGREF);
+    int sz = sizeof(int);
+
+    rc = kv_get_kv(tran, &key, sz, &keys, (void ***)&rlogs, &nkey, bdberr);
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "%s: failed kv_get rc %d\n", __func__, rc);
+        return -1;
+    }
+    if (nkey == 0) {
+        return 0;
+    }
+
+    rnames = calloc(sizeof(char *), nkey);
+    if (rnames == NULL) {
+        logmsg(LOGMSG_ERROR, "%s: failed malloc\n", __func__);
+        *bdberr = BDBERR_MALLOC;
+        return -1;
+    }
+
+    /* Allocate & strdup names for rnames, rlogs only needs endianize */
+    for (int i = 0; i < nkey; i++) {
+        struct delfile_logref *key = (struct delfile_logref *)keys[i];
+        rnames[i] = strdup(key->name);
+        rlogs[i] = ntohl(rlogs[i]);
+        free(keys[i]);
+    }
+    free(keys);
+
+    (*logs) = rlogs;
+    (*files) = rnames;
+
+    return 0;
+}
+
+/* Add a logreference */
+int bdb_llmeta_add_delfile_logref(tran_type *tran, char *name, int logfile, int *bdberr)
+{
+    struct delfile_logref key = {0};
+    key.file_type = htonl(LLMETA_DELFILE_LOGREF);
+    strncpy0(key.name, name, LLMETA_DELFILELEN);
+    int dellog = htonl(logfile);
+    return kv_put(tran, &key, &dellog, sizeof(dellog), bdberr);;
+}
+
+/* Delete a logreference */
+int bdb_llmeta_del_delfile_logref(tran_type *tran, char *name, int *bdberr)
+{
+    struct delfile_logref key = {0};
+    key.file_type = htonl(LLMETA_DELFILE_LOGREF);
+    strncpy0(key.name, name, LLMETA_DELFILELEN);
+    return kv_del(tran, &key, bdberr);
 }

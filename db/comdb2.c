@@ -1247,6 +1247,8 @@ static void *purge_old_files_thread(void *arg)
     dbenv->purge_old_files_is_running = 1;
     backend_thread_event(thedb, COMDB2_THR_EVENT_START_RDONLY);
 
+    purge_stale_llmeta_oldfile_entries(NULL);
+
     assert(!gbl_is_physical_replicant);
 
     while (!db_is_stopped()) {

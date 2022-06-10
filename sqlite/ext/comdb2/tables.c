@@ -293,6 +293,8 @@ int comdb2SystblInit(
                                &systblTableTPPermissionsModule, 0);
   if (rc == SQLITE_OK)
     rc = systblSQLIndexStatsInit(db);
+  if (rc == SQLITE_OK)
+    rc = systblDelfileRefsInit(db);
 #endif
   return rc;
 }

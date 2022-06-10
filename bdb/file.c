@@ -7621,15 +7621,8 @@ int bdb_check_files_on_disk(bdb_state_type *bdb_state, const char *tblname,
     struct dirent *ent;
     DIR *dirp;
     int error;
-    int lognum = 0;
 
     assert(bdb_state->parent == NULL);
-
-    if (bdb_state->attr->keep_referenced_files) {
-        lognum = bdb_get_last_logfile(bdb_state, bdberr);
-        if (lognum == -1)
-            return -1;
-    }
 
     if (!bdb_state || !bdberr) {
         logmsg(LOGMSG_ERROR, "%s: null or invalid argument\n", __func__);
@@ -7775,6 +7768,13 @@ int bdb_check_files_on_disk(bdb_state_type *bdb_state, const char *tblname,
         if (oldfile_list_contains(munged_name))
             continue;
 
+        int ref = 0, lognum = bdb_get_last_logfile(bdb_state, bdberr);
+        if (bdb_llmeta_get_delfile_logref(NULL, munged_name, &ref, bdberr) == 0) {
+            lognum = ref;
+        } else {
+            bdb_llmeta_add_delfile_logref(NULL, munged_name, lognum, bdberr);
+        }
+
         if (oldfile_list_add(strdup(munged_name), lognum, __func__, __LINE__)) {
             print(bdb_state, "failed to collect old file (list full) %s\n",
                   ent->d_name);
@@ -7819,15 +7819,8 @@ static int bdb_process_unused_files(bdb_state_type *bdb_state, tran_type *tran,
     struct dirent *ent;
     DIR *dirp;
     int error;
-    int lognum = 0;
 
     assert(bdb_state->parent != NULL);
-
-    if (delay && bdb_state->attr->keep_referenced_files) {
-        lognum = bdb_get_last_logfile(bdb_state, bdberr);
-        if (lognum == -1)
-            return -1;
-    }
 
     if (!bdb_state || !bdberr) {
         logmsg(LOGMSG_ERROR, "%s: null or invalid argument\n", __func__);
@@ -8014,6 +8007,13 @@ static int bdb_process_unused_files(bdb_state_type *bdb_state, tran_type *tran,
             if (oldfile_list_contains(munged_name))
                 continue;
 
+            int ref = 0, lognum = bdb_get_last_logfile(bdb_state, bdberr);
+            if (bdb_llmeta_get_delfile_logref(NULL, munged_name, &ref, bdberr) == 0) {
+                lognum = ref;
+            } else {
+                bdb_llmeta_add_delfile_logref(NULL, munged_name, lognum, bdberr);
+            }
+
             if (oldfile_list_add(strdup(munged_name), lognum, __func__,
                                  __LINE__)) {
                 print(bdb_state, "failed to collect old file (list full) %s\n",
@@ -8084,6 +8084,29 @@ int bdb_list_unused_files(bdb_state_type *bdb_state, int *bdberr, char *powner)
 
 int bdb_have_unused_files(void) { return oldfile_list_empty() != 1; }
 
+void purge_stale_llmeta_oldfile_entries(tran_type *tran)
+{
+    char **files;
+    int *logs, num = 0, bdberr = 0, rc;
+
+    if ((rc = bdb_llmeta_get_delfile_logrefs(tran, &files, &logs, &num, &bdberr)) != 0) {
+        logmsg(LOGMSG_INFO, "%s: error retrieving oldfile references: %d, bdberr=%d\n",
+               __func__, rc, bdberr);
+        return;
+    }
+
+    for (int i = 0; i < num; i++) {
+        char path[PATH_MAX];
+        struct stat sb;
+        bdb_trans(files[i], path);
+        if (stat(path, &sb)) {
+            bdb_llmeta_del_delfile_logref(tran, files[i], &bdberr);
+        }
+        free(files[i]);
+    }
+    free(files);
+}
+
 int bdb_purge_unused_files(bdb_state_type *bdb_state, tran_type *tran,
                            int *bdberr)
 {
@@ -8152,6 +8175,8 @@ int bdb_purge_unused_files(bdb_state_type *bdb_state, tran_type *tran,
                   *bdberr, munged_name);
         else /* Added back to oldfile list. Don't free the file name. */
             return rc;
+    } else {
+        bdb_llmeta_del_delfile_logref(NULL, munged_name, bdberr);
     }
 
     free(munged_name);

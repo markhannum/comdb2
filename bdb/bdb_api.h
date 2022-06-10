@@ -1544,6 +1544,21 @@ typedef struct {
     char errstr[LLMETA_SCERR_LEN];
 } sc_hist_row; // this is content of row in comdb2_sc_history
 
+/* Retrieve most recent logfile reference for a deleted file */
+int bdb_llmeta_get_delfile_logref(tran_type *tran, char *name, int *logfile,
+                                  int *bdberr);
+
+/* Retreive all deleted files and log-references */
+int bdb_llmeta_get_delfile_logrefs(tran_type *tran, char ***files, int **logs,
+                                   int *num, int *bdberr);
+
+/* Set most recent log which could have written to a deleted file */
+int bdb_llmeta_add_delfile_logref(tran_type *tran, char *name, int logfile,
+                                  int *bdberr);
+
+/* Remove a file-to-log mapping from llmeta */
+int bdb_llmeta_del_delfile_logref(tran_type *tran, char *name, int *bdberr);
+
 int bdb_llmeta_get_sc_history(tran_type *t, sc_hist_row **hist_out, int *num,
                               int *bdberr, const char *tablename);
 
@@ -1828,6 +1843,9 @@ int bdb_gbl_pglogs_mem_init(bdb_state_type *bdb_state);
 
 int bdb_purge_unused_files(bdb_state_type *bdb_state, tran_type *tran,
                            int *bdberr);
+
+void purge_stale_llmeta_oldfile_entries(tran_type *tran);
+
 int bdb_have_unused_files(void);
 
 int bdb_nlocks_for_locker(bdb_state_type *bdb_state, int lid);
