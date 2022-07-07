@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+export debug=1
+export stopfile=./stopfile.txt
+export blobsz=4096
+
+[[ $debug == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="failexit"
+    typeset f=$1
+    write_prompt $func "$f failed: $2"
+    exit -1
+}
+
+function select_records
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="select_records"
+
+    while [[ ! -f $stopfile ]]; do
+		ix=${RANDOM}
+		$CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "select * from t1 where a > $ix limit 10" >/dev/null
+    done
+
+}
+
+function update_random_blobs
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="insert_random_blobs"
+
+    while [[ ! -f $stopfile ]]; do
+		ix=${RANDOM}
+		$CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update t1 set b=randomblob($blobsz), c=randomblob($blobsz), d=randomblob($blobsz) where a > $ix limit 10"
+    done
+}
+
+function insert_random_blobs
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="insert_random_blobs"
+
+    while [[ ! -f $stopfile ]]; do
+		ix=${RANDOM}
+		$CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 (a, b, c, d) values ($ix, randomblob($blobsz), randomblob($blobsz), randomblob($blobsz))"
+	done
+}
+
+function create_blob_table
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="create_table"
+    typeset tbl=t1
+
+    write_prompt $func "Creating table ${tbl}"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop table $tbl" >/dev/null 2>&1
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table $tbl (a int, b blob, c blob, d blob)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index ix1 on $tbl(a)"
+}
+
+function verify_up
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="verify_up"
+    write_prompt $func "Running $func"
+    typeset node=$1
+    typeset count=0
+    typeset r=1
+    while [[ "$r" -ne "0" && "$count" -lt 2000 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+        r=$?
+        [[ $r != 0 ]] && sleep 1
+        let count=count+1
+    done
+    [[ $r != 0 ]] && failexit "node $node did not recover in time"
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    #typeset maxtime=1200
+    #typeset maxtime=120
+    typeset maxtime=1200
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+    typeset inserters=5
+    typeset updaters=5
+    typeset selecters=5
+
+    write_prompt $func "Running $func"
+    create_blob_table
+    
+    let i=0
+    while [[ $i -lt $inserters ]]; do
+        insert_random_blobs &
+        let i=i+1
+    done
+
+    let i=0
+    while [[ $i -lt $updaters ]]; do
+        update_random_blobs &
+        let i=i+1
+    done
+
+    let i=0
+    while [[ $i -lt $selecters ]]; do
+        select_records &
+        let i=i+1
+    done
+
+    while [[ ! -f $stopfile && "$(date +%s)" -lt $endtime ]]; do
+        for node in $CLUSTER; do
+            verify_up $node
+        done
+        sleep 1
+    done
+
+    touch $stopfile
+    wait
+}
+
+# Globals
+export stopfile=./stop.test
+export failfile=./failed.test
+
+run_test 
+
+if [[ -f $failfile ]]; then
+    echo "Failed test"
+    cat $failfile
+    exit 1
+fi
+
+echo "Success"
