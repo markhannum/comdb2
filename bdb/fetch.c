@@ -2266,7 +2266,7 @@ static int bdb_fetch_int(int return_dta, int direction, int lookahead,
     rc = bdb_lock_table_read(bdb_state, tran);
 
     if (rc) {
-        logmsg(LOGMSG_ERROR, "bdb_fetch_int unable to get table read lock.\n");
+        logmsg(LOGMSG_ERROR, "bdb_fetch_int unable to get table read lock, rc=%d.\n", rc);
         return -1;
     }
 

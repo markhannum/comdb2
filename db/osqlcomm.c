@@ -6048,7 +6048,7 @@ static int offload_net_send(const char *host, int usertype, void *data,
                 return OSQL_SEND_ERROR_WRONGMASTER;
             }
 
-            logmsg(LOGMSG_DEBUG,
+            logmsg(LOGMSG_INFO,
                    "%s line %d polling for %d on rc %d host is %s master is"
                    " %s\n",
                    __func__, __LINE__, backoff, rc, host, thedb->master);
@@ -6280,7 +6280,6 @@ static void net_osql_rpl(void *hndl, void *uptr, char *fromnode, int usertype,
 
 static int check_master(const char *tohost)
 {
-
     const char *destnode = (tohost == NULL) ? gbl_mynode : tohost;
     char *master = thedb->master;
 
@@ -6288,6 +6287,25 @@ static int check_master(const char *tohost)
         logmsg(LOGMSG_INFO, "%s: master swinged from %s to %s!\n", __func__,
                 destnode, master);
         return -1;
+    }
+
+    const char *whoismaster = bdb_whoismaster(thedb->bdb_env);
+    if (whoismaster && strcmp(destnode, whoismaster)) {
+        logmsg(LOGMSG_INFO, "%s: whoismaster is %s, destnode is %s!\n", __func__,
+                whoismaster, destnode);
+    }
+    char *repmaster = NULL;
+    uint32_t gen=0, egen=0;
+    int rc;
+
+    if ((rc = bdb_get_rep_master(thedb->bdb_env, &repmaster, &gen, &egen)) != 0) {
+        logmsg(LOGMSG_INFO, "%s: error getting rep-master, %d destnode is %s\n",
+        __func__, rc, destnode);
+    }
+
+    if (repmaster && strcmp(destnode, repmaster)) {
+        logmsg(LOGMSG_INFO, "%s: repmaster is %s, destnode is %s!\n", __func__,
+                repmaster, destnode);
     }
 
     return 0;

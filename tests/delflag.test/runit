@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+export ddlk=50000
+export COMDB2_DIR=$(dirname $COMDB2_EXE)
+export COMDB2_PGDUMP=$COMDB2_DIR/cdb2_pgdump
+export BADPAGES=0
+#export debug=1
+[[ $debug == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export stopfile=./stopfile.txt
+
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    touch $stopfile
+    echo "Failed: $1"
+    exit -1
+}
+
+function copy_pgdump
+{
+    typeset func="copy_pgdump"
+    if [[ -n "$CLUSTER" ]]; then
+        for n in $CLUSTER; do
+            ssh $n "cp $COMDB2_EXE $COMDB2_PGDUMP" </dev/null
+        done
+    fi
+}
+
+function check_pages
+{
+    #[[ $debug == "1" ]] && set -x
+    #set -x
+    typeset func="check_pages"
+    write_prompt $func "Running $func"
+    if [[ -n "$CLUSTER" ]]; then
+        for n in $CLUSTER; do
+            ck=$(ssh $n "ls ${DBDIR}/t1*index | while read x ; do echo \$x; $COMDB2_PGDUMP \$x | egrep \" X \" ; if [[ \$? == 0 ]]; then echo \"FOUND BAD PAGES\"; fi ; done" < /dev/null)
+            echo $ck | egrep "FOUND BAD PAGES"
+            if [[ $? == 0 ]]; then
+                #failexit $func "Found corrupt pages"
+                write_prompt $func "Found corrupt pages: keep alive"
+                BADPAGES=1
+            fi
+        done
+    else
+        ck=$(ls ${DBDIR}/t1*index | while read x ; do $COMDB2_PGDUMP $x | egrep " X " ; if [[ $? == 0 ]]; then echo "FOUND BAD PAGES" ; fi ; done)
+        echo $ck | egrep "FOUND BAD PAGES"
+        if [[ $? == 0 ]]; then
+            #failexit $func "Found corrupt pages"
+            write_prompt $func "Found corrupt pages: keep alive"
+            BADPAGES=1
+        fi
+    fi
+}
+
+function flush_cluster
+{
+    if [[ -n "$CLUSTER" ]]; then
+        for node in $CLUSTER ; do
+            $CDB2SQL_EXE --admin $CDB2_OPTIONS --tabs $DBNAME --host $node "exec procedure sys.cmd.send(\"flush\")"
+        done
+    else
+        $CDB2SQL_EXE --admin $CDB2_OPTIONS --tabs $DBNAME default "exec procedure sys.cmd.send(\"flush\")"
+    fi
+}
+
+function stop_cluster
+{
+    [[ $debug == "1" ]] && set -x
+    for node in $CLUSTER ; do
+        $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME --host $node "exec procedure sys.cmd.send(\"exit\")"
+    done
+    sleep 5
+}
+
+function create_table_t1
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="create_table_t1"
+    write_prompt $func "Running $func"
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop table t1" >/dev/null 2>&1
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int, b longlong, c int, d int, e datetimeus)"
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index ixa on t1(a)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create unique index ixb on t1(b)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index ixc on t1(c)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index ixd on t1(d)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index ixe on t1(e)"
+}
+
+function verify_up
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="verify_up"
+    write_prompt $func "Running $func"
+    typeset node=$1
+    typeset count=0
+    typeset r=1
+    while [[ "$r" -ne "0" && "$count" -lt 100 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+        r=$?
+        [[ $r != 0 ]] && sleep 1
+        let count=count+1
+    done
+    [[ $r != 0 ]] && failexit "node $node did not recover in time"
+}
+
+function downgrade
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="downgrade"
+    typeset node=$(get_master)
+    typeset count=0
+    typeset foundmaster=0
+    typeset maxcount=600
+    typeset initialmaster=0
+    write_prompt $func "Running $func $node"
+
+    x=$(get_master)
+    while [[ "$CLUSTER" != *"$x"* && "$count" -lt "$maxcount" ]]; do
+        sleep 1
+        x=$(get_master)
+        let count=count+1
+    done
+
+    [[ "$count" -ge "$maxcount" ]] && failexit "Could not find master"
+    initialmaster=$x
+
+    while [[ "$x" == "$initialmaster" && "$count" -lt $maxcount ]]; do
+        x=$(get_master)
+        while [[ "$CLUSTER" != *"$x"* && "$count" -lt "$maxcount" ]]; do
+            sleep 1
+            x=$(get_master)
+            let count=count+1
+        done
+        $CDB2SQL_EXE --tabs $CDB2_OPTIONS --host $x $DBNAME "EXEC PROCEDURE sys.cmd.send('downgrade')"
+        sleep 1
+        x=$(get_master)
+        while [[ "$CLUSTER" != *"$x"* && "$count" -lt "$maxcount" ]]; do
+            sleep 1
+            x=$(get_master)
+        done
+
+        [[ "$x" != "$node" ]] && foundmaster=1
+        let count=count+1
+    done
+
+    [[ "$count" -ge "$maxcount" ]] && failexit "Could not downgrade master"
+}
+
+function insert_records
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="insert_records"
+    write_prompt $func "Running $func"
+
+    j=0
+    while [[ $j -lt 50 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1(a,b,c,d,e) select value,random(),1,1,now() from generate_series(1,1000)"
+        let j=j+1
+    done
+}
+
+function update_records_thread
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="update_records_thread"
+    typeset sql=./update.$$.$RANDOM.sql
+    typeset o=""
+    write_prompt $func "Running $func"
+    txns=0
+    while [ "$txns" -lt 20 ]; do
+        write_prompt $func "Iteration $c begin update"
+        lines=0
+        r=1
+        while [ "$r" -ne "0" ]; do
+            echo "begin" > $sql
+            while [ "$lines" -lt 50 ]; do
+                from=$(( RANDOM % 1000 ))
+                to=$(( RANDOM % 1000 ))
+                limit=$(( 1 + ( RANDOM % 20 ) ))
+                echo "update t1 set a = $to where a = $from limit $limit" >> $sql
+                let lines=lines+1
+            done
+            echo "commit" >> $sql
+            o=$($CDB2SQL_EXE --script --file $sql $CDB2_OPTIONS $DBNAME default 2>&1)
+            r=$?
+        done
+        echo $o
+        let txns=txns+1
+        write_prompt $func "Iteration $txns"
+    done
+}
+
+function update_records
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="update_records"
+    typeset j=0
+    while [[ $j -lt 10 ]]; do
+        update_records_thread &
+        let j=j+1
+    done
+
+    wait
+}
+
+function force_curadj_thd
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="force_curadj"
+    typeset val=$(( RANDOM % 1000 ))
+    typeset sql=./update.$$.$RANDOM.sql
+
+    # Insert thousands of records with this value
+    j=0
+    while [[ $j -lt 50 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1(a,b,c,d,e) select $val,random() + value,1,1,now() from generate_series(1,1000)"
+        let j=j+1
+    done
+
+    # Update thousands of records with this value
+    j=0
+
+    while [[ $j -lt 50 ]]; do
+        lines=0
+        r=1
+        while [ $r -ne "0" ]; do
+            echo "begin" > $sql
+            echo "update t1 set a = $val where a = $val limit 100" >> $sql
+            echo "delete from t1 where a = $val and e > now() - cast('5' as int) limit 100" >> $sql
+            echo "commit" >> $sql
+            o=$($CDB2SQL_EXE --script --file $sql $CDB2_OPTIONS $DBNAME default 2>&1)
+            r=$?
+            if [[ $r != 0 ]]; then 
+                echo "Failed: $o"
+            fi
+        done
+        let j=j+1
+    done
+}
+
+function force_curadj
+{
+    [[ $debug == "1" ]] && set -x
+
+    typeset func="force_curadj"
+    typeset j=0
+    while [[ $j -lt 10 ]]; do
+        force_curadj_thd &
+        let j=j+1
+    done
+    wait
+}
+
+function update_and_delete_records
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="update_and_delete_records"
+    typeset j=0
+    while [[ $j -lt 5 ]]; do
+        update_records_thread &
+        let j=j+1
+    done
+    j=0
+    while [[ $j -lt 5 ]]; do
+        delete_records_thread &
+        let j=j+1
+    done
+    wait
+}
+
+function verify_nodes
+{
+    if [[ -z "$CLUSTER" ]]; then
+        $CDB2SQL_EXE --admin $CDB2_OPTIONS $DBNAME default "exec procedure sys.cmd.verify('t1')" &> verify.out
+        if ! grep succeeded verify.out > /dev/null ; then
+            cat verify.out
+            failexit "Verify t1"
+        fi
+    else
+        for n in $CLUSTER ; do
+            $CDB2SQL_EXE --admin $CDB2_OPTIONS $DBNAME --host $n "exec procedure sys.cmd.verify('t1')" &> verify.$n.out
+            if ! grep succeeded verify.$n.out > /dev/null ; then
+                cat verify.$n.out
+                failexit "Verify t1 node $n"
+            fi
+        done
+    fi
+}
+
+function delete_records_thread
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="delete_records_thread"
+    write_prompt $func "Running $func"
+    j=1
+    c=1
+    while [ "$j" -gt 0 -a "$c" -lt 50 ]; do
+        write_prompt $func "Iteration $c begin delete"
+        j=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "delete from t1 where e < now() - cast('5' as int) limit $(( RANDOM % 1000 ))")
+        [[ -z "$j" ]] && j=0
+        let c=c+1
+        write_prompt $func "Iteration $c deleted $j rows"
+    done
+}
+
+function delete_records
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="delete_records"
+    typeset j=0
+    while [[ $j -lt 10 ]]; do
+        delete_records_thread &
+        let j=j+1
+    done
+
+    wait
+}
+
+function disable_random_deadlocks
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="disable_random_deadlocks"
+    if [[ -z "$CLUSTER" ]]; then
+        $CDB2SQL_EXE --admin $CDB2_OPTIONS $DBNAME default "put tunable 'debug_ddlk' 0"
+        [[ $? != 0 ]] && echo "Failed to disable deadlocks"
+    else
+        for n in $CLUSTER ; do
+            $CDB2SQL_EXE --admin $CDB2_OPTIONS $DBNAME --host $n "put tunable 'debug_ddlk' 0"
+            [[ $? != 0 ]] && echo "Failed to disable deadlocks on $n"
+        done
+    fi
+}
+
+function enable_random_deadlocks
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="enable_random_deadlocks"
+    if [[ -z "$CLUSTER" ]]; then
+        $CDB2SQL_EXE --admin $CDB2_OPTIONS $DBNAME default "put tunable 'debug_ddlk' $ddlk"
+    else
+        for n in $CLUSTER ; do
+            $CDB2SQL_EXE --admin $CDB2_OPTIONS $DBNAME --host $n "put tunable 'debug_ddlk' $ddlk"
+        done
+    fi
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    #typeset maxtime=1200
+    typeset maxtime=99999999
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    rm $stopfile
+
+    write_prompt $func "Running $func"
+
+    copy_pgdump
+    create_table_t1
+
+    while [[ ! -f $stopfile && "$(date +%s)" -lt $endtime ]]; do
+        if [[ $(( RANDOM % 2 )) == 1 ]]; then
+            enable_random_deadlocks
+        fi
+        insert_records
+#        force_curadj
+        if [[ $(( RANDOM % 2 )) == 0 ]]; then
+            update_records
+            delete_records
+            update_and_delete_records
+        else
+            force_curadj
+        fi
+
+        disable_random_deadlocks
+        flush_cluster
+        check_pages
+        verify_nodes
+
+        # Don't exit immediately after bad pages: see if they stay
+        if [[ $BADPAGES == 0 && $(( RANDOM % 50 )) == 0 ]]; then
+            downgrade
+            sleep 10
+        fi
+        for node in $CLUSTER; do
+            verify_up $node
+        done
+    done
+
+    # Different thread failed the test
+    [[ -f "$stopfile" ]] && failexit "testcase failed"
+    touch "$stopfile"
+    wait
+}
+
+run_test
+echo "Success"
