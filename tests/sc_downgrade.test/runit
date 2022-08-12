@@ -35,6 +35,19 @@ function stop_cluster
     sleep 5
 }
 
+function set_little_endian
+{
+    [[ "$debug" == "1" ]] && set -x
+    typeset v=$1
+    if [[ -n "$CLUSTER" ]]; then
+        for node in $CLUSTER ; do
+            $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME --host $node "put tunable little_endian_btrees $v"
+        done
+    else
+        $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME default "put tunable little_endian_btrees $v"
+    fi
+}
+
 function create_tables
 {
     [[ $debug == "1" ]] && set -x
@@ -49,6 +62,11 @@ function create_tables
 
     i=0
     while [[ $i -lt $tablecount ]]; do
+        if [[ "0" == $(( i % 2 )) ]]; then
+            set_little_endian 0
+        else
+            set_little_endian 1
+        fi
         tablestr="create table t$i (a int, b blob, c blob, d blob"
         j=0
         while [[ $j -lt $i ]]; do
