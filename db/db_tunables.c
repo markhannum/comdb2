@@ -98,6 +98,7 @@ extern int gbl_reallyearly;
 extern int gbl_rep_mon_threshold;
 extern int gbl_repdebug;
 extern int gbl_replicant_latches;
+extern int gbl_collect_to_table;
 extern int gbl_return_long_column_names;
 extern int gbl_round_robin_stripes;
 extern int skip_clear_queue_extents;

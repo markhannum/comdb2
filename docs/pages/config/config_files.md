@@ -557,6 +557,7 @@ next word determines which option to set, and the following word determines its 
 |DISABLE_PAGEORDER_RECSZ_CHK|0 (BOOLEAN) | If set, allow page-order table scans even for larger record sizes where they don't necessarily lead to improvement.
 |RECOVERY_PAGES|0 (QUANTITY) | Disabled if set to 0.  Othersize, number of pages to write in addition to writing datapages.  This works around corner recovery cases on questionable filesystems.
 |REP_DB_PAGESIZE|0 (QUANTITY) | Page size for BerkeleyDB's replication cache db.
+|LC_DB_PAGESIZE|0 (QUANTITY) | Page size for BerkeleyDB's lsn-collection db.
 |PAGEDEADLOCK_RETRIES|500 (QUANTITY) | On a page deadlock, retry the page operation up to this many times.
 |PAGEDEADLOCK_MAXPOLL|5 (QUANTITY) | If retrying on deadlock (see `PAGEDEADLOCK_RETRIES`), poll up to this many ms on each retry.
 |ENABLE_TEMPTABLE_CLEAN_EXIT|0 (BOOLEAN) | On exit, clean up temp tables (they are deleted on next startup regardless).

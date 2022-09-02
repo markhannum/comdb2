@@ -237,6 +237,9 @@ REGISTER_TUNABLE("disable_partial_indexes", "Disables 'enable_partial_indexes'",
 REGISTER_TUNABLE("disable_prefault_udp", "Disables 'enable_prefault_udp'",
                  TUNABLE_BOOLEAN, &gbl_prefault_udp, INVERSE_VALUE | NOARG,
                  NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("collect_to_table", "Collect reptxn to table.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_collect_to_table, EXPERIMENTAL | INTERNAL,
+                 NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("disable_replicant_latches", "Disables 'replicant_latches'",
                  TUNABLE_BOOLEAN, &gbl_replicant_latches,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);

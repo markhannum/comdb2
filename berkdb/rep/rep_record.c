@@ -62,6 +62,7 @@ void bdb_rellock(void *bdb_state, const char *funcname, int line);
 int bdb_is_open(void *bdb_state);
 int rep_qstat_has_fills(void);
 
+int gbl_collect_to_table = 0;
 extern int gbl_rep_printlock;
 extern int gbl_dispatch_rowlocks_bench;
 extern int gbl_rowlocks_bench_logical_rectype;
@@ -354,6 +355,81 @@ void send_master_req(DB_ENV *dbenv, const char *func, int line)
 					"call-count=%llu, req-count=%llu\n", func, line, 
 					call_count, req_count);
 			lastpr = now;
+	}
+}
+
+static int
+__lsn_tbl_cmp(dbp, dbt1, dbt2)
+	DB *dbp;
+	const DBT *dbt1, *dbt2;
+{
+	DB_LSN *lsn1, *lsn2;
+	lsn1 = dbt1->data;
+	lsn2 = dbt2->data;
+	if (lsn1->file > lsn2->file) {
+		return (1);
+	}
+	if (lsn1->file < lsn2->file) {
+		return (-1);
+	}
+	if (lsn1->offset > lsn2->offset) {
+		return (1);
+	}
+	if (lsn1->offset < lsn2->offset) {
+		return (-1);
+	}
+	return 0;
+}
+
+void
+lc_init(DB_ENV *dbenv, LSN_COLLECTION * lc)
+{
+	if (gbl_collect_to_table) {
+		DB_REP *db_rep;
+		db_rep = dbenv->rep_handle;
+		int ret;
+		if ((ret = db_create(&lc->db, dbenv, DB_REP_CREATE)) != 0) {
+			logmsg(LOGMSG_ERROR, "Error creating lsn-collection-table: %d\n", ret);
+			lc->db = NULL;
+			return;
+		}
+		if ((ret = __bam_set_bt_compare(lc->db, __lsn_tbl_cmp)) != 0) {
+			__db_close(lc->db, NULL, DB_NOSYNC);
+			//__db_remove(lc->db, NULL, 
+			lc->db = NULL;
+			return;
+		}
+
+		F_SET(lc->db, DB_AM_CL_WRITER);
+		u_int32_t flags;
+
+		flags = DB_NO_AUTO_COMMIT |
+			DB_CREATE | (F_ISSET(dbenv, DB_ENV_THREAD) ? DB_THREAD : 0);
+
+		if (dbenv->lc_db_pagesize > 0) {
+			if ((ret = lc->db->set_pagesize(lc->db, dbenv->lc_db_pagesize))) {
+				__db_close(lc->db, NULL, DB_NOSYNC);
+				lc->db = NULL;
+				return;
+			}
+		}
+
+		/* lc-db name format is __db.lc.db.<NUMBER>\0 
+		 *						LCDBBASE  1   10    1
+		 */
+		if ((ret =
+			__os_malloc(dbenv, strlen(LCDBBASE) + 12,
+				&lc->lcdbname)) != 0) {
+			abort();
+		}
+
+		sprintf(lc->lcdbname, "%s.%d", LCDBBASE, db_rep->lcdbcnt++);
+
+        if ((ret = __db_open(lc->db, NULL, lc->lcdbname, NULL, DB_BTREE,
+                             flags, 0, PGNO_BASE_MD)) != 0) {
+			abort();
+        }
+        F_CLR(lc->db, DB_AM_RECOVER);
 	}
 }
 
@@ -4816,9 +4892,15 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 			goto err;
 		}
 		lcin = &lc;
-		/* here's the bug!!!! ! */
-		qsort(lc.array, lc.nlsns, sizeof(struct logrecord),
-			__rep_lsn_cmp);
+		/* 
+		 *  here's the bug!!!! ! 
+		 *  child-transactions are collected recursively, which means that they 
+		 *  may be out-of-order.
+		 */
+		if (!lc.db) {
+			qsort(lc.array, lc.nlsns, sizeof(struct logrecord),
+					__rep_lsn_cmp);
+		}			
 	}
 
 
@@ -5542,8 +5624,10 @@ bad_resize:	;
 #endif
 	}
 
-	qsort(rp->lc.array, rp->lc.nlsns, sizeof(struct logrecord),
-		__rep_lsn_cmp);
+	if (!rp->lc.db) {
+		qsort(rp->lc.array, rp->lc.nlsns, sizeof(struct logrecord),
+				__rep_lsn_cmp);
+	}
 
 #ifndef NDEBUG
 	if (txn_rl_args) {
@@ -5846,23 +5930,35 @@ __rep_collect_txn_from_log(dbenv, lsnp, lc, had_serializable_records, rp)
 		} else {
 
 			__rep_classify_type(rectype, had_serializable_records);
-			if (lc->nalloc < lc->nlsns + 1) {
-				int i;
-				nalloc = lc->nalloc == 0 ? 20 : lc->nalloc * 2;
-				if ((ret = __os_realloc(dbenv,
-						nalloc * sizeof(struct logrecord),
-						&lc->array)) != 0)
-					goto err;
-				for (i = lc->nalloc; i < nalloc; i++) {
-					bzero(&lc->array[i].rec, sizeof(DBT));
+			if (lc->db) {
+				DBT key_dbt = {0}, data_dbt = {0};
+				key_dbt.data = lsnp;
+				key_dbt.size = sizeof(*lsnp);
+				data_dbt.data = data.data;
+				data_dbt.size = data.size;
+				ret = __db_put(lc->db, NULL, &key_dbt, &data_dbt, 0);
+				if (ret != 0) {
+					abort();
 				}
-				lc->nalloc = nalloc;
+			} else {
+				if (lc->nalloc < lc->nlsns + 1) {
+					int i;
+					nalloc = lc->nalloc == 0 ? 20 : lc->nalloc * 2;
+					if ((ret = __os_realloc(dbenv,
+									nalloc * sizeof(struct logrecord),
+									&lc->array)) != 0)
+						goto err;
+					for (i = lc->nalloc; i < nalloc; i++) {
+						bzero(&lc->array[i].rec, sizeof(DBT));
+					}
+					lc->nalloc = nalloc;
+				}
+				lc->array[lc->nlsns].lsn = *lsnp;
 			}
-			lc->array[lc->nlsns].lsn = *lsnp;
 
 			/* note: if we don't have a recovery processor, we shouldn't be collecting log
 			 * record payloads here at all - just skip it */
-			if (rp) {
+			if (rp && !lc->db) {
 				if (switched_to_realloc ||
 					((lc->memused + data.size) >
 					dbenv->recovery_memsize)) {
@@ -5961,6 +6057,7 @@ __rep_collect_txn_txnid(dbenv, lsnp, lc, had_serializable_records, rp, txnid)
 	DB_REP *db_rep;
 	REP *rep;
 
+
 	db_rep = dbenv->rep_handle;
 	rep = db_rep->region;
 
@@ -5984,9 +6081,12 @@ __rep_collect_txn_txnid(dbenv, lsnp, lc, had_serializable_records, rp, txnid)
 				DBT check_dbt = { 0 };
 				DB_LOGC *check_logc = NULL;
 				LSN_COLLECTION checklc = { 0 };
+                lc_init(dbenv, &checklc);
 
-				qsort(lc->array, lc->nlsns,
-					sizeof(struct logrecord), __rep_lsn_cmp);
+				if (!lc->db) {
+					qsort(lc->array, lc->nlsns,
+							sizeof(struct logrecord), __rep_lsn_cmp);
+				}
 
 				check_dbt.flags = DB_DBT_MALLOC;
 
@@ -7250,59 +7350,115 @@ __rep_bt_cmp(dbp, dbt1, dbt2)
 	return (0);
 }
 
-typedef struct del_repdb_args {
+typedef struct del_lcldb_args {
 	DB_ENV *dbenv;
-	DB *oldrepdb;
-	char *oldrepdbname;
-} del_repdb_args_t;
+	DB *lcldb;
+	char *lcldbname;
+    LINKC_T(struct del_lcldb_args) lnk;
+} del_lcldb_args_t;
 
-static void *
-del_thd(void *arg)
+static pthread_mutex_t lcldb_del_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t lcldb_del_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t del_thd;
+static int del_lcldb_thd_created = 0;
+
+LISTC_T(struct del_lcldb_args) del_lcldb_list;
+
+static void del_lcldb_item(del_lcldb_args_t *deldb)
 {
-	del_repdb_args_t *delr = (del_repdb_args_t *)arg;
 	DB_ENV *dbenv;
 	DB *dbp;
-	char *repdbname;
+	char *lcldbname;
 	int ret;
 
-	dbenv = delr->dbenv;
+	dbenv = deldb->dbenv;
 
 	if ((ret = __os_malloc(dbenv, strlen(dbenv->comdb2_dirs.txn_dir) +
-			strlen(delr->oldrepdbname) + 16, &repdbname)) != 0)
+			strlen(deldb->lcldbname) + 16, &lcldbname)) != 0)
 		abort();
 
-	sprintf(repdbname, "%s/%s", dbenv->comdb2_dirs.txn_dir,
-		delr->oldrepdbname);
+	sprintf(lcldbname, "%s/%s", dbenv->comdb2_dirs.txn_dir,
+		deldb->lcldbname);
 
-	F_CLR(delr->oldrepdb, DB_AM_RECOVER);
+	F_CLR(deldb->lcldb, DB_AM_RECOVER);
 
 	/* First close it */
-	if ((ret = __db_close(delr->oldrepdb, NULL, DB_NOSYNC)) != 0) {
+	if ((ret = __db_close(deldb->lcldb, NULL, DB_NOSYNC)) != 0) {
 		logmsg(LOGMSG_ERROR, "Error on db_close of %s, ret=%d\n",
-			delr->oldrepdbname, ret);
+			deldb->lcldbname, ret);
 		goto err;
 	}
 
 	if ((ret = db_create(&dbp, dbenv, DB_REP_CREATE)) != 0) {
 		logmsg(LOGMSG_ERROR, "Error closing %s, ret=%d\n",
-			delr->oldrepdbname, ret);
+			deldb->lcldbname, ret);
 		goto err;
 	}
 
 	if ((ret =
-		__db_remove(dbp, NULL, delr->oldrepdbname, NULL,
+		__db_remove(dbp, NULL, deldb->lcldbname, NULL,
 			DB_NOSYNC)) != 0) {
 		logmsg(LOGMSG_ERROR, "Couldn't db_remove %s ret=%d\n",
-			delr->oldrepdbname, ret);
+			deldb->lcldbname, ret);
 		goto err;
 	}
 
 err:
-	__os_free(dbenv, repdbname);
-	__os_free(dbenv, delr->oldrepdbname);
-	__os_free(dbenv, delr);
+	__os_free(dbenv, lcldbname);
+	__os_free(dbenv, deldb->lcldbname);
+	__os_free(dbenv, deldb);
+}
 
-	return NULL;
+static void *
+lcldb_del_thd(void *arg)
+{
+    Pthread_mutex_lock(&lcldb_del_lock);
+    while (1) {
+        del_lcldb_args_t *deldb = listc_rbl(&del_lcldb_list);
+        if (deldb) {
+            Pthread_mutex_unlock(&lcldb_del_lock);
+            del_lcldb_item(deldb);
+            Pthread_mutex_lock(&lcldb_del_lock);
+        } else {
+	        struct timespec ts;
+		    clock_gettime(CLOCK_REALTIME, &ts);
+		    ts.tv_sec++;
+		    pthread_cond_timedwait(&lcldb_del_cond, &lcldb_del_lock, &ts);
+        }
+    }
+    Pthread_mutex_unlock(&lcldb_del_lock);
+    return NULL;
+}
+
+void del_lcldb(DB_ENV *dbenv, char *dbname, DB *db)
+{
+    del_lcldb_args_t *deldb;
+    int ret;
+    if ((ret = __os_malloc(dbenv, sizeof(*deldb), &deldb)) != 0) {
+        abort();
+    }
+    deldb->dbenv = dbenv;
+    deldb->lcldb = db;
+    deldb->lcldbname = dbname;
+
+    Pthread_mutex_lock(&lcldb_del_lock);
+    if (!del_lcldb_thd_created) {
+        listc_init(&del_lcldb_list, offsetof(del_lcldb_args_t, lnk));
+		pthread_attr_t attr;
+		Pthread_attr_init(&attr);
+		Pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+		Pthread_attr_setstacksize(&attr, 1024 * 1024);
+        int rc = pthread_create(&del_thd, &attr, lcldb_del_thd, NULL);
+        if (rc != 0) {
+			logmsg(LOGMSG_FATAL, "couldnt create del-lcldb thread\n");
+            exit(1);
+        }
+		Pthread_attr_destroy(&attr);
+        del_lcldb_thd_created = 1;
+    }
+    listc_abl(&del_lcldb_list, deldb);
+    Pthread_cond_signal(&lcldb_del_cond);
+    Pthread_mutex_unlock(&lcldb_del_lock);
 }
 
 static int
@@ -7339,12 +7495,11 @@ __truncate_repdb(dbenv)
 	if (!gbl_optimize_truncate_repdb) {
 		ret = __db_truncate(db_rep->rep_db, NULL, &unused, 0);
 	} else {
-#define	REPDBBASE	"__db.rep.db"
 		DB *dbp = NULL;
 		int ret;
 		u_int32_t flags;
 		char *repdbname;
-		del_repdb_args_t *delr;
+		del_lcldb_args_t *deldb;
 		int rc;
 		pthread_t tid;
 		pthread_attr_t attr;
@@ -7399,28 +7554,10 @@ __truncate_repdb(dbenv)
 		/* Install new repdb */
 		F_SET(dbp, DB_AM_RECOVER);
 
-		if ((ret = __os_malloc(dbenv, sizeof(*delr), &delr)) != 0) {
-			abort();
-			goto err;
-		}
-
-		delr->dbenv = dbenv;
-		delr->oldrepdb = db_rep->rep_db;
-		delr->oldrepdbname = db_rep->repdbname;
+        del_lcldb(dbenv, db_rep->repdbname, db_rep->rep_db);
 
 		db_rep->repdbname = repdbname;
 		db_rep->rep_db = dbp;
-
-		Pthread_attr_init(&attr);
-		Pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-		Pthread_attr_setstacksize(&attr, 1024 * 1024);
-
-		rc = pthread_create(&tid, &attr, del_thd, delr);
-		if (rc != 0) {
-			logmsg(LOGMSG_FATAL, "couldnt create del_thd\n");
-			exit(1);
-		}
-		Pthread_attr_destroy(&attr);
 
 		MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 	}

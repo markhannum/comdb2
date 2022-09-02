@@ -826,6 +826,8 @@ err:
 int __rep_check_applied_lsns(DB_ENV * dbenv, LSN_COLLECTION * lc,
 	int inrecovery);
 
+void lc_init(DB_ENV *dbenv, LSN_COLLECTION * lc);
+
 static int
 full_recovery_check(DB_ENV *dbenv, DB_LSN *max_lsn)
 {
@@ -835,6 +837,8 @@ full_recovery_check(DB_ENV *dbenv, DB_LSN *max_lsn)
 	DB_LSN lsn, cpy;
 	u_int32_t type;
 	LSN_COLLECTION lc = { 0 };
+    lc_init(dbenv, &lc);
+
 	int ignore;
 	int maxnlsns = 0;
 	DB_LSN first, last;

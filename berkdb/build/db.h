@@ -2061,6 +2061,8 @@ struct __lsn_collection {
 	int memused;
 	int had_serializable_records;
 	int filled_from_cache;
+	DB *db;
+	char *lcdbname;
 };
 
 struct __lc_cache_entry {
@@ -2167,6 +2169,8 @@ struct __db_env {
 	int		 mp_recovery_pages;
 	/* Page size for the replication database. */
 	int		 rep_db_pagesize;
+	/* Page size for the lc-collect database. */
+	int		 lc_db_pagesize;
 
 	/* Replication */
 	char*		rep_eid;	/* environment id. */
@@ -2409,6 +2413,8 @@ struct __db_env {
 		char*, int, void *)));
 	int  (*set_rep_db_pagesize) __P((DB_ENV *, int));
 	int  (*get_rep_db_pagesize) __P((DB_ENV *, int *));
+    int  (*set_lc_db_pagesize) __P((DB_ENV *, int));
+    int  (*get_lc_db_pagesize) __P((DB_ENV *, int *));
 	void *tx_handle;		/* Txn handle and methods. */
 	int  (*get_tx_max) __P((DB_ENV *, u_int32_t *));
 	int  (*set_tx_max) __P((DB_ENV *, u_int32_t));

@@ -352,6 +352,8 @@ DEF_ATTR(RECOVERY_PAGES, recovery_pages, QUANTITY, 0,
          "cases on questionable filesystems.")
 DEF_ATTR(REP_DB_PAGESIZE, rep_db_pagesize, QUANTITY, 0,
          "Page size for BerkeleyDB's replication cache db.")
+DEF_ATTR(LC_DB_PAGESIZE, lc_db_pagesize, QUANTITY, 0,
+         "Page size for BerkeleyDB's lsn-collection db.")
 DEF_ATTR_2(
     PAGEDEADLOCK_RETRIES, pagedeadlock_retries, QUANTITY, 500,
     "On a page deadlock, retry the page operation up to this many times.",

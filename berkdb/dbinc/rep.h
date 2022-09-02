@@ -36,6 +36,8 @@ typedef struct __rep {
 	u_int32_t	gbytes;		/* Limit on data sent in single... */
 	u_int32_t	bytes;		/* __rep_process_message call. */
 
+#define	REPDBBASE	"__db.rep.db"
+#define LCDBBASE	"__db.lc.db"
 
 #define	DB_REP_REQUEST_GAP	4
 #define	DB_REP_MAX_GAP		128
@@ -147,6 +149,7 @@ struct __db_rep {
 	DB_MUTEX	*db_mutexp;	/* Mutex for bookkeeping database. */
 	char		*repdbname;
 	int		repdbcnt;
+	int		lcdbcnt;
 	DB		*rep_db;	/* Bookkeeping database. */
 
 	REP		*region;	/* In memory structure. */

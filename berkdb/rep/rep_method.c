@@ -60,6 +60,8 @@ static int __rep_set_rep_truncate_callback __P((DB_ENV *, int (*)(DB_ENV *, DB_L
 static int __rep_set_rep_recovery_cleanup __P((DB_ENV *, int (*)(DB_ENV *, DB_LSN *, int is_master)));
 static int __rep_lock_recovery_lock __P((DB_ENV *));
 static int __rep_unlock_recovery_lock __P((DB_ENV *));
+static int __rep_set_lc_db_pagesize __P((DB_ENV *, int));
+static int __rep_get_lc_db_pagesize __P((DB_ENV *, int *));
 static int __rep_set_rep_db_pagesize __P((DB_ENV *, int));
 static int __rep_get_rep_db_pagesize __P((DB_ENV *, int *));
 static int __rep_start __P((DB_ENV *, DBT *, u_int32_t, u_int32_t));
@@ -132,6 +134,8 @@ __rep_dbenv_create(dbenv)
 		dbenv->set_check_standalone = __rep_set_check_standalone;
 		dbenv->set_rep_db_pagesize = __rep_set_rep_db_pagesize;
 		dbenv->get_rep_db_pagesize = __rep_get_rep_db_pagesize;
+		dbenv->set_lc_db_pagesize = __rep_set_lc_db_pagesize;
+		dbenv->get_lc_db_pagesize = __rep_get_lc_db_pagesize;
 		dbenv->rep_truncate_repdb = __rep_truncate_repdb;
 	}
 
@@ -525,8 +529,6 @@ __rep_client_dbinit(dbenv, startup)
 	db_rep = dbenv->rep_handle;
 	dbp = NULL;
 
-#define	REPDBBASE	"__db.rep.db"
-
 	MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 
 	/* Check if this has already been called on this environment. */
@@ -537,11 +539,11 @@ __rep_client_dbinit(dbenv, startup)
 
 	if (startup) {
 		/* Go through the txn directory & remove any files with 
-		 * the __db.rep.db signature */
+		 * the __db.rep.db or __db.signature */
 
 		if ((ret =
 			__os_malloc(dbenv,
-			    strlen(dbenv->comdb2_dirs.txn_dir) + 4, &dir)) != 0)
+				strlen(dbenv->comdb2_dirs.txn_dir) + 4, &dir)) != 0)
 			goto err;
 
 		sprintf(dir, "%s/", dbenv->comdb2_dirs.txn_dir);
@@ -558,15 +560,14 @@ __rep_client_dbinit(dbenv, startup)
 			else
 				p = &namesp[i][0];
 
-			if (strncmp(p, REPDBBASE, strlen(REPDBBASE)) == 0) {
-
+			if ((strncmp(p, REPDBBASE, strlen(REPDBBASE)) == 0) ||
+				(strncmp(p, LCDBBASE, strlen(LCDBBASE)) == 0)) {
 				if ((ret =
 					db_create(&dbp, dbenv,
-					    DB_REP_CREATE)) != 0)
+						DB_REP_CREATE)) != 0)
 					goto err;
 
 				(void)__db_remove(dbp, NULL, p, NULL, DB_FORCE);
-
 			}
 		}
 		__os_dirfree(dbenv, namesp, dircnt);
@@ -870,6 +871,35 @@ __rep_set_rep_db_pagesize(dbenv, pagesize)
 	}
 
 	dbenv->rep_db_pagesize = pagesize;
+	return 0;
+}
+
+static int
+__rep_get_lc_db_pagesize(dbenv, pagesize)
+	DB_ENV *dbenv;
+	int *pagesize;
+{
+	PANIC_CHECK(dbenv);
+	*pagesize = dbenv->lc_db_pagesize;
+	return 0;
+}
+
+static int
+__rep_set_lc_db_pagesize(dbenv, pagesize)
+	DB_ENV *dbenv;
+	int pagesize;
+{
+	PANIC_CHECK(dbenv);
+	ENV_ILLEGAL_AFTER_OPEN(dbenv, "DB_ENV->set_lc_db_pagesize");
+
+	if (pagesize < 4096) {
+		__db_err(dbenv,
+			"DB_ENV->set_lc_db_pagesize: "
+			"pagesize must be >= 4096.");
+		return EINVAL;
+	}
+
+	dbenv->lc_db_pagesize = pagesize;
 	return 0;
 }
 

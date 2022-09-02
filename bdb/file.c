@@ -2375,6 +2375,16 @@ static DB_ENV *dbenv_open(bdb_state_type *bdb_state)
         }
     }
 
+    if (bdb_state->attr->lc_db_pagesize > 0) {
+        rc =
+            dbenv->set_lc_db_pagesize(dbenv, bdb_state->attr->lc_db_pagesize);
+        if (rc != 0) {
+            logmsg(LOGMSG_FATAL, "set_lc_db_pagesize to %d failed\n",
+                    bdb_state->attr->lc_db_pagesize);
+            exit(1);
+        }
+    }
+
     if (bdb_state->attr->recovery_pages > 0) {
         rc = dbenv->set_mp_recovery_pages(dbenv,
                                           bdb_state->attr->recovery_pages);

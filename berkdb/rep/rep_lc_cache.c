@@ -85,16 +85,24 @@ __lc_cache_destroy(DB_ENV *dbenv)
 	return 0;
 }
 
+void del_lcldb(DB_ENV *dbenv, char *dbname, DB *db);
+
 static void
 free_lsn_collection(DB_ENV *dbenv, LSN_COLLECTION * lc)
 {
-	for (int i = 0; i < lc->nlsns; i++) {
-		if (lc->array[i].rec.data) {
-			__os_free(dbenv, lc->array[i].rec.data);
-			lc->array[i].rec.data = NULL;
+    if (lc->db) {
+        del_lcldb(dbenv, lc->lcdbname, lc->db);
+        lc->db = NULL;
+        lc->lcdbname = NULL;
+    } else {
+		for (int i = 0; i < lc->nlsns; i++) {
+			if (lc->array[i].rec.data) {
+				__os_free(dbenv, lc->array[i].rec.data);
+				lc->array[i].rec.data = NULL;
+			}
 		}
+		__os_free(dbenv, lc->array);
 	}
-	__os_free(dbenv, lc->array);
 	lc->array = 0;
 	lc->nalloc = 0;
 	lc->nlsns = 0;
@@ -587,6 +595,7 @@ __lc_cache_get(DB_ENV *dbenv, DB_LSN *lsnp, LSN_COLLECTION * lcout,
 			e->lc.nlsns = 0;
 			e->lc.nalloc = 0;
 			e->lc.array = NULL;
+            e->lc.db = NULL;
 
 			e->lc.had_serializable_records = 0;
 			e->txnid = 0;
@@ -597,7 +606,6 @@ __lc_cache_get(DB_ENV *dbenv, DB_LSN *lsnp, LSN_COLLECTION * lcout,
 			ZERO_LSN(e->last_seen_lsn);
 			listc_rfl(&dbenv->lc_cache.lru, e);
 			listc_abl(&dbenv->lc_cache.avail, e);
-
 
 			ZERO_LSN(*lsnp);
 
