@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+export debug=1
+[[ "$debug" == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export stopfile=./stopfile.txt
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    touch $stopfile
+    echo "Failed: $1"
+    exit -1
+}
+
+function create_tables_and_triggers
+{
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<EOF
+create table foraudit {$(cat foraudit.csc2)}\$\$
+create table audit {$(cat audit.csc2)}\$\$
+create procedure cons0 version 'sptest' {$(cat cons.lua)}\$\$
+create lua consumer cons0 on (table foraudit for insert and update and delete)
+EOF
+}
+
+function run_consumer
+{
+    typeset func="run_consumer"
+    write_prompt $func "Running $func"
+
+    while [[ ! -f $stopfile ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "exec procedure cons0(true)"
+    done
+}
+
+function verify_up
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="verify_up"
+    write_prompt $func "Running $func"
+    typeset node=$1
+    typeset count=0
+    typeset r=1
+    while [[ "$r" -ne "0" && "$count" -lt 2000 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+        r=$?
+        [[ $r != 0 ]] && sleep 1
+        let count=count+1
+    done
+    [[ $r != 0 ]] && failexit "$func node $node did not recover in time"
+}
+
+function select_from_node
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="select_from_node"
+    write_prompt $func "Running $func"
+    typeset node=$1
+
+    x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select * from audit limit 1" 2>&1)
+    [[ $x == *"unknown error"* ]] && failexit "$func $x"
+}
+
+function stop_cluster
+{
+    [[ $debug == "1" ]] && set -x
+    for node in $CLUSTER ; do
+        $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME --host $node "exec procedure sys.cmd.send(\"exit\")"
+    done
+    sleep 5
+}
+
+function downgrade
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="downgrade"
+    typeset node=$(get_master)
+    typeset count=0
+    typeset foundmaster=0
+    typeset maxcount=600
+    typeset initialmaster=0
+    write_prompt $func "Running $func $node"
+
+    x=$(get_master)
+    while [[ "$CLUSTER" != *"$x"* && "$count" -lt "$maxcount" ]]; do
+        sleep 1
+        x=$(get_master)
+        let count=count+1
+    done
+
+    [[ "$count" -ge "$maxcount" ]] && failexit "Could not find master"
+    initialmaster=$x
+
+    while [[ "$x" == "$initialmaster" && "$count" -lt $maxcount ]]; do
+        x=$(get_master)
+        while [[ "$CLUSTER" != *"$x"* && "$count" -lt "$maxcount" ]]; do
+            sleep 1
+            x=$(get_master)
+            let count=count+1
+        done
+        $CDB2SQL_EXE --tabs $CDB2_OPTIONS --host $x $DBNAME "EXEC PROCEDURE sys.cmd.send('downgrade')"
+        sleep 1
+        x=$(get_master)
+        while [[ "$CLUSTER" != *"$x"* && "$count" -lt "$maxcount" ]]; do
+            sleep 1
+            x=$(get_master)
+        done
+
+        [[ "$x" != "$node" ]] && foundmaster=1
+        let count=count+1
+    done
+
+    [[ "$count" -ge "$maxcount" ]] && failexit "Could not downgrade master"
+}
+
+function downgrade_loop
+{
+    [[ $debug == "1" ]] && set -x
+    while [[ ! -f $stopfile ]]; do
+        node=$(get_master)
+        while [[ "$CLUSTER" != *"$node"* ]]; do
+            sleep 1
+            node=$(get_master)
+        done
+        #pushnext
+        downgrade
+        bounce_node $node
+        verify_up $node
+        select_from_node $node
+    done
+}
+
+function bounce_non_master
+{
+    typeset j=0
+    typeset node=$(get_master)
+    [[ $debug == "1" ]] && set -x
+    
+    for x in ${CLUSTER}; do
+        CLUSTERARRAY[$j]=$x
+        let j=j+1
+    done
+
+    g=$(( RANDOM % ${#CLUSTERARRAY[@]} ))
+    while [[ "$node" == "${CLUSTERARRAY[$g]}" ]]; do
+        g=$(( RANDOM % ${#CLUSTERARRAY[@]} ))
+    done
+    bounce_node ${CLUSTERARRAY[$g]}
+    verify_up ${CLUSTERARRAY[$g]}
+    select_from_node ${CLUSTERARRAY[$g]}
+}
+
+function bounce_loop
+{
+    typeset j=0
+    typeset node=$(get_master)
+    [[ $debug == "1" ]] && set -x
+    
+    while [[ ! -f $stopfile ]]; do
+        bounce_non_master
+    done
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    typeset maxtime=400
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    write_prompt $func "Running $func"
+    rm $stopfile
+
+    create_tables_and_triggers
+    sleep 2
+    run_consumer &
+    sleep 2
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME "insert into foraudit(i) select * from generate_series(1,1000)"
+
+    #downgrade_loop &
+    #bounce_loop &
+
+    sleep 3
+
+    while [[ ! -f $stopfile && "$(date +%s)" -lt $endtime ]]; do
+        for node in $CLUSTER; do
+            verify_up $node
+        done
+
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME "insert into foraudit(i) select * from generate_series(1,1000)"
+
+        j=0
+        while [[ $j -lt 10 ]]; do
+            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME "exec procedure sys.cmd.send('pushnext')"
+            let j=j+1
+            sleep 3
+        done
+
+        if [[ "$(( RANDOM % 2 ))" == 0 ]]; then
+            bounce_non_master
+        else
+            downgrade
+        fi
+    done
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME "drop lua consumer cons0"
+
+    [[ -f "$stopfile" ]] && failexit "$func testcase failed"
+    touch "$stopfile"
+    wait
+}
+
+[[ -z "$CLUSTER" ]] && failexit "This test requires a cluster"
+run_test
+stop_cluster
+echo "Success"
