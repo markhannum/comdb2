@@ -13,3 +13,5 @@ blobstripe
 berkattr elect_highest_committed_gen 0
 ufid_log on
 abort_on_missing_ufid on
+ufid_remove_dbp on
+ufid_add_on_collect on
