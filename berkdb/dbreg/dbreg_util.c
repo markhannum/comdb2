@@ -386,6 +386,9 @@ __ufid_dump(dbenv)
 	Pthread_mutex_unlock(&dbenv->ufid_to_db_lk);
 }
 
+// Provide tunable to reproduce failures in new testcases
+int gbl_reproduce_ufid_race = 1;
+
 // PUBLIC: int __ufid_add_dbp __P(( DB_ENV *, DB *));
 int
 __ufid_add_dbp(dbenv, dbp)
@@ -397,6 +400,20 @@ __ufid_add_dbp(dbenv, dbp)
 
 	Pthread_mutex_lock(&dbenv->ufid_to_db_lk);
 	if ((ufid = hash_find(dbenv->ufid_to_db_hash, dbp->fileid))) {
+        // TODO XXX one of these required?
+/*
+		if (gbl_reproduce_ufid_race) {
+		    if (ufid->dbp != NULL && ufid->dbp != dbp) {
+			    ufid->dbp->added_to_ufid = 0;
+            }
+        }
+		if (gbl_reproduce_ufid_race) {
+			if (ufid->dbp != NULL) {
+				DB_ASSERT(ufid->dbp == dbp);
+			}
+		}
+*/
+
 #if 0
 		if (ufid->dbp != NULL && ufid->dbp != dbp) {
 			/* There may be 2 dbp's for the same ufid, if a replicant upgrades to a
@@ -1169,8 +1186,9 @@ __dbreg_lazy_id(dbp)
 	dblp = dbenv->lg_handle;
 	lp = dblp->reginfo.primary;
 	fnp = dbp->log_filename;
+    int lazylock = !gbl_reproduce_ufid_race;
 
-	MUTEX_LOCK(dbenv, &lp->lazy_id_mutex);
+    if (lazylock) MUTEX_LOCK(dbenv, &lp->lazy_id_mutex);
 	/* The fq_mutex protects the FNAME list and id management. */
 	MUTEX_LOCK(dbenv, &lp->fq_mutex);
 	if (fnp->id != DB_LOGFILEID_INVALID) {
@@ -1204,7 +1222,7 @@ err:
 	if (ret != 0 && id != DB_LOGFILEID_INVALID)
 		(void)__dbreg_revoke_id(dbp, 1, id);
 	MUTEX_UNLOCK(dbenv, &lp->fq_mutex);
-	MUTEX_UNLOCK(dbenv, &lp->lazy_id_mutex);
+	if (lazylock) MUTEX_UNLOCK(dbenv, &lp->lazy_id_mutex);
 	return (ret);
 }
 
