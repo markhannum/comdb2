@@ -55,6 +55,7 @@
 	if (argp->type > 1000) { \
 		if ((ret = __ufid_to_db(dbenv, argp->txnid, &file_dbp, \
 						argp->ufid_fileid, lsnp)) != 0) { \
+            if (ret != 0) fprintf(stderr, "ufid_to_db returns %d\n", ret);  \
 			if (ret	== DB_DELETED) { \
 				ret = 0; \
 				goto done; \
@@ -67,6 +68,7 @@
 	} else { \
 		if ((ret = __dbreg_id_to_db(dbenv, argp->txnid,			\
 			&file_dbp, argp->fileid, inc_count, lsnp, 0)) != 0) { 		\
+            if (ret != 0) fprintf(stderr, "dbreg_id_to_db returns %d\n", ret);  \
 			if (ret	== DB_DELETED) {\
 				ret = 0;\
 				goto done;\
@@ -103,10 +105,12 @@ int __log_flush(DB_ENV *dbenv, const DB_LSN *);
 	if (argp->type > 1000) {					\
 		ret = __ufid_to_db(dbenv, argp->txnid, &file_dbp,	\
 			argp->ufid_fileid, lsnp);			\
+        if (ret != 0) fprintf(stderr, "ufid_to_db returns %d\n", ret);  \
 	}								\
 	else {								\
 		ret = __dbreg_id_to_db(dbenv, argp->txnid,		\
 			&file_dbp, argp->fileid, inc_count, lsnp, 0);	\
+        if (ret != 0) fprintf(stderr, "dbreg_id_to_db returns %d\n", ret);  \
 	} 								\
 	if (ret) { 							\
 		if (ret	== DB_DELETED && IS_RECOVERING(dbenv)) {	\

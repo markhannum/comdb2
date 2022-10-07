@@ -387,7 +387,7 @@ __ufid_dump(dbenv)
 }
 
 // Provide tunable to reproduce failures in new testcases
-int gbl_reproduce_ufid_race = 1;
+int gbl_reproduce_ufid_race = 0;
 
 // PUBLIC: int __ufid_add_dbp __P(( DB_ENV *, DB *));
 int
@@ -400,13 +400,16 @@ __ufid_add_dbp(dbenv, dbp)
 
 	Pthread_mutex_lock(&dbenv->ufid_to_db_lk);
 	if ((ufid = hash_find(dbenv->ufid_to_db_hash, dbp->fileid))) {
-        // TODO XXX one of these required?
+		if (ufid->dbp != NULL) {
+			DB_ASSERT(ufid->dbp == dbp);
+		}
+		// TODO XXX one of these required?
 /*
 		if (gbl_reproduce_ufid_race) {
-		    if (ufid->dbp != NULL && ufid->dbp != dbp) {
-			    ufid->dbp->added_to_ufid = 0;
-            }
-        }
+			if (ufid->dbp != NULL && ufid->dbp != dbp) {
+				ufid->dbp->added_to_ufid = 0;
+			}
+		}
 		if (gbl_reproduce_ufid_race) {
 			if (ufid->dbp != NULL) {
 				DB_ASSERT(ufid->dbp == dbp);
