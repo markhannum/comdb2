@@ -387,7 +387,7 @@ __ufid_dump(dbenv)
 }
 
 // Provide tunable to reproduce failures in new testcases
-int gbl_reproduce_ufid_race = 0;
+int gbl_reproduce_ufid_race = 1;
 
 // PUBLIC: int __ufid_add_dbp __P(( DB_ENV *, DB *));
 int
@@ -1191,7 +1191,7 @@ __dbreg_lazy_id(dbp)
 	fnp = dbp->log_filename;
     int lazylock = !gbl_reproduce_ufid_race;
 
-    if (lazylock) MUTEX_LOCK(dbenv, &lp->lazy_id_mutex);
+    if (lazylock) __dbreg_lock_lazy_id(dbenv);
 	/* The fq_mutex protects the FNAME list and id management. */
 	MUTEX_LOCK(dbenv, &lp->fq_mutex);
 	if (fnp->id != DB_LOGFILEID_INVALID) {
