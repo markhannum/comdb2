@@ -64,6 +64,7 @@ dumplock_all_nodes() {
 }
 
 core_all_nodes() {
+    echo "coring all nodes"
     local node
     local pidfl=${TMPDIR}/${DBNAME}.pid
     if [[ -z "$CLUSTER" ]] || [[ `echo $CLUSTER | grep $HOSTNAME ` ]]; then
@@ -78,7 +79,12 @@ core_all_nodes() {
             continue
         fi
         pidfl=${TMPDIR}/${DBNAME}.pid
-        ssh -o StrictHostKeyChecking=no $node "cat ${pidfl} | xargs kill -6 " </dev/null
+        echo "pidfl is $pidfl"
+        ssh -n -o StrictHostKeyChecking=no $node "cat ${pidfl} | xargs kill -6 " </dev/null
+        pidfl=${TMPDIR}/${DBNAME}.${node}.pid
+        echo "pidfl is $pidfl"
+        ssh -n -o StrictHostKeyChecking=no $node "cat ${pidfl} | xargs kill -6 " </dev/null
+        #ssh -n -o StrictHostKeyChecking=no $node "kill -6 \$(ps -ef | egrep comdb2 | egrep -v bash | egrep lrl | awk '{print \$2}')" </dev/null
     done
 }
 
@@ -155,9 +161,13 @@ unsetup_db() {
 
 
     if [[ "$CORE_ON_TIMEOUT" -eq "1" && "$successful" -eq "-1" ]]; then
+        echo "coring all nodes on timeout"
         core_all_nodes
     elif [[ "$CORE_ON_FAILURE" -eq "1" && "$successful" -ne "1" ]]; then
+        echo "coring all nodes on failure"
         core_all_nodes
+    else
+        echo "not coring nodes"
     fi
 
 
