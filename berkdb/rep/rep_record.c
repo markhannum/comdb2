@@ -2919,6 +2919,10 @@ static inline void repdb_dequeue(DBT *control_dbt, DBT *rec_dbt)
 }
 
 __thread int disable_random_deadlocks = 0;
+int gbl_debug_rep_long_req = 0;
+int gbl_rep_long_req_mod = 4;
+int gbl_rep_long_req_min = 7;
+int gbl_rep_long_req_max = 60;
 
 /*
  * __rep_apply --
@@ -3638,6 +3642,14 @@ gap_check:		max_lsn_dbtp = NULL;
 							gbl_slow_rep_process_txn_maxms);
 					}
 				}
+
+                if (gbl_debug_rep_long_req) {
+                    if (!(time(NULL) % gbl_rep_long_req_mod)) {
+                        int range = (gbl_rep_long_req_max - gbl_rep_long_req_min);
+                        int s = (rand() % range);
+                        sleep(gbl_rep_long_req_min + s);
+                    }
+                }
 
 				/*
 				 * If an application is doing app-specific

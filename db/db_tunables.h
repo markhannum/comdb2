@@ -1404,6 +1404,18 @@ REGISTER_TUNABLE("dump_net_queue_on_partial_write",
                  "Dump net-queue info on partial write. (Default: off):",
                  TUNABLE_BOOLEAN, &gbl_dump_net_queue_on_partial_write,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug_rep_long_req", "Coordinated slow rep-process-message.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_debug_rep_long_req,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug_rep_long_req_mod", "Mod value for coordinated slowness.  (Default: 4)",
+                 TUNABLE_INTEGER, &gbl_rep_long_req_mod,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug_rep_long_req_min", "Min value for coordinated slowness.  (Default: 7)",
+                 TUNABLE_INTEGER, &gbl_rep_long_req_min,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug_rep_long_req_max", "Max value for coordinated slowness.  (Default: 60)",
+                 TUNABLE_INTEGER, &gbl_rep_long_req_max,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug_partial_write", "Simulate partial write in net.  "
                  "(Default: 0)", TUNABLE_INTEGER, &gbl_debug_partial_write,
                  EXPERIMENTAL | INTERNAL, NULL,NULL, NULL, NULL);
