@@ -37,5 +37,14 @@ typedef struct net_queue_stat {
     int64_t total_count;
 } net_queue_stat_t;
 
+/* TODO
+typedef struct net_queue_total_stat {
+    pthread_mutex_t lock;
+    int64_t *type_counts;
+    int64_t unknown_count;
+    int64_t total_count;
+} net_queue_total_stat_t;
+*/
+
 void net_rep_qstat_init(netinfo_type *netinfo_ptr);
 #endif

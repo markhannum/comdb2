@@ -2920,9 +2920,9 @@ static inline void repdb_dequeue(DBT *control_dbt, DBT *rec_dbt)
 
 __thread int disable_random_deadlocks = 0;
 int gbl_debug_rep_long_req = 0;
-int gbl_rep_long_req_mod = 4;
-int gbl_rep_long_req_min = 7;
-int gbl_rep_long_req_max = 60;
+int gbl_rep_long_req_mod = 10;
+int gbl_rep_long_req_min = 4;
+int gbl_rep_long_req_max = 10;
 
 /*
  * __rep_apply --
