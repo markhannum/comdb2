@@ -172,4 +172,27 @@ if [[ -f $failfile ]]; then
     exit 1
 fi
 
+# Allow 20 seconds for replicants to become available
+let iter=0
+let incoh=1
+while [ "$iter" -lt 20 -a "$incoh" = 1 ]; do
+    for node in $CLUSTER; do
+        let incoh=0
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+        if [[ $? == 0 ]]; then
+            echo "Successful select from $node"
+        else
+            echo "Unsuccessful select from $node"
+            let incoh=1
+        fi
+        let iter=iter+1
+    done
+    sleep 1
+done
+
+if [[ "$incoh" == 1 ]]; then
+    echo "Failed test- nodes not available"
+    exit 1
+fi
+
 echo "Success"
