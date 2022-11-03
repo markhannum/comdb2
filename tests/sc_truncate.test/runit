@@ -174,16 +174,24 @@ fi
 
 # Allow 20 seconds for replicants to become available
 let iter=0
-let incoh=1
-while [ "$iter" -lt 20 -a "$incoh" = 1 ]; do
+export incoh=1
+set -x
+while [ "$incoh" -eq 1 ]; do
+    echo "Checking coherent iteration $iter"
     for node in $CLUSTER; do
-        let incoh=0
+        export incoh=0
         $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
         if [[ $? == 0 ]]; then
             echo "Successful select from $node"
         else
             echo "Unsuccessful select from $node"
-            let incoh=1
+            export incoh=1
+            $CDB2SQL_EXE --admin $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+            if [[ $? == 0 ]]; then 
+                echo "Successful ADMIN select from $node"
+            else
+                echo "Unsuccessful ADMIN select from $node"
+            fi
         fi
         let iter=iter+1
     done

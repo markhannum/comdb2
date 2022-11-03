@@ -2319,7 +2319,7 @@ static void *pglogs_asof_thread(void *arg)
 
         while (lcommit) {
             assert(log_compare(&new_asof_lsn, &lcommit->commit_lsn) >= 0);
-
+            // XXX ABOVE ASSERT FAILS ON DOWNGRADE
             if (lcommit->logical_tranid) {
                 ret = transfer_ltran_pglogs_to_gbl(
                     bdb_state, lcommit->logical_tranid, lcommit->commit_lsn);
