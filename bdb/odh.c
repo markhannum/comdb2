@@ -56,10 +56,20 @@
 static void read_odh(const void *buf, struct odh *odh);
 static void write_odh(void *buf, const struct odh *odh, uint8_t flags);
 /*
- * Mvcc tables will have 2 'commit-genids' which preceed the record.  The first
- * corresponds to the record's logical insert time, and the second corresponds
+ * Mvcc tables & indexes will have 2 'commit-genids' as part of the record.  The 
+ * first corresponds to the record's logical insert time, and the second corresponds
  * to the record's logical delete time.  If a record currently exists, we use
  * MAXLONGLONG for this second field.
+ *
+ * For tables, both of these fields will preceed the records ODH, and will be read
+ * as part of that ODH.  For indexes, the 'delete time' field will extend the key
+ * portion of the index, and the 'insert time' will preceed the genid (or maybe
+ * have this subsequent to the genid, but before the datacopy info?).  We handle 
+ * the indexes this way so that we can continue to enforce uniqueness at the 
+ * berkley level.  If a key is unique, there should be at most a single record which
+ * matches "KEY + MAXLONGLONG".  Any previous version of KEY will be available as 
+ * "KEY + TIMESTAMP".  TIMESTAMP is the timestamp of the transaction which deleted 
+ * that version of KEY.
  *
  * Mvcc indexes will extend the key with the 8-byte delete time.  As currently
  * existing records will always have MAXLONGLONG for that field, we can continue
