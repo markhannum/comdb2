@@ -453,7 +453,7 @@ void bdb_thread_done_rw(void);
 void get_master_lsn(void *bdb_state, DB_LSN *lsnout);
 int bdb_valid_lease(void *bdb_state);
 
-int gbl_verbose_fills = 0;
+int gbl_verbose_fills = 1;
 
 static int queue_log_more_count = 0;
 static int queue_log_fill_count = 0;
@@ -462,6 +462,20 @@ uint64_t subtract_lsn(void *bdb_state, DB_LSN *lsn1, DB_LSN *lsn2);
 void comdb2_early_ack(DB_ENV *, DB_LSN, uint32_t generation);
 
 int gbl_dedup_rep_all_reqs = 0;
+
+void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
+int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, DBT *max_lsn, int flags, 
+                     void *usr_ptr, const char *func, int line)
+{
+	int rc = __rep_send_message(dbenv, master_eid, REP_LOG_REQ, lsn, max_lsn, flags, NULL);
+
+    if (gbl_verbose_fills) {
+		logmsg(LOGMSG_USER, "SENDING rep_log_req %d:%d from %s line %d rc=%d\n",
+            lsn->file, lsn->offset, func, line, rc);
+        comdb2_cheapstack_sym(stderr, "send_rep_log_req");
+    }
+    return rc;
+}
 
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 					 const char *func, int line)
@@ -474,7 +488,9 @@ int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 	}
 	int rc = __rep_send_message(dbenv, master_eid, REP_ALL_REQ, lsn, NULL, flags, NULL);
 	if (gbl_verbose_fills) {
-		logmsg(LOGMSG_DEBUG, "SENDING rep_all_req from %s line %d rc=%d\n", func, line, rc);
+		logmsg(LOGMSG_USER, "SENDING rep_all_req %d:%d from %s line %d rc=%d\n",
+            lsn->file, lsn->offset, func, line, rc);
+        comdb2_cheapstack_sym(stderr, "send_rep_log_req");
 	}
 	return rc;
 }
@@ -776,9 +792,9 @@ static void *apply_thread(void *arg)
 			LOGCOPY_TOLSN(&tmp_lsn, &first_repdb_lsn);
 			max_lsn_dbt.data = &tmp_lsn;
 			max_lsn_dbt.size = sizeof(tmp_lsn); 
-			if ((ret = __rep_send_message(dbenv, master_eid,
-							REP_LOG_REQ, &my_lsn, &max_lsn_dbt, 0,
-							NULL)) == 0) {
+
+            if ((ret = send_rep_log_req(dbenv, master_eid, &my_lsn, &max_lsn_dbt,
+                    0, NULL, __func__, __LINE__)) == 0) {
 				last_fill = comdb2_time_epochms();
 
 				if (gbl_verbose_fills) {
@@ -3362,14 +3378,8 @@ gap_check:		max_lsn_dbtp = NULL;
 				 * __FILE__, __LINE__, next_lsn.file, next_lsn.offset);
 				 */
 				if (!gbl_decoupled_logputs) {
-					if ((rc = __rep_send_message(dbenv, eid,
-							REP_LOG_REQ, &next_lsn, max_lsn_dbtp, 0,
-							NULL)) == 0) {
-						if (gbl_verbose_fills) {
-							logmsg(LOGMSG_USER, "%s line %d good REP_LOG_REQ "
-									"for %d:%d\n", __func__, __LINE__, 
-									next_lsn.file, next_lsn.offset);
-						}
+                    if ((rc = send_rep_log_req(dbenv, eid, &next_lsn, max_lsn_dbtp,
+                            0, NULL, __func__, __LINE__)) == 0) {
 					} else if (gbl_verbose_fills){
 						logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ "
 								"for %d:%d, %d\n", __func__, __LINE__, 
@@ -3506,14 +3516,8 @@ gap_check:		max_lsn_dbtp = NULL;
 				 * __FILE__, __LINE__, next_lsn.file, next_lsn.offset);
 				 */
 				if (!gbl_decoupled_logputs) {
-					if ((rc = __rep_send_message(dbenv, eid,
-								REP_LOG_REQ, &next_lsn, max_lsn_dbtp, 0,
-								NULL)) == 0) {
-						if (gbl_verbose_fills) {
-							logmsg(LOGMSG_USER, "%s line %d good REP_LOG_REQ "
-									"for %d:%d\n", __func__, __LINE__, 
-									next_lsn.file, next_lsn.offset);
-						}
+                    if ((rc = send_rep_log_req(dbenv, eid, &next_lsn, max_lsn_dbtp, 0,
+                            NULL, __func__, __LINE__)) == 0) {
 					} else if (gbl_verbose_fills) {
 						logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ "
 								"for %d:%d, %d\n", __func__, __LINE__, 
