@@ -464,6 +464,8 @@ extern int gbl_decoupled_logputs;
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 					 const char *func, int line);
 
+int send_rep_verify_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, const char *func, int line);
+
 int
 __rep_new_master(dbenv, cntrl, eid)
 	DB_ENV *dbenv;
@@ -557,8 +559,7 @@ __rep_new_master(dbenv, cntrl, eid)
 					__FILE__, __LINE__, last_lsn.file,
 					last_lsn.offset);
 #endif
-				(void)__rep_send_message(dbenv, eid,
-					REP_VERIFY_REQ, &last_lsn, NULL, 0, NULL);
+                (void)send_rep_verify_req(dbenv, eid, &last_lsn, __func__, __LINE__);
 			}
 		} else {
 			/* Let the apply-thread make this request */
@@ -662,8 +663,7 @@ empty:		MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 		gbl_passed_repverify = 0;
 
 		dbenv->newest_rep_verify_tran_time = 0;
-		(void)__rep_send_message(dbenv,
-			eid, REP_VERIFY_REQ, &last_lsn, NULL, 0, NULL);
+        (void)send_rep_verify_req(dbenv, eid, &last_lsn, __func__, __LINE__);
 	}
 
 	return (DB_REP_NEWMASTER);

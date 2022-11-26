@@ -6,3 +6,10 @@ dtastripe 4
 #handle_buf_latency_ms 50
 appsockslimit 10
 maxappsockslimit 10
+setattr REP_WORKERS 0
+setattr REP_PROCESSORS 0
+allow_readonly_runtime_mod 1
+maxosqltransfer 9999999999
+decoupled_logputs 0
+verbose_fills 1
+logput_window 1

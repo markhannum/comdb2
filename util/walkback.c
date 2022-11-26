@@ -25,6 +25,8 @@
 #include <fcntl.h>
 #endif
 
+#define CHEAPSTACK_LOCK
+
 int gbl_walkback_enabled = 1;
 int gbl_warnthresh = 50;
 

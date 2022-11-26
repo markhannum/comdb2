@@ -669,13 +669,17 @@ int is_incoherent(bdb_state_type *bdb_state, const char *host)
     return is_incoherent_complete(bdb_state, host, NULL);
 }
 
+
 int gbl_throttle_logput_trace = 0;
 int gbl_incoherent_logput_window = 0;
+
+static inline int is_incoherent_complete(bdb_state_type *bdb_state,
+                                         const char *host, int *incohwait);
 
 static int throttle_updates_incoherent_nodes(bdb_state_type *bdb_state,
                                              const char *host)
 {
-    int ret = 0, now, pr = 0;
+    int ret = 0, now, pr = 0, incohwait = 0;
     static int lastpr = 0;
     static unsigned long long throttles = 0;
     unsigned long long cntbytes;
@@ -691,8 +695,7 @@ static int throttle_updates_incoherent_nodes(bdb_state_type *bdb_state,
         lastpr = now;
     }
 
-    /* INCOHERENT & INCOHERENT_SLOW */
-    if (is_incoherent(bdb_state, host)) {
+    if (is_incoherent_complete(bdb_state, host, &incohwait) || incohwait) {
 
         DB_LSN *lsnp, *masterlsn;
 
