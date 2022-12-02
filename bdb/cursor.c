@@ -3498,13 +3498,22 @@ int bdb_relink_pglogs(void *bdb_state, unsigned char *fileid, db_pgno_t pgno,
 #include "nodemap.h"
 
 int gbl_set_seqnum_trace = 0;
+void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
 
 static inline void set_seqnum_host(void *in_bdb_state, char *host, DB_LSN lsn,
                                    const char *func, int line)
 {
     bdb_state_type *bdb_state = (bdb_state_type *)in_bdb_state;
+    if (lsn.file == INT_MAX) {
+        abort();
+    }
     bdb_state->seqnum_info->seqnums[nodeix(host)].lsn = lsn;
     if (gbl_set_seqnum_trace) {
+        static int lastst = 0;
+        if (comdb2_time_epoch() - lastst) {
+            comdb2_cheapstack_sym(stderr, "set_seqnum");
+            lastst = comdb2_time_epoch();
+        }
         logmsg(LOGMSG_USER, "%s line %d setting host %s lsn to %d:%d\n", func,
                line, host, lsn.file, lsn.offset);
     }

@@ -453,7 +453,7 @@ void bdb_thread_done_rw(void);
 void get_master_lsn(void *bdb_state, DB_LSN *lsnout);
 int bdb_valid_lease(void *bdb_state);
 
-int gbl_verbose_fills = 1;
+int gbl_verbose_fills = 0;
 
 static int queue_log_more_count = 0;
 static int queue_log_fill_count = 0;
@@ -1455,7 +1455,8 @@ skip:				/*
 
 		/* REP_LOG_LOGPUT is almost the same as REP_LOG (the type gets reverted
 		   to REP_LOG in rep_send()), except that it can be throttled. */
-		type = gbl_decoupled_logputs ?  REP_LOG_FILL : REP_LOG_LOGPUT;
+		//type = gbl_decoupled_logputs ?  REP_LOG_FILL : REP_LOG_LOGPUT;
+		type = REP_LOG_FILL;
 		flags = IS_ZERO_LSN(rp->lsn) ||
 			IS_INIT_LSN(rp->lsn) ? DB_FIRST : DB_SET;
 		sendflags = DB_REP_SENDACK;
@@ -1610,6 +1611,12 @@ more:
 			R_LOCK(dbenv, &dblp->reginfo);
 			lsn = lp->lsn;
 			R_UNLOCK(dbenv, &dblp->reginfo);
+
+		    if (gbl_verbose_fills) {
+                logmsg(LOGMSG_USER, "%s line %d LOG_MORE for LSN %d:%d\n",
+                    __func__, __LINE__, lsn.file, lsn.offset);
+            }
+
 			/*
 			 * If the master_id is invalid, this means that since
 			 * the last record was sent, somebody declared an
@@ -1686,6 +1693,7 @@ more:
 		 * it, then we need to send all records up to the LSN in the
 		 * data dbt.
 		 */
+        DB_LSN origlsn = rp->lsn;
 		oldfilelsn = lsn = rp->lsn;
 		fromline = __LINE__;
 		if ((ret = __log_cursor(dbenv, &logc)) != 0)
@@ -1696,11 +1704,12 @@ more:
 		int resp_rc;
 		sendflags = DB_REP_SENDACK;
 
-		type = gbl_decoupled_logputs ? REP_LOG_FILL : REP_LOG_LOGPUT;
+		//type = gbl_decoupled_logputs ? REP_LOG_FILL : REP_LOG_LOGPUT;
+		type = REP_LOG_FILL;
 		if (gbl_verbose_fills) {
 			if (rec && rec->size != 0) {
 				logmsg(LOGMSG_USER, "%s line %d received REP_LOG_REQ from %s %d:%d to "
-						"%d:%d\n", __func__, __LINE__, *eidp, lsn.file, lsn.offset,
+						"%d:%d\n", __func__, __LINE__, *eidp, origlsn.file, origlsn.offset,
 						((DB_LSN *)(rec->data))->file, 
 						((DB_LSN *)(rec->data))->offset);
 			} else {
@@ -2990,6 +2999,7 @@ static void set_max_wait_lsn(LOG *lp, DB_LSN *lsn, const char *func, int line)
 }
 
 __thread int disable_random_deadlocks = 0;
+int gbl_always_request_gap = 0;
 
 /*
  * __rep_apply --
@@ -3136,6 +3146,7 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 		goto done;
 	}
 	
+    // XXX EQUAL CMP
 	if (cmp == 0) {
 		/* We got the log record that we are expecting. */
 		if (rp->rectype == REP_NEWFILE) {
@@ -3375,7 +3386,9 @@ gap_check:		max_lsn_dbtp = NULL;
 			next_lsn = lp->ready_lsn;
 			do_req = ++lp->rcvd_recs >= lp->wait_recs;
 
-			do_req = 1;
+			if (gbl_always_request_gap) {
+				do_req = 1;
+			}
 
 			if (do_req) {
 				lp->wait_recs = rep->request_gap;
@@ -3443,6 +3456,7 @@ gap_check:		max_lsn_dbtp = NULL;
 				}
 			}
 		}
+    // XXX HIGHER RECORD
 	} else if (cmp > 0) {
 		/*
 		 * The LSN is higher than the one we were waiting for.
@@ -3459,9 +3473,14 @@ gap_check:		max_lsn_dbtp = NULL;
 		R_UNLOCK(dbenv, &dblp->reginfo);
 		do_req = 0;
 		if (gbl_verbose_fills) {
+            static int lastpr = 0;
 			logmsg(LOGMSG_USER, "RECEIVED rep_apply %d:%d (higher than %d:%d) wait_recs=%d, rcvd_recs=%d\n",
 				rp->lsn.file, rp->lsn.offset, lp->ready_lsn.file, lp->ready_lsn.offset, lp->wait_recs,
                 lp->rcvd_recs);
+            if (comdb2_time_epoch() - lastpr) {
+                lastpr = comdb2_time_epoch();
+                comdb2_cheapstack_sym(stderr, "higher-lsn");
+            }
 		}
 		if (lp->wait_recs == 0) {
 			/*
@@ -3543,6 +3562,7 @@ gap_check:		max_lsn_dbtp = NULL;
 			goto done;
 		}
 
+        // XXX i don't think this makes sense
 		if (IS_ZERO_LSN(lp->waiting_lsn) ||
 			log_compare(&rp->lsn, &lp->waiting_lsn) < 0) {
 			lp->waiting_lsn = rp->lsn;
@@ -3605,6 +3625,7 @@ gap_check:		max_lsn_dbtp = NULL;
 			ret = DB_REP_NOTPERM;
 		}
 		goto done;
+    // XXX LOWER RECORD
 	} else {
 		static int lastpr = 0;
 		int now;

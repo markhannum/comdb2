@@ -2225,6 +2225,12 @@ int bdb_is_standalone(void *dbenv, void *in_bdb_state)
 extern int gbl_commit_delay_trace;
 int gbl_skip_catchup_logic = 0;
 
+/*
+void zero_seqnum_lk(bdb_state_type *bdb_state, const char *host, const char *func, int line)
+{
+}
+*/
+
 static DB_ENV *dbenv_open(bdb_state_type *bdb_state)
 {
     DB_ENV *dbenv;
@@ -2965,6 +2971,8 @@ again1:
                &(bdb_state->seqnum_info->seqnums[nodeix(master_sid)]),
                sizeof(seqnum_type));
         memcpy(&master_lsn, &master_seqnum.lsn, sizeof(DB_LSN));
+        logmsg(LOGMSG_INFO, "%s line %d master %s seqnum is %d:%d\n",
+            __func__, __LINE__, master_sid, master_lsn.file, master_lsn.offset);
 
         /*
         fprintf(stder, "%s:%d master_seqnum=%d:%d\n", __FILE__, __LINE__,

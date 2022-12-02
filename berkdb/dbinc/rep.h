@@ -37,8 +37,8 @@ typedef struct __rep {
 	u_int32_t	bytes;		/* __rep_process_message call. */
 
 
-#define	DB_REP_REQUEST_GAP	4
-#define	DB_REP_MAX_GAP		128
+#define	DB_REP_REQUEST_GAP	64
+#define	DB_REP_MAX_GAP		4096
 
 
 #if 0

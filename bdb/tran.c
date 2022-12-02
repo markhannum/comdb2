@@ -1673,6 +1673,9 @@ int bdb_tran_commit_with_seqnum_int(bdb_state_type *bdb_state, tran_type *tran,
                    sizeof(DB_LSN));
 
             if (log_compare(&lsn, &old_lsn) > 0) {
+                if (lsn.file == INT_MAX) {
+                    abort();
+                }
                 /*fprintf(stderr, "%s:%d 2 updating my seqnum to %d:%d\n",
                   __func__, __LINE__, lsn.file, lsn.offset);*/
 
@@ -1963,6 +1966,9 @@ int bdb_tran_commit_with_seqnum_int(bdb_state_type *bdb_state, tran_type *tran,
             if (log_compare(&lsn, &old_lsn) > 0) {
                 /*fprintf(stderr, "%s:%d 2 updating my seqnum to %d:%d\n",
                   __func__, __LINE__, lsn.file, lsn.offset);*/
+                if (lsn.file == INT_MAX) {
+                    abort();
+                }
                 memcpy(&(bdb_state->seqnum_info
                              ->seqnums[nodeix(bdb_state->repinfo->myhost)]),
                        &lsn, sizeof(DB_LSN));
