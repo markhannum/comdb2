@@ -699,8 +699,9 @@ static int throttle_updates_incoherent_nodes(bdb_state_type *bdb_state,
         lastpr = now;
     }
 
-    //if (is_incoherent_complete(bdb_state, host, &incohwait) || incohwait) {
-    if (is_incoherent(bdb_state, host)) {
+    int incoherent = 0, incohwait = 0;
+    if ((incoherent = is_incoherent_complete(bdb_state, host, &incohwait))) {
+    //if (is_incoherent(bdb_state, host)) {
 
         DB_LSN *lsnp, *masterlsn;
 
@@ -735,7 +736,8 @@ static int throttle_updates_incoherent_nodes(bdb_state_type *bdb_state,
             }
         }
     } else if (pr) {
-        logmsg(LOGMSG_USER, "%s allowing logput to %s\n", __func__, host);
+        logmsg(LOGMSG_USER, "%s allowing logput to %s, incoherent=%d wait=%d\n", __func__,
+               host, incoherent, incohwait);
     }
 
     return ret;
@@ -765,7 +767,7 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
     int bufsz;
     int rc;
     int outrc;
-    int is_log = 0;
+    //int is_log = 0;
     int is_log_req = 0;
 
     struct rep_type_berkdb_rep_ctrlbuf_hdr p_rep_type_berkdb_rep_ctrlbuf_hdr = {
@@ -826,10 +828,12 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
     bdb_state = (bdb_state_type *)dbenv->app_private;
 
 
+/*
     if (rectype == REP_LOG || rectype == REP_LOG_LOGPUT || 
         rectype == REP_LOG_MORE || rectype == REP_LOG_FILL) {
         is_log = 1;
     }
+*/
     if (rectype == REP_LOG_REQ) {
         is_log_req = 1;
     }
@@ -1089,8 +1093,9 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
                     }
                 }
 
+                /*
                 if (is_log) {
-                    DB_LSN seqnum_lsn = {0};
+                   DB_LSN seqnum_lsn = {0};
                     DB_LSN tmp;
 
                     tmp.file = ntohl(rep_control->lsn.file);
@@ -1103,11 +1108,15 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
                         abort();
                     }
                 }
-                if ((t = comdb2_time_epoch()) - lastpr) {
+                */
+                int incoherent = 0, incohwait = 0;
+                incoherent = is_incoherent_complete(bdb_state, host, &incohwait);
+
+                if ((t = comdb2_time_epoch()) - lastpr || incoherent) {
                     int file = lsnp ? ntohl(lsnp->file) : 0;
                     int offset = lsnp ? ntohl(lsnp->offset) : 0;
-                    logmsg(LOGMSG_USER, "%s:%d SENDING type %d lsn %d:%d to host %s\n",
-                        __func__, __LINE__, rectype, file, offset, hostlist[i]);
+                    logmsg(LOGMSG_USER, "%s:%d SENDING type %d lsn %d:%d to host %s incoh=%d wait=%d\n",
+                        __func__, __LINE__, rectype, file, offset, hostlist[i], incoherent, incohwait);
                     comdb2_cheapstack_sym(stderr, "berkdb_send_rtn");
                     lastpr = t;
                 }
@@ -1160,6 +1169,7 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
         }
 
 
+        /*
         if (is_log) {
             DB_LSN seqnum_lsn = {0};
             DB_LSN tmp;
@@ -1174,6 +1184,7 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
                 abort();
             }
         }
+        */
 
 
         p_rep_type_berkdb_rep_seqnum.seqnum = tmpseq =
@@ -2113,6 +2124,10 @@ int net_hostdown_rtn(netinfo_type *netinfo_ptr, char *host)
             defer_commits(bdb_state, host, __func__);
             set_coherent_state(bdb_state, host, STATE_INCOHERENT, __func__,
                                __LINE__);
+
+            Pthread_mutex_lock(&(bdb_state->seqnum_info->lock));
+            bdb_state->seqnum_info->seqnums[nodeix(host)].lsn.file = 0;
+            Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
         }
 
         /* hostdown can defer commits */
@@ -2683,10 +2698,12 @@ static void got_new_seqnum_from_node(bdb_state_type *bdb_state,
                seqnum->commit_generation, mygen, change_coherency);
     }
 
+    /*
     DB_LSN oldlsn = bdb_state->seqnum_info->seqnums[nodeix(host)].lsn;
     if (oldlsn.file > 0 && oldlsn.file + 1 < seqnum->lsn.file) {
         abort();
     }
+    */
 
     if (should_copy_seqnum(bdb_state, seqnum,
                            &bdb_state->seqnum_info->seqnums[nodeix(host)])) {
@@ -5074,7 +5091,7 @@ void berkdb_receive_msg(void *ack_handle, void *usr_ptr, char *from_host,
             return;
         }
 
-        bdb_state->dbenv->rep_flush(bdb_state->dbenv);
+        //bdb_state->dbenv->rep_flush(bdb_state->dbenv);
 
         logmsg(LOGMSG_INFO, "USER_TYPE_LSNCMP %d %d    %d %d\n", lsn_cmp.lsn.file,
                 cur_lsn.file, lsn_cmp.lsn.offset, cur_lsn.offset);
@@ -5795,7 +5812,7 @@ void *watcher_thread(void *arg)
              * message,
              * and broadcasts it to all nodes
              */
-            bdb_state->dbenv->rep_flush(bdb_state->dbenv);
+            //bdb_state->dbenv->rep_flush(bdb_state->dbenv);
 
             num_skipped = 0;
 
@@ -5881,7 +5898,8 @@ void *watcher_thread(void *arg)
         master_host = bdb_state->repinfo->master_host;
         bdb_get_rep_master(bdb_state, &rep_master, NULL, NULL);
 
-        if (bdb_state->caught_up) {
+        //if (bdb_state->caught_up) {
+        if (1) {
             /* periodically send info too all nodes about our curresnt LSN and
                the current logfile we are on */
             send_myseqnum_to_all(bdb_state, 0);

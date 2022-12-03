@@ -1425,10 +1425,11 @@ skip:				/*
 		sendtime = 0;
 
 		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
-		gbytes = rep->gbytes;
+		//gbytes = rep->gbytes;
 		bytes = rep->bytes;
 		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
-		check_limit = gbytes != 0 || bytes != 0;
+		//check_limit = gbytes != 0 || bytes != 0;
+		check_limit = bytes != 0;
 		fromline = __LINE__;
 		if ((ret = __log_cursor(dbenv, &logc)) != 0)
 			goto errlock;
@@ -1480,6 +1481,18 @@ skip:				/*
 			R_UNLOCK(dbenv, &dblp->reginfo);
 
 			bytes_sent += (data_dbt.size + sizeof(REP_CONTROL));
+
+			if (check_limit && bytes_sent > gbl_finish_fill_threshold) {
+					rep->stat.st_nthrottles++;
+
+					if (gbl_verbose_fills){
+						logmsg(LOGMSG_USER, "%s line %d toggle %s fill "
+								"LOG_MORE\n", __func__, __LINE__, *eidp);
+					}
+
+					goto more;
+			}
+#if 0
 			if (check_limit && (!gbl_finish_fill_threshold || 
 						bytes_behind > gbl_finish_fill_threshold)) {
 				/*
@@ -1511,6 +1524,7 @@ skip:				/*
 				}
 				bytes -= (data_dbt.size + sizeof(REP_CONTROL));
 			}
+#endif
 
 			if ((rc = __rep_time_send_message(dbenv, *eidp, type, &lsn, &data_dbt,
 							sendflags, NULL, &sendtime)) != 0) {
@@ -1586,6 +1600,10 @@ more:
 	case REP_LOG:
 		CLIENT_ONLY(rep, rp);
 		MASTER_CHECK(dbenv, *eidp, rep);
+		if (rp->rectype == REP_LOG_MORE && gbl_verbose_fills) {
+			logmsg(LOGMSG_USER, "%s:%d RECEIVED REP_LOG_MORE LSN %d:%d\n",
+				__func__, __LINE__, rp->lsn.file, rp->lsn.offset);
+		}
 		if (!IN_ELECTION_TALLY(rep)) {
 			fromline = __LINE__;
 			if (gbl_decoupled_logputs) {
@@ -1594,9 +1612,14 @@ more:
 					goto errlock;
 			} else {
 				fromline = __LINE__;
-				if ((ret = __rep_apply(dbenv, rp, rec, ret_lsnp,
-								commit_gen, 0)) != 0)
+				if (((ret = __rep_apply(dbenv, rp, rec, ret_lsnp,
+								commit_gen, 0)) != 0) && (ret != DB_REP_ISPERM) && (ret != DB_REP_NOTPERM)) {
+					if (gbl_verbose_fills) {
+						logmsg(LOGMSG_USER, "%s:%d APPLY %d:%d returns %d, breaking\n",
+							__func__, __LINE__, rp->lsn.file, rp->lsn.offset, ret);
+					}
 					goto errlock;
+				}
 			}
 		} else {
 			send_master_req(dbenv, __func__, __LINE__);
@@ -1612,10 +1635,10 @@ more:
 			lsn = lp->lsn;
 			R_UNLOCK(dbenv, &dblp->reginfo);
 
-		    if (gbl_verbose_fills) {
-                logmsg(LOGMSG_USER, "%s line %d LOG_MORE for LSN %d:%d\n",
-                    __func__, __LINE__, lsn.file, lsn.offset);
-            }
+			if (gbl_verbose_fills) {
+				logmsg(LOGMSG_USER, "%s line %d LOG_MORE for LSN %d:%d\n",
+					__func__, __LINE__, lsn.file, lsn.offset);
+			}
 
 			/*
 			 * If the master_id is invalid, this means that since
