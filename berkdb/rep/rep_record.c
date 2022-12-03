@@ -1067,7 +1067,7 @@ __rep_process_message(dbenv, control, rec, eidp, ret_lsnp, commit_gen, online)
 	REP_CONTROL *rp;
 	REP_VOTE_INFO *vi;
 	REP_GEN_VOTE_INFO *vig;
-	u_int32_t bytes, egen, committed_gen, flags, sendflags, gen, gbytes, rectype, type;
+	u_int32_t egen, committed_gen, flags, sendflags, gen, rectype, type;
 	unsigned long long bytes_sent;
 	int check_limit, cmp, done, do_req, rc, starttime, endtime, tottime;
 	int match, old, recovering, ret, t_ret, sendtime;
@@ -1419,17 +1419,11 @@ skip:				/*
 		goto errlock;
 	case REP_ALL_REQ:
 		MASTER_ONLY(rep, rp);
-		gbytes = bytes = 0;
 		bytes_sent = 0;
 		starttime = comdb2_time_epochms();
 		sendtime = 0;
 
-		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
-		//gbytes = rep->gbytes;
-		bytes = rep->bytes;
-		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
-		//check_limit = gbytes != 0 || bytes != 0;
-		check_limit = bytes != 0;
+		check_limit = (gbl_finish_fill_threshold > 0);
 		fromline = __LINE__;
 		if ((ret = __log_cursor(dbenv, &logc)) != 0)
 			goto errlock;
@@ -1673,6 +1667,7 @@ more:
 		MASTER_ONLY(rep, rp);
 		bytes_sent = 0;
 		sendtime = 0;
+        check_limit = (gbl_finish_fill_threshold > 0);
 		starttime = comdb2_time_epochms();
 		if (rec != NULL && rec->size != 0) {
 			memcpy(&tmplsn, rec->data, sizeof(tmplsn));
@@ -1822,12 +1817,8 @@ more:
 			}
 		}
 
-		/*
-		 * XXX 
-		 * The logic has changed so that anything above 
-		 * gbl_req_all_threshold turns into a REQ_ALL.
-		 */
-		while (ret == 0 && rec != NULL && rec->size != 0) {
+        /* We only enter this loop if rep_log_req requests a range (rec != NULL) */
+		while (ret == 0 && type == REP_LOG_FILL && rec != NULL && rec->size != 0) {
 			if ((ret =
 				__log_c_get(logc, &lsn, &data_dbt,
 					DB_NEXT)) != 0) {
@@ -1848,17 +1839,31 @@ more:
 				}
 			}
 
-			if (log_compare(&lsn, (DB_LSN *)rec->data) >= 0)
-				break;
-
 			oldfilelsn = lsn;
 			oldfilelsn.offset += logc->c_len;
+			if (log_compare(&lsn, (DB_LSN *)rec->data) >= 0) {
+				if (gbl_verbose_fills){
+					logmsg(LOGMSG_USER, "%s line %d sent final record, break-loop\n",
+							__func__, __LINE__);
+				}
+			}
 
 			bytes_sent += (data_dbt.size + sizeof(REP_CONTROL));
+			if ((check_limit && bytes_sent > gbl_finish_fill_threshold)) {
+				rep->stat.st_nthrottles++;
+				if (gbl_verbose_fills){
+					logmsg(LOGMSG_USER, "%s line %d rep-log-req toggle %s fill "
+							"LOG_MORE\n", __func__, __LINE__, *eidp);
+				}
+				goto more2;
+			}
+
 			if ((resp_rc = __rep_time_send_message(dbenv, *eidp, type, &lsn,
 							&data_dbt, sendflags, NULL, &sendtime)) != 0) {
-				/* If the net queue is full, we break out of the loop. */
-				break;
+more2:
+				/*  log_more resets the type which breaks out of the loop. */
+				resp_rc = __rep_send_log_more(dbenv, *eidp, &type, &lsn, &data_dbt,
+						sendflags, __func__, __LINE__);
 			}
 		}
 
