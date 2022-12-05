@@ -458,7 +458,6 @@ __rep_set_egen(dbenv, func, line, egen)
  */
 
 int gbl_abort_on_incorrect_upgrade;
-extern int last_fill;
 extern int gbl_decoupled_logputs;
 
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
@@ -571,7 +570,6 @@ __rep_new_master(dbenv, cntrl, eid)
 								"for %d:%d\n", __func__, __LINE__, lsn.file,
 								lsn.offset);
 					}
-					last_fill = comdb2_time_epochms();
 				} else if (gbl_verbose_fills) {
 					logmsg(LOGMSG_USER, "%s line %d failed REP_ALL_REQ for "
 							"%d:%d\n", __func__, __LINE__, lsn.file, 
@@ -613,10 +611,7 @@ empty:		MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 			 */
 			lp->wait_recs = rep->max_gap;
 			MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
-			if (send_rep_all_req(dbenv, rep->master_id, &lsn, DB_REP_NODROP,
-				__func__, __LINE__) == 0) {
-				last_fill = comdb2_time_epochms();
-			}
+			send_rep_all_req(dbenv, rep->master_id, &lsn, DB_REP_NODROP, __func__, __LINE__);
 		} else
 			MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 

@@ -5,7 +5,7 @@
    you may not use this file except in compliance with the License.
    You may obtain a copy of the License at
 
-       http://www.apache.org/licenses/LICENSE-2.0
+	   http://www.apache.org/licenses/LICENSE-2.0
 
    Unless required by applicable law or agreed to in writing, software
    distributed under the License is distributed on an "AS IS" BASIS,
@@ -217,6 +217,10 @@ extern int gbl_allow_neg_column_size;
 extern int gbl_client_heartbeat_ms;
 extern int gbl_rep_wait_release_ms;
 extern int gbl_rep_wait_core_ms;
+extern int gbl_rep_flush;
+extern int gbl_rep_flush_init;
+extern int gbl_throttle_fill_reqs;
+extern int gbl_fake_fill_drop;
 extern int gbl_random_get_curtran_failures;
 extern int gbl_fail_client_write_lock;
 extern int gbl_instrument_dblist;

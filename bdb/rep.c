@@ -5646,6 +5646,8 @@ int request_delaymore(void *bdb_state_in)
 }
 
 int gbl_rep_wait_core_ms = 0;
+int gbl_rep_flush_init = 0;
+int gbl_rep_flush = 1;
 
 void *watcher_thread(void *arg)
 {
@@ -5812,7 +5814,11 @@ void *watcher_thread(void *arg)
              * message,
              * and broadcasts it to all nodes
              */
-            //bdb_state->dbenv->rep_flush(bdb_state->dbenv);
+            if (gbl_rep_flush_init) {
+                bdb_state->dbenv->rep_flush_init(bdb_state->dbenv);
+            } else if (gbl_rep_flush) {
+                bdb_state->dbenv->rep_flush(bdb_state->dbenv);
+            }
 
             num_skipped = 0;
 

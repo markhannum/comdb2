@@ -47,6 +47,7 @@ static int __rep_elect __P((DB_ENV *, int, int, u_int32_t, u_int32_t *, char **)
 static int __rep_elect_init
 __P((DB_ENV *, DB_LSN *, int, int, int *, u_int32_t *));
 static int __rep_flush __P((DB_ENV *));
+static int __rep_flush_init __P((DB_ENV *));
 static int __rep_restore_prepared __P((DB_ENV *));
 static int __rep_get_limit __P((DB_ENV *, u_int32_t *, u_int32_t *));
 static int __rep_set_limit __P((DB_ENV *, u_int32_t, u_int32_t));
@@ -114,6 +115,7 @@ __rep_dbenv_create(dbenv)
 	{
 		dbenv->rep_elect = __rep_elect;
 		dbenv->rep_flush = __rep_flush;
+		dbenv->rep_flush_init = __rep_flush_init;
 		dbenv->rep_process_message = __rep_process_message;
 		dbenv->rep_verify_will_recover = __rep_verify_will_recover;
 		dbenv->rep_start = __rep_start;
@@ -1642,6 +1644,43 @@ __rep_flush(dbenv)
 	/* treat the end of the log as perm */
 	(void)__rep_send_message(dbenv,
 	    db_eid_broadcast, REP_LOG, &lsn, &rec, DB_LOG_PERM, NULL);
+
+err:	if ((t_ret = __log_c_close(logc)) != 0 && ret == 0)
+		ret = t_ret;
+	return (ret);
+}
+
+/*
+ * __rep_flush_init --
+ *	Re-push the last log record to all clients, in case they've lost
+ * messages and don't know it.  This use REP_LOG_FLUSH to skip the normal 
+ * codepath of waiting for lots of 'dups' before sending the rep_log_req.
+ */
+
+static int
+__rep_flush_init(dbenv)
+	DB_ENV *dbenv;
+{
+	DBT rec;
+	DB_LOGC *logc;
+	DB_LSN lsn;
+	int ret, t_ret;
+
+	PANIC_CHECK(dbenv);
+	ENV_REQUIRES_CONFIG(dbenv, dbenv->rep_handle, "rep_flush", DB_INIT_REP);
+
+	if ((ret = __log_cursor(dbenv, &logc)) != 0)
+		return (ret);
+
+	memset(&rec, 0, sizeof(rec));
+	memset(&lsn, 0, sizeof(lsn));
+
+	if ((ret = __log_c_get(logc, &lsn, &rec, DB_LAST)) != 0)
+		goto err;
+
+	/* treat the end of the log as perm */
+	(void)__rep_send_message(dbenv,
+	    db_eid_broadcast, REP_LOG_INIT, &lsn, &rec, DB_LOG_PERM, NULL);
 
 err:	if ((t_ret = __log_c_close(logc)) != 0 && ret == 0)
 		ret = t_ret;

@@ -5,7 +5,7 @@
    you may not use this file except in compliance with the License.
    You may obtain a copy of the License at
 
-       http://www.apache.org/licenses/LICENSE-2.0
+	   http://www.apache.org/licenses/LICENSE-2.0
 
    Unless required by applicable law or agreed to in writing, software
    distributed under the License is distributed on an "AS IS" BASIS,
@@ -1621,6 +1621,26 @@ REGISTER_TUNABLE("rep_wait_core_ms",
                  "Abort if rep-thread waits longer than this threshold for "
                  "locks.  (Default: 0)",
                  TUNABLE_INTEGER, &gbl_rep_wait_core_ms,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("rep_flush",
+                 "Send rep-flush from watcher thread.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_rep_flush,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("rep_flush_init",
+                 "Send rep-flush-init from watcher thread.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_rep_flush_init,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("rep_throttle_fill",
+                 "Throttle replication fill-requests.  (Default: 0)",
+                 TUNABLE_INTEGER, &gbl_throttle_fill_reqs,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("rep_fake_fill_drop",
+                 "Fake fill-request drop.  (Default: 0)",
+                 TUNABLE_INTEGER, &gbl_fake_fill_drop,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
 REGISTER_TUNABLE("rep_mon_threshold",

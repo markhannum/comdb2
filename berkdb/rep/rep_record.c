@@ -90,7 +90,9 @@ int gbl_finish_fill_threshold = 60000000;
 
 int gbl_max_logput_queue = 100000;
 int gbl_apply_thread_pollms = 100;
-int last_fill = 0;
+int last_fill_req_ms = 0;
+int last_fill_request = 0;
+int last_fill_record = 0;
 int gbl_req_all_threshold = 10000000;
 int gbl_req_all_time_threshold = 0;
 int gbl_req_delay_count_threshold = 5;
@@ -118,7 +120,7 @@ extern int set_commit_context(unsigned long long context, uint32_t *generation,
 	void *plsn, void *args, unsigned int rectype);
 
 static int __rep_apply __P((DB_ENV *, REP_CONTROL *, DBT *, DB_LSN *,
-	uint32_t *, int));
+	uint32_t *, uint32_t));
 static int __rep_dorecovery __P((DB_ENV *, DB_LSN *, DB_LSN *, int));
 static int __rep_lsn_cmp __P((const void *, const void *));
 static int __rep_newfile __P((DB_ENV *, REP_CONTROL *, DB_LSN *));
@@ -461,24 +463,70 @@ uint64_t subtract_lsn(void *bdb_state, DB_LSN *lsn1, DB_LSN *lsn2);
 void comdb2_early_ack(DB_ENV *, DB_LSN, uint32_t generation);
 
 int gbl_dedup_rep_all_reqs = 0;
+int gbl_throttle_fill_reqs = 0;
 
 void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
 
 static void timed_cheapstack(const char *msg, int *lasttime, int count)
 {
-    int t = comdb2_time_epoch();
-    if (t - (*lasttime)) {
-        (*lasttime) = t;
-        comdb2_cheapstack_sym(stderr, "%s count=%d\n", msg, count);
-    }
+	int t = comdb2_time_epoch();
+	if (t - (*lasttime)) {
+		(*lasttime) = t;
+		comdb2_cheapstack_sym(stderr, "%s count=%d\n", msg, count);
+	}
+}
+
+int gbl_fake_fill_drop = 0;
+
+static int fake_fill_req_drop(const char *func, int line)
+{
+	int fake_drop = gbl_fake_fill_drop;
+	if (fake_drop > 1 && !(rand() % fake_drop)) {
+		if (gbl_verbose_fills) {
+			logmsg(LOGMSG_USER, "fake-drop fill-req from %s line %d\n", func, line);
+		}
+		return 1;
+	}
+	return 0;
+}
+
+static int throttle_fill_request(const char *func, int line)
+{
+	if (gbl_throttle_fill_reqs <= 0) {
+		return 0;
+	}
+	int now = comdb2_time_epoch();
+	if ((now - last_fill_request) < gbl_throttle_fill_reqs) {
+		if (gbl_verbose_fills) {
+			logmsg(LOGMSG_USER, "BLOCKING fill-request, last-request too recent %s line %d\n", func, line);
+		}
+		return 1;
+	}
+	if ((now - last_fill_record) < gbl_throttle_fill_reqs) {
+		if (gbl_verbose_fills) {
+			logmsg(LOGMSG_USER, "BLOCKING fill-request, last-fill-record too recent %s line %d\n", func, line);
+		}
+		return 1;
+	}
+	return 0;
 }
 
 int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, DBT *max_lsn, int flags, 
 					 void *usr_ptr, const char *func, int line)
 {
-    static int lasttime = 0, count = 0;
+	static int lasttime = 0, count = 0;
+	// throttle rep-log-requests which request a range
+	if (max_lsn != NULL) {
+		if (throttle_fill_request(func, line)) {
+			return 0;
+		}
+	}
 	int rc = __rep_send_message(dbenv, master_eid, REP_LOG_REQ, lsn, max_lsn, flags, NULL);
-    count++;
+	if (max_lsn != NULL) {
+		last_fill_req_ms = comdb2_time_epochms();
+		last_fill_request = comdb2_time_epoch();
+	}
+	count++;
 
 	if (gbl_verbose_fills) {
 		DB_LSN tmp_lsn = {0};
@@ -487,20 +535,20 @@ int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, DBT *max_lsn,
 		}
 		logmsg(LOGMSG_USER, "SENDING rep_log_req %d:%d to %d:%d from %s line %d rc=%d\n",
 			lsn->file, lsn->offset, tmp_lsn.file, tmp_lsn.offset, func, line, rc);
-        timed_cheapstack("send_rep_log_req", &lasttime, count);
+		timed_cheapstack("send_rep_log_req", &lasttime, count);
 	}
 	return rc;
 }
 
 int send_rep_verify_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, const char *func, int line)
 {
-    static int lasttime = 0, count = 0;
+	static int lasttime = 0, count = 0;
 	int rc = __rep_send_message(dbenv, master_eid, REP_VERIFY_REQ, lsn, NULL, 0, NULL);
-    count++;
+	count++;
 	if (gbl_verbose_fills) {
 		logmsg(LOGMSG_USER, "SENDING rep_verify_req %d:%d from %s line %d rc=%d\n", lsn->file,
 				lsn->offset, func, line, rc);
-        timed_cheapstack("send_rep_verify_req", &lasttime, count);
+		timed_cheapstack("send_rep_verify_req", &lasttime, count);
 	}
 	return rc;
 }
@@ -508,22 +556,35 @@ int send_rep_verify_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, const char
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 					 const char *func, int line)
 {
-    static int lasttime = 0, count = 0;
+	static int lasttime = 0, count = 0;
 	if (gbl_dedup_rep_all_reqs && rep_qstat_has_allreq()) {
 		if (gbl_verbose_fills) {
 			logmsg(LOGMSG_DEBUG, "BLOCKING rep_all_req from %s line %d\n", func, line);
 		}
 		return 0;
 	}
+	if (throttle_fill_request(func, line)) {
+		return 0;
+	}
+	if (fake_fill_req_drop(func, line)) {
+		return 0;
+	}
 	int rc = __rep_send_message(dbenv, master_eid, REP_ALL_REQ, lsn, NULL, flags, NULL);
-    count++;
+	count++;
+	last_fill_req_ms = comdb2_time_epochms();
+	last_fill_request = comdb2_time_epoch();
 	if (gbl_verbose_fills) {
 		logmsg(LOGMSG_USER, "SENDING rep_all_req %d:%d from %s line %d rc=%d\n",
 			lsn->file, lsn->offset, func, line, rc);
-        timed_cheapstack("send_rep_all_req", &lasttime, count);
+		timed_cheapstack("send_rep_all_req", &lasttime, count);
 	}
 	return rc;
 }
+
+enum {
+	REP_APPLY_DECOUPLED = 0x00000001,
+	REP_APPLY_INIT	  = 0x00000002
+};
 
 static void *apply_thread(void *arg) 
 {
@@ -616,7 +677,11 @@ static void *apply_thread(void *arg)
 			if (rep->gen == q->gen) {
 				static int last_print = 0, last_applying_print = 0;
 				static unsigned long long count = 0;
+				uint32_t flags = REP_APPLY_DECOUPLED;
 				int now;
+				if (q->rp->rectype == REP_LOG_INIT) {
+					flags |= REP_APPLY_INIT;
+				}
 
 				if (gbl_verbose_fills && ((now = time(NULL)) -
 							last_applying_print)) {
@@ -625,7 +690,7 @@ static void *apply_thread(void *arg)
 					last_applying_print = now;
 				}
 
-				ret = __rep_apply(dbenv, q->rp, &rec, &ret_lsnp, &q->gen, 1);
+				ret = __rep_apply(dbenv, q->rp, &rec, &ret_lsnp, &q->gen, flags);
 				Pthread_mutex_unlock(&rep_candidate_lock);
 				if (ret == 0 || ret == DB_REP_ISPERM) {
 					bdb_set_seqnum(dbenv->app_private);
@@ -660,7 +725,6 @@ static void *apply_thread(void *arg)
 					if (master_eid != db_eid_invalid && 
 							(rc = send_rep_all_req(dbenv, master_eid, &lsn, 
 							 flags, __func__, __LINE__)) == 0) {
-						last_fill = comdb2_time_epochms();
 						if (gbl_verbose_fills) {
 							logmsg(LOGMSG_USER, "%s line %d continue "
 									"REP_ALL_REQ lsn %d:%d\n", __func__,
@@ -785,7 +849,7 @@ static void *apply_thread(void *arg)
 
 		/* There's a log_more in the queue */
 		if (log_fill_count || comdb2_time_epochms() -
-				last_fill < gbl_fills_waitms) {
+				last_fill_req_ms < gbl_fills_waitms) {
 			bdb_relthelock(__func__, __LINE__);
 			Pthread_mutex_lock(&rep_queue_lock);
 			continue;
@@ -805,7 +869,6 @@ static void *apply_thread(void *arg)
 			/* Request all records from the master */
 			if ((ret = send_rep_all_req(dbenv, master_eid, &my_lsn, 0, 
 							__func__, __LINE__)) == 0) {
-				last_fill = comdb2_time_epochms();
 				if (gbl_verbose_fills) {
 					logmsg(LOGMSG_USER, "%s line %d successful REP_ALL_REQ from %d:%d "
 							"behind=%llu\n", __func__, __LINE__, 
@@ -825,7 +888,6 @@ static void *apply_thread(void *arg)
 
 			if ((ret = send_rep_log_req(dbenv, master_eid, &my_lsn, &max_lsn_dbt,
 					0, NULL, __func__, __LINE__)) == 0) {
-				last_fill = comdb2_time_epochms();
 
 				if (gbl_verbose_fills) {
 					logmsg(LOGMSG_USER, "%s line %d successful REP_LOG_REQ"
@@ -1589,7 +1651,8 @@ more:
 #endif
 	case REP_LOG_FILL:
 	case REP_LOG_MORE:
-		last_fill = comdb2_time_epochms();
+		last_fill_record = comdb2_time_epoch();
+	case REP_LOG_INIT:
 	case REP_LOG:
 		CLIENT_ONLY(rep, rp);
 		MASTER_CHECK(dbenv, *eidp, rep);
@@ -1605,8 +1668,12 @@ more:
 					goto errlock;
 			} else {
 				fromline = __LINE__;
+                uint32_t flags = 0;
+                if (rp->rectype == REP_LOG_INIT) {
+                    flags |= REP_LOG_INIT;
+                }
 				if (((ret = __rep_apply(dbenv, rp, rec, ret_lsnp,
-								commit_gen, 0)) != 0) && (ret != DB_REP_ISPERM) && (ret != DB_REP_NOTPERM)) {
+								commit_gen, flags)) != 0) && (ret != DB_REP_ISPERM) && (ret != DB_REP_NOTPERM)) {
 					if (gbl_verbose_fills) {
 						logmsg(LOGMSG_USER, "%s:%d APPLY %d:%d returns %d, breaking\n",
 							__func__, __LINE__, rp->lsn.file, rp->lsn.offset, ret);
@@ -3024,17 +3091,20 @@ int gbl_always_request_gap = 0;
  * process and manage incoming log records.
  */
 static int
-__rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
+__rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, flags)
+
 	DB_ENV *dbenv;
 	REP_CONTROL *rp;
 	DBT *rec;
 	DB_LSN *ret_lsnp;
 	uint32_t *commit_gen;
-	int decoupled;
+	uint32_t flags;
 {
 	__dbreg_register_args dbreg_args;
 	__txn_ckp_args *ckp_args = NULL;
 	static int count_in_func = 0;
+    int decoupled = (flags & REP_APPLY_DECOUPLED);
+    int init_do_req = (flags & REP_APPLY_INIT);
 	DB_REP *db_rep;
 	DBT control_dbt, key_dbt, lsn_dbt;
 	DBT max_lsn_dbt, *max_lsn_dbtp, nextrec_dbt, rec_dbt;
@@ -3340,6 +3410,8 @@ gap_check:		max_lsn_dbtp = NULL;
 				if (!r) {
 					/* set ret to 0 (repdb case sets ret to db_c_close rc) */
 					ZERO_LSN(lp->waiting_lsn);
+					last_fill_record = 0;
+					last_fill_request = 0;
 					break;
 				}
 				grp = r->repctl;
@@ -3360,6 +3432,9 @@ gap_check:		max_lsn_dbtp = NULL;
 
 				if (ret == DB_NOTFOUND) {
 					ZERO_LSN(lp->waiting_lsn);
+					last_fill_record = 0;
+					last_fill_request = 0;
+
 					/*
 					 * Whether or not the current record is
 					 * simple, there's no next one, and
@@ -3400,7 +3475,7 @@ gap_check:		max_lsn_dbtp = NULL;
 			next_lsn = lp->ready_lsn;
 			do_req = ++lp->rcvd_recs >= lp->wait_recs;
 
-			if (gbl_always_request_gap) {
+			if (gbl_always_request_gap || init_do_req) {
 				do_req = 1;
 			}
 
@@ -3895,13 +3970,13 @@ int gbl_time_rep_apply = 0;
 static pthread_mutex_t apply_lk = PTHREAD_MUTEX_INITIALIZER;
 
 static int
-__rep_apply(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
+__rep_apply(dbenv, rp, rec, ret_lsnp, commit_gen, flags)
 	DB_ENV *dbenv;
 	REP_CONTROL *rp;
 	DBT *rec;
 	DB_LSN *ret_lsnp;
 	uint32_t *commit_gen;
-	int decoupled;
+    uint32_t flags;
 {
 	static unsigned long long rep_apply_count = 0;
 	static unsigned long long rep_apply_usc = 0;
@@ -3917,7 +3992,7 @@ __rep_apply(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 
 	Pthread_mutex_lock(&apply_lk);
 	getbbtime(&start);
-	rc = __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled);
+	rc = __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, flags);
 	getbbtime(&end);
 	Pthread_mutex_unlock(&apply_lk);
 	usecs = diff_bbtime(&end, &start);
@@ -7914,7 +7989,6 @@ finish:ZERO_LSN(lp->waiting_lsn);
 		MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 		if (send_rep_all_req(dbenv, master, &rp->lsn, DB_REP_NODROP,
 					__func__, __LINE__) == 0) {
-			last_fill = comdb2_time_epochms();
 			if (gbl_verbose_fills) {
 				logmsg(LOGMSG_USER, "%s line %d successful REP_ALL_REQ for "
 						"%d:%d\n", __func__, __LINE__, rp->lsn.file,

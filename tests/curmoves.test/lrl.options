@@ -17,3 +17,5 @@ throttle_logput_trace 1
 set_coherent_state_trace 1
 wait_for_seqnum_trace 1
 verbose_repmore_trace 1
+rep_flush 0
+rep_flush_init 1
