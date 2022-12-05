@@ -116,7 +116,6 @@ static int reset_recovery_processor(struct __recovery_processor *rp);
 extern int bdb_purge_logical_transactions(void *statearg, DB_LSN *trunclsn);
 extern int set_commit_context(unsigned long long context, uint32_t *generation,
 	void *plsn, void *args, unsigned int rectype);
-extern int gbl_berkdb_verify_skip_skipables;
 
 static int __rep_apply __P((DB_ENV *, REP_CONTROL *, DBT *, DB_LSN *,
 	uint32_t *, int));
@@ -2086,17 +2085,15 @@ more2:
 			(ret = __log_c_get(logc, &lsn, &mylog, DB_PREV)) == 0) {
 			match = 0;
 
-			if (gbl_berkdb_verify_skip_skipables) {
+			LOGCOPY_32(&rectype, mylog.data);
+			while (!matchable_log_type(rectype) && (ret =
+				__log_c_get(logc, &lsn, &mylog,
+					DB_PREV)) == 0) {
 				LOGCOPY_32(&rectype, mylog.data);
-				while (!matchable_log_type(rectype) && (ret =
-					__log_c_get(logc, &lsn, &mylog,
-						DB_PREV)) == 0) {
-					LOGCOPY_32(&rectype, mylog.data);
-				}
+			}
 
-				if (ret == DB_NOTFOUND) {
-					goto notfound;
-				}
+			if (ret == DB_NOTFOUND) {
+				goto notfound;
 			}
 
 			MUTEX_LOCK(dbenv, db_rep->db_mutexp);
@@ -2117,43 +2114,32 @@ more2:
 
 		} else if (ret == DB_NOTFOUND) {
 notfound:
-			if (gbl_berkdb_verify_skip_skipables) {
-				__db_err(dbenv,
-					"Log contains only skippable records, chance of diverging logs\n");
-				ret = __log_c_get(logc, &lsn, &mylog, DB_FIRST);
+			__db_err(dbenv,
+				"Log contains only skippable records, chance of diverging logs\n");
+			ret = __log_c_get(logc, &lsn, &mylog, DB_FIRST);
 
-				if (ret == 0) {
-					MUTEX_LOCK(dbenv, db_rep->db_mutexp);
-					lp->verify_lsn = lsn;
-					lp->rcvd_recs = 0;
-					lp->wait_recs = rep->request_gap;
-					MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
+			if (ret == 0) {
+				MUTEX_LOCK(dbenv, db_rep->db_mutexp);
+				lp->verify_lsn = lsn;
+				lp->rcvd_recs = 0;
+				lp->wait_recs = rep->request_gap;
+				MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 
-					match = 0;
+				match = 0;
 
-					/*
-					 * gbl_berkdb_verify_skip_skipables = 0;
-					 */
+				verify_req_count++;
+				if ((now = time(NULL)) > verify_req_print) {
+					logmsg(LOGMSG_INFO, "%s line %d: recovery sending verify_req count=%llu lsn [%d][%d]\n", 
+							__func__, __LINE__, verify_req_count, lsn.file, lsn.offset);
+					verify_req_print = now;
+				}
 
-					/*
-					 * fprintf(stderr, "Client file %s line %d sending verify req for lsn %d:%d\n",
-					 * __FILE__, __LINE__, lsn.file, lsn.offset);
-					 */
+				assert(lsn.file > 0);
+				(void)send_rep_verify_req(dbenv, *eidp, &lsn, __func__, __LINE__);
+			} else
+				abort();
 
-					verify_req_count++;
-					if ((now = time(NULL)) > verify_req_print) {
-						logmsg(LOGMSG_INFO, "%s line %d: recovery sending verify_req count=%llu lsn [%d][%d]\n", 
-								__func__, __LINE__, verify_req_count, lsn.file, lsn.offset);
-						verify_req_print = now;
-					}
-
-					assert(lsn.file > 0);
-					(void)send_rep_verify_req(dbenv, *eidp, &lsn, __func__, __LINE__);
-				} else
-					abort();
-
-				goto rep_verify_err;
-			}
+			goto rep_verify_err;
 			/*
 			 * If we've truly matched on the first record,
 			 * verify to that.

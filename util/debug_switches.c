@@ -60,7 +60,6 @@ static struct debug_switches {
     int skip_duplicate_seqnums;
     int allow_key_typechange;
     int check_for_hung_checkpoint_thread;
-    int skip_skipables_on_verify;
     int verbose_deadlocks;
     int stack_on_deadlock;
     int verbose_fix_pinref;
@@ -119,7 +118,6 @@ int init_debug_switches(void)
     debug_switches.skip_duplicate_seqnums = 1;
     debug_switches.allow_key_typechange = 0;
     debug_switches.check_for_hung_checkpoint_thread = 0;
-    debug_switches.skip_skipables_on_verify = 1;
     debug_switches.verbose_deadlocks = 0;
     debug_switches.stack_on_deadlock = 0;
     debug_switches.verbose_fix_pinref = 1;
@@ -214,8 +212,6 @@ int init_debug_switches(void)
     register_int_switch("check_for_hung_checkpoint_thread",
                         "check_for_hung_checkpoint_thread",
                         &debug_switches.check_for_hung_checkpoint_thread);
-    register_int_switch("skip_skipables_on_verify", "skip_skipables_on_verify",
-                        &debug_switches.skip_skipables_on_verify);
     register_int_switch("verbose_deadlocks", "verbose_deadlocks",
                         &debug_switches.verbose_deadlocks);
     register_int_switch("stack_on_deadlock", "stack_on_deadlock",
@@ -396,10 +392,6 @@ int debug_switch_allow_key_typechange(void)
 int debug_switch_check_for_hung_checkpoint_thread(void)
 {
     return debug_switches.check_for_hung_checkpoint_thread;
-}
-int debug_switch_skip_skipables_on_verify(void)
-{
-    return debug_switches.skip_skipables_on_verify;
 }
 int debug_switch_verbose_deadlocks(void)
 {

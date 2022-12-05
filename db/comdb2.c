@@ -623,8 +623,6 @@ int gbl_reallyearly = 0;
 
 int gbl_udp = 1;
 
-int gbl_berkdb_verify_skip_skipables = 0;
-
 int gbl_berkdb_epochms_repts = 0;
 
 int gbl_disable_sql_dlmalloc = 0;
@@ -5321,9 +5319,6 @@ int main(int argc, char **argv)
 
     if (gbl_clean_exit_on_sigterm)
         signal(SIGTERM, clean_exit_sigwrap);
-
-    if (debug_switch_skip_skipables_on_verify())
-        gbl_berkdb_verify_skip_skipables = 1;
 
     init_q_vars();
 
