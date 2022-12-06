@@ -220,6 +220,7 @@ extern int gbl_rep_wait_core_ms;
 extern int gbl_rep_flush;
 extern int gbl_rep_flush_init;
 extern int gbl_throttle_fill_reqs;
+extern int gbl_fake_fill_req_drop;
 extern int gbl_fake_fill_drop;
 extern int gbl_random_get_curtran_failures;
 extern int gbl_fail_client_write_lock;

@@ -19,3 +19,5 @@ wait_for_seqnum_trace 1
 verbose_repmore_trace 1
 rep_flush 0
 rep_flush_init 1
+rep_fake_fill_drop 0
+rep_fake_fill_req_drop 0

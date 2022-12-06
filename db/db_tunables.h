@@ -1639,8 +1639,13 @@ REGISTER_TUNABLE("rep_throttle_fill",
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
 REGISTER_TUNABLE("rep_fake_fill_drop",
-                 "Fake fill-request drop.  (Default: 0)",
+                 "Fake fill drop.  (Default: 0)",
                  TUNABLE_INTEGER, &gbl_fake_fill_drop,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("rep_fake_fill_req_drop",
+                 "Fake log-request drop.  (Default: 0)",
+                 TUNABLE_INTEGER, &gbl_fake_fill_req_drop,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
 REGISTER_TUNABLE("rep_mon_threshold",

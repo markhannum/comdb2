@@ -476,11 +476,24 @@ static void timed_cheapstack(const char *msg, int *lasttime, int count)
 	}
 }
 
+int gbl_fake_fill_req_drop = 0;
 int gbl_fake_fill_drop = 0;
+
+static int fake_fill_drop(int type, const char *func, int line)
+{
+	int fake_drop = gbl_fake_fill_drop;
+	if (fake_drop > 1 && !(rand() % fake_drop)) {
+		if (gbl_verbose_fills) {
+			logmsg(LOGMSG_USER, "fake-drop fill-req type %d from %s line %d\n", type, func, line);
+		}
+		return 1;
+	}
+	return 0;
+}
 
 static int fake_fill_req_drop(const char *func, int line)
 {
-	int fake_drop = gbl_fake_fill_drop;
+	int fake_drop = gbl_fake_fill_req_drop;
 	if (fake_drop > 1 && !(rand() % fake_drop)) {
 		if (gbl_verbose_fills) {
 			logmsg(LOGMSG_USER, "fake-drop fill-req from %s line %d\n", func, line);
@@ -520,6 +533,9 @@ int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, DBT *max_lsn,
 		if (throttle_fill_request(func, line)) {
 			return 0;
 		}
+		if (fake_fill_req_drop(func, line)) {
+			return 0;
+		}
 	}
 	int rc = __rep_send_message(dbenv, master_eid, REP_LOG_REQ, lsn, max_lsn, flags, NULL);
 	if (max_lsn != NULL) {
@@ -551,6 +567,63 @@ int send_rep_verify_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, const char
 		timed_cheapstack("send_rep_verify_req", &lasttime, count);
 	}
 	return rc;
+}
+
+int gbl_trace_repmore_reqs = 0;
+
+static int
+send_fill(dbenv, eid, rtype, lsnp, dbtp, flags, usr_ptr, timerp, func, line)
+    DB_ENV *dbenv;
+    char *eid;
+    u_int32_t rtype;
+    DB_LSN *lsnp;
+    const DBT *dbtp;
+    u_int32_t flags;
+    void *usr_ptr;
+    int *timerp;
+    const char *func;
+    int line;
+{
+    if (fake_fill_drop(rtype, func, line)) {
+        return 0;
+    }
+    return __rep_time_send_message(dbenv, eid, rtype, lsnp, dbtp, flags, usr_ptr, timerp);
+}
+
+
+static int
+send_log_more(dbenv, eid, typep, lsnp, dbtp, flags, func, line)
+    DB_ENV *dbenv;
+    char *eid;
+    u_int32_t *typep;
+    DB_LSN *lsnp;
+    const DBT *dbtp;
+    u_int32_t flags;
+    const char *func;
+    int line;
+{
+    /* Net queue could be full: send REP_LOG_MORE with the
+     * NODROP flag lit */
+    int ret;
+    *typep = REP_LOG_MORE;
+    flags |= (DB_REP_NODROP|DB_REP_NOBUFFER);
+    if (gbl_trace_repmore_reqs)
+        flags |= DB_REP_TRACE;
+
+    if (gbl_verbose_fills){
+        logmsg(LOGMSG_USER, "%s line %d toggled to LOG_MORE to "
+                "%s for LSN %d:%d\n", func, line, eid,
+                lsnp->file, lsnp->offset);
+    }
+
+    /* Replicant re-requests after timeout if this fails */
+    if ((ret = __rep_send_message(dbenv, eid, *typep, lsnp,
+                    dbtp, flags, NULL)) != 0 &&
+            gbl_verbose_fills) {
+        logmsg(LOGMSG_USER, "%s line %d failed LOG_MORE for %s,"
+                " %d\n", func, line, eid, ret);
+    }
+    return (ret);
 }
 
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
@@ -1526,9 +1599,8 @@ skip:				/*
 			 */
 			if (lsn.file != oldfilelsn.file) {
 				/* REP_NEWFILE is not throttled. */
-				(void)__rep_time_send_message(dbenv,
-						*eidp, REP_NEWFILE, &oldfilelsn, NULL,
-						sendflags, NULL, &sendtime);
+				(void)send_fill(dbenv, *eidp, REP_NEWFILE, &oldfilelsn,NULL,
+						sendflags, NULL, &sendtime, __func__, __LINE__);
 			}
 
 			R_LOCK(dbenv, &dblp->reginfo);
@@ -1581,13 +1653,13 @@ skip:				/*
 			}
 #endif
 
-			if ((rc = __rep_time_send_message(dbenv, *eidp, type, &lsn, &data_dbt,
-							sendflags, NULL, &sendtime)) != 0) {
+			if ((rc = send_fill(dbenv, *eidp, type, &lsn, &data_dbt,
+							sendflags, NULL, &sendtime, __func__, __LINE__)) != 0) {
 more:
 				/* Net queue could be full. Send LOG_MORE to throttle.
 				   We will break out of the loop afterwards because type
 				   is changed in __rep_send_log_more() */
-				ret = __rep_send_log_more(dbenv, *eidp, &type,
+				ret = send_log_more(dbenv, *eidp, &type,
 						&lsn, &data_dbt, sendflags, __func__, __LINE__);
 			} else {
 				if (gbl_verbose_fills && send_count == 0) {
@@ -1788,7 +1860,6 @@ more:
 		int resp_rc;
 		sendflags = DB_REP_SENDACK;
 
-		//type = gbl_decoupled_logputs ? REP_LOG_FILL : REP_LOG_LOGPUT;
 		type = REP_LOG_FILL;
 		if (gbl_verbose_fills) {
 			if (rec && rec->size != 0) {
@@ -1809,8 +1880,8 @@ more:
 			oldfilelsn.offset += logc->c_len;
 			bytes_sent += (data_dbt.size + sizeof(REP_CONTROL));
 
-			if ((resp_rc = __rep_time_send_message(dbenv, *eidp, type, &rp->lsn,
-						&data_dbt, sendflags, NULL, &sendtime))
+			if ((resp_rc = send_fill(dbenv, *eidp, type, &rp->lsn,
+						&data_dbt, sendflags, NULL, &sendtime, __func__, __LINE__))
 					!= 0 && gbl_verbose_fills) {
 				logmsg(LOGMSG_USER, "%s line %d failed for %d:%d\n",
 						__func__, __LINE__, lsn.file, lsn.offset);
@@ -1864,9 +1935,9 @@ more:
 					}
 				} else {
 					endlsn.offset += logc->c_len;
-					if ((resp_rc = __rep_time_send_message(dbenv, *eidp,
+					if ((resp_rc = send_fill(dbenv, *eidp,
 						REP_NEWFILE, &endlsn, NULL,
-						rec == NULL ? DB_REP_NOBUFFER : 0, NULL, &sendtime)) != 0 &&
+						rec == NULL ? DB_REP_NOBUFFER : 0, NULL, &sendtime, __func__, __LINE__)) != 0 &&
 							gbl_verbose_fills) {
 						logmsg(LOGMSG_USER, "%s line %d failed to send newfile "
 								"for LSN %d:%d\n", __func__, __LINE__, 
@@ -1895,9 +1966,9 @@ more:
 
 			/* IMPORTANT: send NEWFILE before breaking out of loop */
 			if (lsn.file != oldfilelsn.file) {
-				if ((resp_rc = __rep_time_send_message(dbenv,
+				if ((resp_rc = send_fill(dbenv,
 					*eidp, REP_NEWFILE, &oldfilelsn, NULL,
-					sendflags, NULL, &sendtime)) != 0 &&
+					sendflags, NULL, &sendtime, __func__, __LINE__)) != 0 &&
 					gbl_verbose_fills) {
 					logmsg(LOGMSG_USER, "%s line %d failed to send newfile "
 							"for LSN %d:%d, %d\n", __func__, __LINE__, 
@@ -1924,11 +1995,12 @@ more:
 				goto more2;
 			}
 
-			if ((resp_rc = __rep_time_send_message(dbenv, *eidp, type, &lsn,
-							&data_dbt, sendflags, NULL, &sendtime)) != 0) {
+			if ((resp_rc = send_fill(dbenv, *eidp, type, &lsn,
+							&data_dbt, sendflags, NULL, &sendtime, __func__, 
+							__LINE__)) != 0) {
 more2:
 				/*  log_more resets the type which breaks out of the loop. */
-				resp_rc = __rep_send_log_more(dbenv, *eidp, &type, &lsn, &data_dbt,
+				resp_rc = send_log_more(dbenv, *eidp, &type, &lsn, &data_dbt,
 						sendflags, __func__, __LINE__);
 			}
 		}
@@ -3468,14 +3540,27 @@ gap_check:		max_lsn_dbtp = NULL;
 
 		if (!IS_ZERO_LSN(lp->waiting_lsn) &&
 			log_compare(&lp->ready_lsn, &lp->waiting_lsn) != 0) {
+
 			/*
-			 * We got a record and processed it, but we may
-			 * still be waiting for more records.
+			 * We got a record and processed it, but we may still be waiting for
+			 * more records.
+			 * 
+			 * This is in the 'cmp == 0' case.  The code above will always reset 
+			 * rcvd_recs to 0 ..  this means that in stock-berkley, the only way 
+			 * to set do_req to 1 is if we've continued a fill from repdb 
+			 * (wait_recs sets to 0).
+			 * 
+			 * Because rcvd_recs is always set to 0, stock-berkley won't trigger 
+			 * a fill request with a matching record.  ON THE OTHER HAND.. we 
+			 * CHANGED this code some time ago, before we understood it, and 
+			 * always set do_req to 1 in this case.
 			 */
+
 			next_lsn = lp->ready_lsn;
 			do_req = ++lp->rcvd_recs >= lp->wait_recs;
 
-			if (gbl_always_request_gap || init_do_req) {
+			// if init_do_req compares to 0, then there shouldn't be a gap
+			if (gbl_always_request_gap) {
 				do_req = 1;
 			}
 
@@ -3545,7 +3630,7 @@ gap_check:		max_lsn_dbtp = NULL;
 				}
 			}
 		}
-    // XXX HIGHER RECORD
+	// XXX HIGHER RECORD
 	} else if (cmp > 0) {
 		/*
 		 * The LSN is higher than the one we were waiting for.
@@ -3562,15 +3647,41 @@ gap_check:		max_lsn_dbtp = NULL;
 		R_UNLOCK(dbenv, &dblp->reginfo);
 		do_req = 0;
 		if (gbl_verbose_fills) {
-            static int lastpr = 0;
+			static int lastpr = 0;
 			logmsg(LOGMSG_USER, "RECEIVED rep_apply %d:%d (higher than %d:%d) wait_recs=%d, rcvd_recs=%d\n",
 				rp->lsn.file, rp->lsn.offset, lp->ready_lsn.file, lp->ready_lsn.offset, lp->wait_recs,
-                lp->rcvd_recs);
-            if (comdb2_time_epoch() - lastpr) {
-                lastpr = comdb2_time_epoch();
-                comdb2_cheapstack_sym(stderr, "higher-lsn");
-            }
+				lp->rcvd_recs);
+			if (comdb2_time_epoch() - lastpr) {
+				lastpr = comdb2_time_epoch();
+				comdb2_cheapstack_sym(stderr, "higher-lsn");
+			}
 		}
+
+		/* Only add less than the oldest */
+		/* First add this record to repdb & set waiting_lsn */
+		if (inmem_repdb) {
+			repdb_enqueue(rp, rec, decoupled);
+			ret = 0;
+		} else {
+			disable_random_deadlocks = 1;
+			ret = __db_put(dbp, NULL, &key_dbt, rec, 0);
+			if (ret != 0)
+				abort();
+			disable_random_deadlocks = 0;
+		}
+
+		rep->stat.st_log_queued++;
+		rep->stat.st_log_queued_total++;
+		if (rep->stat.st_log_queued_max < rep->stat.st_log_queued)
+			rep->stat.st_log_queued_max = rep->stat.st_log_queued;
+
+		// XXX i don't think this makes sense .. shouldn't this be set above .. ???
+		// Maybe this intentionally trails??
+		if (IS_ZERO_LSN(lp->waiting_lsn) ||
+			log_compare(&rp->lsn, &lp->waiting_lsn) < 0) {
+			lp->waiting_lsn = rp->lsn;
+		}
+
 		if (lp->wait_recs == 0) {
 			/*
 			 * This is a new gap. Initialize the number of
@@ -3583,7 +3694,7 @@ gap_check:		max_lsn_dbtp = NULL;
 			zero_max_wait_lsn(lp, __func__, __LINE__);
 		}
 
-		if (++lp->rcvd_recs >= lp->wait_recs) {
+		if (++lp->rcvd_recs >= lp->wait_recs || init_do_req) {
 			/*
 			 * If we've waited long enough, request the record
 			 * (or set of records) and double the wait interval.
@@ -3630,33 +3741,6 @@ gap_check:		max_lsn_dbtp = NULL;
 			lastpr = now;
 		}
 #endif
-		/* Only add less than the oldest */
-		if (inmem_repdb) {
-			repdb_enqueue(rp, rec, decoupled);
-			ret = 0;
-		} else {
-			disable_random_deadlocks = 1;
-			ret = __db_put(dbp, NULL, &key_dbt, rec, 0);
-			if (ret != 0)
-				abort();
-			disable_random_deadlocks = 0;
-		}
-
-		rep->stat.st_log_queued++;
-		rep->stat.st_log_queued_total++;
-		if (rep->stat.st_log_queued_max < rep->stat.st_log_queued)
-			rep->stat.st_log_queued_max = rep->stat.st_log_queued;
-
-		if (ret != 0) {
-			goto done;
-		}
-
-        // XXX i don't think this makes sense
-		if (IS_ZERO_LSN(lp->waiting_lsn) ||
-			log_compare(&rp->lsn, &lp->waiting_lsn) < 0) {
-			lp->waiting_lsn = rp->lsn;
-		}
-
 		if (do_req) {
 			/* Request the LSN we are still waiting for. */
 			MUTEX_LOCK(dbenv, db_rep->rep_mutexp);

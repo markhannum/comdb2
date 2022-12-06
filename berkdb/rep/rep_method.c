@@ -1653,7 +1653,7 @@ err:	if ((t_ret = __log_c_close(logc)) != 0 && ret == 0)
 /*
  * __rep_flush_init --
  *	Re-push the last log record to all clients, in case they've lost
- * messages and don't know it.  This use REP_LOG_FLUSH to skip the normal 
+ * messages and don't know it.  This use REP_LOG_FLUSH to skip the normal
  * codepath of waiting for lots of 'dups' before sending the rep_log_req.
  */
 
