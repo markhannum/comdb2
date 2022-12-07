@@ -103,8 +103,6 @@ __rep_region_init(dbenv)
 		 * Set default values for the min and max log records that we
 		 * wait before requesting a missing log record.
 		 */
-		rep->request_gap = DB_REP_REQUEST_GAP;
-		rep->max_gap = DB_REP_MAX_GAP;
 		F_SET(rep, REP_F_NOARCHIVE);
         (void)time(&rep->timestamp);
 	} else

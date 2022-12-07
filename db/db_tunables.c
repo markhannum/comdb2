@@ -219,6 +219,8 @@ extern int gbl_rep_wait_release_ms;
 extern int gbl_rep_wait_core_ms;
 extern int gbl_rep_flush;
 extern int gbl_rep_flush_init;
+extern int gbl_rep_request_gap;
+extern int gbl_rep_max_gap;
 extern int gbl_throttle_fill_reqs;
 extern int gbl_fake_fill_req_drop;
 extern int gbl_fake_fill_drop;

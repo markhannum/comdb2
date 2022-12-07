@@ -826,10 +826,6 @@ __rep_set_request(dbenv, min, max)
 	/*
 	 * Note we acquire the rep_mutexp or the db_mutexp as needed.
 	 */
-	MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
-	rep->request_gap = min;
-	rep->max_gap = max;
-	MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 
 	MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 	dblp = dbenv->lg_handle;

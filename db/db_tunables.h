@@ -1638,6 +1638,16 @@ REGISTER_TUNABLE("rep_throttle_fill",
                  TUNABLE_INTEGER, &gbl_throttle_fill_reqs,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("rep_request_gap",
+                 "Replication retransmission threshold.  (Default: 64)",
+                 TUNABLE_INTEGER, &gbl_rep_request_gap,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
+REGISTER_TUNABLE("rep_max_gap",
+                 "Maximum replication retransmission threshold.  (Default: 4096)",
+                 TUNABLE_INTEGER, &gbl_rep_max_gap,
+                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+
 REGISTER_TUNABLE("rep_fake_fill_drop",
                  "Fake fill drop.  (Default: 0)",
                  TUNABLE_INTEGER, &gbl_fake_fill_drop,

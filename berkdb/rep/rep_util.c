@@ -415,6 +415,8 @@ __rep_set_egen(dbenv, func, line, egen)
 
 int gbl_abort_on_incorrect_upgrade;
 extern int gbl_decoupled_logputs;
+extern int gbl_rep_request_gap;
+extern int gbl_rep_max_gap;
 
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 					 const char *func, int line);
@@ -565,7 +567,7 @@ empty:		MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 			 * will get reset once we start receiving these
 			 * records.
 			 */
-			lp->wait_recs = rep->max_gap;
+			lp->wait_recs = gbl_rep_max_gap;
 			MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 			send_rep_all_req(dbenv, rep->master_id, &lsn, DB_REP_NODROP, __func__, __LINE__);
 		} else
@@ -603,7 +605,7 @@ empty:		MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 	MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 	lp->verify_lsn = last_lsn;
 	lp->rcvd_recs = 0;
-	lp->wait_recs = rep->request_gap;
+	lp->wait_recs = gbl_rep_request_gap;
 	MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 	{
 #if 0

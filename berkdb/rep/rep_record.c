@@ -65,6 +65,10 @@ int bdb_is_open(void *bdb_state);
 int rep_qstat_has_fills(void);
 int rep_qstat_has_allreq(void);
 
+int gbl_always_request_gap = 0;
+int gbl_rep_request_gap = 64;
+int gbl_rep_max_gap = 4096;
+
 extern int gbl_rep_printlock;
 extern int gbl_dispatch_rowlocks_bench;
 extern int gbl_rowlocks_bench_logical_rectype;
@@ -1467,8 +1471,8 @@ skip:				/*
 
 				lp->wait_recs *= 2;
 
-				if (lp->wait_recs > rep->max_gap)
-					lp->wait_recs = rep->max_gap;
+				if (lp->wait_recs > gbl_rep_max_gap)
+					lp->wait_recs = gbl_rep_max_gap;
 				lp->rcvd_recs = 0;
 				lsn = lp->verify_lsn;
 			}
@@ -2238,7 +2242,7 @@ more2:
 			MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 			lp->verify_lsn = lsn;
 			lp->rcvd_recs = 0;
-			lp->wait_recs = rep->request_gap;
+			lp->wait_recs = gbl_rep_request_gap;
 			MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 
 			verify_req_count++;
@@ -2261,7 +2265,7 @@ notfound:
 				MUTEX_LOCK(dbenv, db_rep->db_mutexp);
 				lp->verify_lsn = lsn;
 				lp->rcvd_recs = 0;
-				lp->wait_recs = rep->request_gap;
+				lp->wait_recs = gbl_rep_request_gap;
 				MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 
 				match = 0;
@@ -3152,8 +3156,6 @@ static void set_max_wait_lsn(LOG *lp, DB_LSN *lsn, const char *func, int line)
 }
 
 __thread int disable_random_deadlocks = 0;
-int gbl_always_request_gap = 0;
-
 /*
  * __rep_apply --
  *
@@ -3565,7 +3567,7 @@ gap_check:		max_lsn_dbtp = NULL;
 			}
 
 			if (do_req) {
-				lp->wait_recs = rep->request_gap;
+				lp->wait_recs = gbl_rep_request_gap;
 				lp->rcvd_recs = 0;
 				if (log_compare(&rp->lsn,
 					&lp->max_wait_lsn) == 0) {
@@ -3689,7 +3691,7 @@ gap_check:		max_lsn_dbtp = NULL;
 			 * that it be resent.  We grab the limits out of
 			 * the rep without the mutex.
 			 */
-			lp->wait_recs = rep->request_gap;
+			lp->wait_recs = gbl_rep_request_gap;
 			lp->rcvd_recs = 0;
 			zero_max_wait_lsn(lp, __func__, __LINE__);
 		}
@@ -3704,8 +3706,8 @@ gap_check:		max_lsn_dbtp = NULL;
 
 			lp->wait_recs *= 2;
 
-			if (lp->wait_recs > rep->max_gap)
-				lp->wait_recs = rep->max_gap;
+			if (lp->wait_recs > gbl_rep_max_gap)
+				lp->wait_recs = gbl_rep_max_gap;
 
 			/*
 			 * If we've never requested this record, then request
@@ -8069,7 +8071,7 @@ finish:ZERO_LSN(lp->waiting_lsn);
 		 * will get reset once we start receiving these
 		 * records.
 		 */
-		lp->wait_recs = rep->max_gap;
+		lp->wait_recs = gbl_rep_max_gap;
 		MUTEX_UNLOCK(dbenv, db_rep->db_mutexp);
 		if (send_rep_all_req(dbenv, master, &rp->lsn, DB_REP_NODROP,
 					__func__, __LINE__) == 0) {

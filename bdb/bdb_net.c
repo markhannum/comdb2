@@ -168,15 +168,8 @@ int do_ack(bdb_state_type *bdb_state, DB_LSN permlsn, uint32_t generation)
     bdb_state->dbenv->get_rep_gen(bdb_state->dbenv, &seqnum.generation);
     /* Master lease time is 0 (master will ignore) */
 
-//    if (permlsn.file == 0 || seqnum.lsn.file == 0 || permlsn.file == INT_MAX || seqnum.lsn.file == INT_MAX)
     if (permlsn.file == 0 || seqnum.lsn.file == 0)
         abort();
-
-    static DB_LSN lastperm = {0};
-    if (lastperm.file > 0 && permlsn.file > lastperm.file + 1) {
-        abort();
-    }
-    lastperm = permlsn;
 
     new_ack_info(info, BDB_SEQNUM_TYPE_LEN, bdb_state->repinfo->myhost);
 

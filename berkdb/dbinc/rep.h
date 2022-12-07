@@ -36,21 +36,6 @@ typedef struct __rep {
 	u_int32_t	gbytes;		/* Limit on data sent in single... */
 	u_int32_t	bytes;		/* __rep_process_message call. */
 
-
-#define	DB_REP_REQUEST_GAP	64
-#define	DB_REP_MAX_GAP		4096
-
-
-#if 0
-   /* COMDB2 */
-#define	DB_REP_REQUEST_GAP	1
-#define	DB_REP_MAX_GAP		32
-#endif
-
-	u_int32_t	request_gap;	/* # of records to receive before we
-					 * request a missing log record. */
-	u_int32_t	max_gap;	/* Maximum number of records before
-					 * requesting a missing log record. */
 	/* Status change information */
 	u_int32_t	msg_th;		/* Number of callers in rep_proc_msg. */
 	int		start_th;	/* A thread is in rep_start. */

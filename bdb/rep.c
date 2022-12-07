@@ -672,9 +672,8 @@ int is_incoherent(bdb_state_type *bdb_state, const char *host)
     return is_incoherent_complete(bdb_state, host, NULL);
 }
 
-
 int gbl_throttle_logput_trace = 0;
-int gbl_incoherent_logput_window = 0;
+int gbl_incoherent_logput_window = 40000000;
 
 static inline int is_incoherent_complete(bdb_state_type *bdb_state,
                                          const char *host, int *incohwait);
@@ -682,7 +681,6 @@ static inline int is_incoherent_complete(bdb_state_type *bdb_state,
 static int throttle_updates_incoherent_nodes(bdb_state_type *bdb_state,
                                              const char *host)
 {
-    //int ret = 0, now, pr = 0, incohwait = 0;
     int ret = 0, now, pr = 0;
     static int lastpr = 0;
     static unsigned long long throttles = 0;
@@ -710,7 +708,6 @@ static int throttle_updates_incoherent_nodes(bdb_state_type *bdb_state,
             ->seqnums[nodeix(bdb_state->repinfo->master_host)]
             .lsn;
         cntbytes = subtract_lsn(bdb_state, masterlsn, lsnp);
-        //if (lsnp->file == INT_MAX || (!lsnp->file && !masterlsn->file) || cntbytes > window) {
         if (cntbytes > window) {
             ret = 1;
             throttles++;
@@ -767,7 +764,6 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
     int bufsz;
     int rc;
     int outrc;
-    //int is_log = 0;
     int is_log_req = 0;
 
     struct rep_type_berkdb_rep_ctrlbuf_hdr p_rep_type_berkdb_rep_ctrlbuf_hdr = {
@@ -827,32 +823,9 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
     /* get a pointer back to our bdb_state */
     bdb_state = (bdb_state_type *)dbenv->app_private;
 
-
-/*
-    if (rectype == REP_LOG || rectype == REP_LOG_LOGPUT || 
-        rectype == REP_LOG_MORE || rectype == REP_LOG_FILL) {
-        is_log = 1;
-    }
-*/
     if (rectype == REP_LOG_REQ) {
         is_log_req = 1;
     }
-/*
-        DB_LSN seqnum_lsn = {0};
-        DB_LSN thislsn;
-
-        thislsn.file = ntohl(lsnp->file);
-        thislsn.offset = ntohl(lsnp->offset);
-
-        Pthread_mutex_lock(&(bdb_state->seqnum_info->lock));
-        seqnum_lsn = bdb_state->seqnum_info->seqnums[nodeix(host)].lsn;
-        Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
-
-        if (thislsn.file - seqnum_lsn.file > 2) {
-            abort();
-        }
-    }
-*/
 
     if (rectype == REP_LOG_LOGPUT) {
         is_logput = 1;
@@ -1093,22 +1066,6 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
                     }
                 }
 
-                /*
-                if (is_log) {
-                   DB_LSN seqnum_lsn = {0};
-                    DB_LSN tmp;
-
-                    tmp.file = ntohl(rep_control->lsn.file);
-                    tmp.offset = ntohl(rep_control->lsn.offset);
-                    Pthread_mutex_lock(&(bdb_state->seqnum_info->lock));
-                    seqnum_lsn = bdb_state->seqnum_info->seqnums[nodeix(host)].lsn;
-                    Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
-                    // tmp code to catch a bug
-                    if (seqnum_lsn.file > 0 && tmp.file > seqnum_lsn.file && tmp.file - seqnum_lsn.file > 2) {
-                        abort();
-                    }
-                }
-                */
                 int incoherent = 0, incohwait = 0;
                 incoherent = is_incoherent_complete(bdb_state, host, &incohwait);
 
@@ -1167,25 +1124,6 @@ int berkdb_send_rtn(DB_ENV *dbenv, const DBT *control, const DBT *rec,
                 abort();
             }
         }
-
-
-        /*
-        if (is_log) {
-            DB_LSN seqnum_lsn = {0};
-            DB_LSN tmp;
-
-            tmp.file = ntohl(rep_control->lsn.file);
-            tmp.offset = ntohl(rep_control->lsn.offset);
-            Pthread_mutex_lock(&(bdb_state->seqnum_info->lock));
-            seqnum_lsn = bdb_state->seqnum_info->seqnums[nodeix(host)].lsn;
-            Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
-            //if (seqnum_lsn.file > 0 && tmp.file - 3 > seqnum_lsn.file) {
-            if (seqnum_lsn.file > 0 && tmp.file > seqnum_lsn.file && tmp.file - seqnum_lsn.file > 2) {
-                abort();
-            }
-        }
-        */
-
 
         p_rep_type_berkdb_rep_seqnum.seqnum = tmpseq =
             get_seqnum(bdb_state, host);
@@ -1916,13 +1854,8 @@ void net_newnode_rtn(netinfo_type *netinfo_ptr, char *hostname, int portnum)
     if (bdb_state->repinfo->master_host == bdb_state->repinfo->myhost) {
         Pthread_mutex_lock(&(bdb_state->coherent_state_lock));
 
-/*
-        set_coherent_state(bdb_state, hostname, STATE_INCOHERENT_WAIT, __func__,
-                           __LINE__);
-                           */
         set_coherent_state(bdb_state, hostname, STATE_INCOHERENT, __func__,
                            __LINE__);
-
         Pthread_mutex_unlock(&(bdb_state->coherent_state_lock));
 
         /* Colease thread will do this */
@@ -2697,13 +2630,6 @@ static void got_new_seqnum_from_node(bdb_state_type *bdb_state,
                seqnum->lsn.file, seqnum->lsn.offset, seqnum->generation,
                seqnum->commit_generation, mygen, change_coherency);
     }
-
-    /*
-    DB_LSN oldlsn = bdb_state->seqnum_info->seqnums[nodeix(host)].lsn;
-    if (oldlsn.file > 0 && oldlsn.file + 1 < seqnum->lsn.file) {
-        abort();
-    }
-    */
 
     if (should_copy_seqnum(bdb_state, seqnum,
                            &bdb_state->seqnum_info->seqnums[nodeix(host)])) {
@@ -5646,8 +5572,8 @@ int request_delaymore(void *bdb_state_in)
 }
 
 int gbl_rep_wait_core_ms = 0;
-int gbl_rep_flush_init = 0;
-int gbl_rep_flush = 1;
+int gbl_rep_flush_init = 1;
+int gbl_rep_flush = 0;
 
 void *watcher_thread(void *arg)
 {
