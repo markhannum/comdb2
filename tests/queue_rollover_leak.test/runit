@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+export debug=1
+[[ $debug == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+
+export stopfile=./stopfile.txt
+
+function failexit
+{
+    touch $stopfile
+    echo "Failed: $1"
+    exit -1
+}
+
+function verify_up
+{
+    typeset node=$1
+    typeset count=0
+    typeset r=1
+    while [[ "$r" -ne "0" && "$count" -lt 2000 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+        r=$?
+        [[ $r != 0 ]] && sleep 1
+        let count=count+1
+    done
+    [[ $r != 0 ]] && failexit "node $node did not recover in time"
+}
+
+function create_tables
+{
+    $CDB2SQL_EXE -s --cdb2cfg ${CDB2_CONFIG} ${DBNAME} default - <<EOF
+create table foraudit {$(cat foraudit.csc2)}\$\$
+create procedure nop1 version 'noptest' {$(cat nop_consumer.lua)}\$\$
+create lua consumer nop1 on (table foraudit for insert)
+EOF
+    r=$?
+    [[ "$r" -ne 0 ]] && failexit "failed to create tables & queues"
+}
+
+function insert_thread
+{
+    while [[ ! -f $stopfile ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into foraudit values(1)" >/dev/null
+        r=$?
+        [[ $r -ne 0 ]] && failexit "failed to insert: $r"
+    done
+}
+
+function consume_thread
+{
+    while [[ ! -f $stopfile ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "exec procedure nop1()" >/dev/null
+        r=$?
+        [[ $r -ne 0 ]] && failexit "failed to consume: $r"
+    done
+}
+
+function run_test
+{
+    typeset maxtime=600
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    create_tables
+    rm $stopfile
+
+    insert_thread &
+    consume_thread &
+
+    while [[ ! -f $stopfile && "$(date +%s)" -lt $endtime ]]; do
+        for node in $CLUSTER; do
+            verify_up $node
+        done
+        sleep 1
+    done
+
+    [[ -f "$stopfile" ]] && failexit "testcase failed"
+    touch "$stopfile"
+    wait
+}
+
+run_test
+echo
