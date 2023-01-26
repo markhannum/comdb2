@@ -131,12 +131,14 @@ int finalize_drop_table(struct ireq *iq, struct schema_change_type *s,
             sc_errf(s,
                     "Drop partitioned table failed, shard %s not registered\n",
                     db->tablename);
+            logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
             return SC_INTERNAL_ERROR;
         }
         struct errstat err = {0};
         rc = partition_llmeta_delete(tran, s->timepartition_name, &err);
         if (rc) {
             sc_errf(s, "Failed to remove partition llmeta %d\n", err.errval);
+            logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
             return SC_INTERNAL_ERROR;
         }
     }

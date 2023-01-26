@@ -395,6 +395,7 @@ int finalize_add_table(struct ireq *iq, struct schema_change_type *s,
         struct errstat err = {0};
         if (partition_llmeta_delete(tran, s->timepartition_name, &err)) {
             sc_errf(s, "Failed to remove partition llmeta %d\n", err.errval);
+            logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
             return SC_INTERNAL_ERROR;
         }
     }

@@ -1785,6 +1785,11 @@ REGISTER_TUNABLE("disable_tpsc_tblvers",
                  TUNABLE_BOOLEAN, &gbl_disable_tpsc_tblvers, NOARG, NULL, NULL,
                  NULL, NULL);
 
+REGISTER_TUNABLE("debug_leak_shards",
+                 "Don't delete old time-partition shards.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_debug_leak_shards, EXPERIMENTAL | INTERNAL,
+                 NULL, NULL, NULL, NULL);
+
 REGISTER_TUNABLE("abort_irregular_set_durable_lsn",
                  "Abort incorrect calls to set_durable_lsn. (Default: off)",
                  TUNABLE_BOOLEAN, &gbl_abort_irregular_set_durable_lsn,

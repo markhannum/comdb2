@@ -119,7 +119,7 @@ showparams:
 
 $(patsubst %.test,%,$(ALL_TESTS)): basicops
 
-%: %.test
+%: %.test init
 	@N=`$(TESTSROOTDIR)/tools/get_test_counter.sh` && echo TESTID=${TESTID} running in $(TESTDIR) $* $$N/${TOTAL}
 	@cp -r $< $(TESTDIR)/
 	@$(MAKE) -skC $(TESTDIR)/$<

@@ -152,6 +152,7 @@ int add_queue_to_environment(char *table, int avgitemsz, int pagesize)
     newdb = newqdb(thedb, table, avgitemsz, pagesize, 0);
     if (newdb == NULL) {
         logmsg(LOGMSG_ERROR, "add_queue_to_environment:newqdb failed\n");
+        logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
         return SC_INTERNAL_ERROR;
     }
 

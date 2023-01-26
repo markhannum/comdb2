@@ -454,6 +454,7 @@ int do_alter_table(struct ireq *iq, struct schema_change_type *s,
         Pthread_mutex_unlock(&csc2_subsystem_mtx);
         if (local_lock)
             unlock_schema_lk();
+        logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
         return SC_INTERNAL_ERROR;
     }
 
@@ -500,6 +501,7 @@ int do_alter_table(struct ireq *iq, struct schema_change_type *s,
             unlock_schema_lk();
         cleanup_newdb(newdb);
         sc_errf(s, "Internal error");
+        logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
         return SC_INTERNAL_ERROR;
     }
 

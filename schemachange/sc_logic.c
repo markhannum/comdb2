@@ -404,6 +404,7 @@ static int check_table_version(struct ireq *iq, struct schema_change_type *sc)
                          "failed to get version for table:%s rc:%d",
                          sc->tablename, rc);
         iq->errstat.errval = ERR_SC;
+        logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
         return SC_INTERNAL_ERROR;
     }
     if (sc->usedbtablevers != version) {
@@ -411,6 +412,8 @@ static int check_table_version(struct ireq *iq, struct schema_change_type *sc)
                          "stale version for table:%s master:%llu replicant:%d",
                          sc->tablename, version, sc->usedbtablevers);
         iq->errstat.errval = ERR_SC;
+        logmsg(LOGMSG_ERROR, "%s %d table-version leader:%llu replicant:%d??\n",
+            __func__, __LINE__, version, sc->usedbtablevers);
         return SC_INTERNAL_ERROR;
     }
     return 0;

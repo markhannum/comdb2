@@ -236,8 +236,10 @@ int start_schema_change_tran(struct ireq *iq, tran_type *trans)
             free_schema_change_type(s);
             return rc;
         }
-        if (seed == 0 && host == 0)
+        if (seed == 0 && host == 0) {
+            logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
             return SC_INTERNAL_ERROR; // SC_INVALID_OPTIONS?
+        }
         logmsg(LOGMSG_INFO, "stored seed %016llx, stored host %u\n",
                seed, host);
         logmsg(

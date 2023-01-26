@@ -79,6 +79,7 @@ int do_alter_stripes_int(struct schema_change_type *s)
             logmsg(LOGMSG_ERROR,
                    "morestripe: couldn't acquire table writelocks\n");
             unlock_schema_lk();
+            logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
             return SC_INTERNAL_ERROR;
         }
     }
@@ -115,6 +116,7 @@ int do_alter_stripes_int(struct schema_change_type *s)
                 bdb_tran_abort(thedb->bdb_env, sc_logical_tran, &bdberr);
                 unlock_schema_lk();
                 resume_threads(thedb);
+                logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
                 return SC_INTERNAL_ERROR;
             }
 
@@ -156,6 +158,7 @@ int do_alter_stripes_int(struct schema_change_type *s)
     if ((rc = bdb_llog_scdone_tran(thedb->bdb_env, change_stripe, phys_tran,
                                    NULL, 0, &bdberr)) != 0) {
         logmsg(LOGMSG_ERROR, "morestripe: couldn't write scdone record\n");
+        logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
         return SC_INTERNAL_ERROR;
     }
 

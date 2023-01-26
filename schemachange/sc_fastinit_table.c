@@ -96,6 +96,7 @@ int do_fastinit(struct ireq *iq, struct schema_change_type *s, tran_type *tran)
     if (!newdb) {
         sc_client_error(s, "%s", err.errstr);
         Pthread_mutex_unlock(&csc2_subsystem_mtx);
+        logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
         return SC_INTERNAL_ERROR;
     }
 

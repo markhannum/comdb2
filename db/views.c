@@ -1000,6 +1000,8 @@ done:
     return NULL;
 }
 
+int gbl_debug_leak_shards = 0;
+
 static int
 _view_cron_schedule_next_rollout(timepart_view_t *view, int timeCrtRollout,
                                  int timeNextRollout, char *removeShardName,
@@ -1010,7 +1012,7 @@ _view_cron_schedule_next_rollout(timepart_view_t *view, int timeCrtRollout,
     char *tmp_str;
     int tm;
 
-    if (removeShardName) {
+    if (removeShardName && !gbl_debug_leak_shards) {
         /* we need to schedule a purge */
         tm = timeCrtRollout + delete_lag;
 

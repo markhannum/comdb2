@@ -434,6 +434,7 @@ int prepare_table_version_one(tran_type *tran, struct dbtable *db,
     free(ondisk_text);
     if (rc != 0) {
         logmsg(LOGMSG_FATAL, "Couldn't save in llmeta! PANIC!!");
+        abort();
         exit(1);
     }
 
@@ -474,6 +475,7 @@ int fetch_sc_seed(const char *tablename, struct dbenv *thedb,
         logmsg(LOGMSG_ERROR,
                "Can't retrieve schema change seed, rc %d bdberr %d\n",
                rc, bdberr);
+        logmsg(LOGMSG_ERROR, "%s %d INTERNAL ERROR??\n", __func__, __LINE__);
         return SC_INTERNAL_ERROR;
     } else {
         /* found some seed */

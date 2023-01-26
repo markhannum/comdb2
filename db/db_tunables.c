@@ -351,6 +351,7 @@ extern int gbl_queuedb_timeout_sec;
 extern int gbl_timeseries_metrics;
 extern int gbl_metric_maxpoints;
 extern int gbl_metric_maxage;
+extern int gbl_debug_leak_shards;
 extern int gbl_abort_irregular_set_durable_lsn;
 extern int gbl_legacy_defaults;
 extern int gbl_legacy_schema;
