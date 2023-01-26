@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
 
-export debug=1
+#export debug=1
 [[ $debug == "1" ]] && set -x
 
 . ${TESTSROOTDIR}/tools/write_prompt.sh
@@ -68,7 +68,7 @@ function run_test
     typeset endtime=$(( now + maxtime ))
 
     create_tables
-    rm $stopfile
+    rm $stopfile 2>/dev/null >/dev/null
 
     insert_thread &
     consume_thread &
