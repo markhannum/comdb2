@@ -78,7 +78,7 @@ static int __db_lock_move __P((DB_ENV *,
 static int __db_txnlist_find_internal __P((DB_ENV *, void *, db_txnlist_type,
 	u_int32_t, u_int8_t[DB_FILE_ID_LEN], DB_TXNLIST **, int));
 static int __db_txnlist_pgnoadd __P((DB_ENV *, DB_TXNHEAD *,
-	int32_t, u_int8_t[DB_FILE_ID_LEN], char *, db_pgno_t));
+	int32_t, u_int8_t[DB_FILE_ID_LEN], char *, db_pgno_t, db_txnlist_type));
 
 
 /* TODO: dispatch table for these? */
@@ -592,15 +592,14 @@ __db_dispatch(dbenv, dtab, dtabsize, db, lsnp, redo, info)
 					return ret;
 				}
 				make_call = 1;
+				int txnadd = (rectype == DB___txn_xa_regop ? TXN_PREPARE :
+							 (rectype == DB___txn_dist_prepare ? TXN_DIST_PREPARE : TXN_ABORT));
+
 				if (ret == TXN_OK) {
-					ret = __db_txnlist_update(dbenv, info, txnid,
-							rectype == DB___txn_xa_regop ?
-							TXN_PREPARE : TXN_ABORT, NULL);
+					ret = __db_txnlist_update(dbenv, info, txnid, txnadd, NULL);
 #if defined (UFID_HASH_DEBUG)
 					comdb2_cheapstack_sym(stderr, "db_txnlist_update line %d for "
-						"[%d:%d] to %d:", __LINE__, lsnp->file, lsnp->offset,
-						rectype == DB___txn_xa_regop ?
-						TXN_PREPARE : TXN_ABORT);
+						"[%d:%d] to %d:", __LINE__, lsnp->file, lsnp->offset, txnadd);
 #endif
 					if (ret != 0)
 						return ret;
@@ -983,6 +982,7 @@ __db_txnlist_end(dbenv, listp)
 				__os_free(dbenv, p->u.l.lsn_array);
 				break;
 			case TXNLIST_DELETE:
+			case TXNLIST_PGNO_PREPARED:
 			case TXNLIST_PGNO:
 			case TXNLIST_TXNID:
 			default:
@@ -1156,6 +1156,7 @@ __db_txnlist_find_internal(dbenv, listp, type, txnid, uid, txnlistp, delete)
 		DB_ASSERT(i <= hp->generation);
 		generation = hp->gen_array[i].generation;
 		break;
+	case TXNLIST_PGNO_PREPARED:
 	case TXNLIST_PGNO:
 		memcpy(&hash, uid, sizeof(hash));
 		generation = 0;
@@ -1197,6 +1198,7 @@ __db_txnlist_find_internal(dbenv, listp, type, txnid, uid, txnlistp, delete)
 			break;
 
 		case TXNLIST_PGNO:
+		case TXNLIST_PGNO_PREPARED:
 			if (memcmp(uid, p->u.p.uid, DB_FILE_ID_LEN) != 0)
 				continue;
 
@@ -1426,7 +1428,7 @@ __db_add_limbo_fid(dbenv, info, ufid, pgno, count)
 
 	do {
 		if ((ret =
-			__db_txnlist_pgnoadd(dbenv, info, -1, ufid, fname, pgno)) != 0)
+			__db_txnlist_pgnoadd(dbenv, info, -1, ufid, fname, pgno, TXNLIST_PGNO)) != 0)
 			return (ret);
 		pgno++;
 	} while (--count != 0);
@@ -1462,7 +1464,7 @@ __db_add_limbo(dbenv, info, fileid, pgno, count)
 	do {
 		if ((ret =
 		    __db_txnlist_pgnoadd(dbenv, info, fileid, fnp->ufid,
-		    R_ADDR(&dblp->reginfo, fnp->name_off), pgno)) != 0)
+		    R_ADDR(&dblp->reginfo, fnp->name_off), pgno, TXNLIST_PGNO)) != 0)
 			return (ret);
 		pgno++;
 	} while (--count != 0);
@@ -2078,13 +2080,14 @@ __db_limbo_prepare(dbp, txn, elp)
  *	entry for the file and then add the pgno.
  */
 static int
-__db_txnlist_pgnoadd(dbenv, hp, fileid, uid, fname, pgno)
+__db_txnlist_pgnoadd(dbenv, hp, fileid, uid, fname, pgno, type)
 	DB_ENV *dbenv;
 	DB_TXNHEAD *hp;
 	int32_t fileid;
 	u_int8_t uid[DB_FILE_ID_LEN];
 	char *fname;
 	db_pgno_t pgno;
+	db_txnlist_type type;
 {
 	DB_TXNLIST *elp;
 	size_t len;
@@ -2094,7 +2097,7 @@ __db_txnlist_pgnoadd(dbenv, hp, fileid, uid, fname, pgno)
 	elp = NULL;
 
 	if (__db_txnlist_find_internal(dbenv, hp,
-	    TXNLIST_PGNO, 0, uid, &elp, 0) != 0) {
+	    type, 0, uid, &elp, 0) != 0) {
 		if ((ret =
 		    __os_malloc(dbenv, sizeof(DB_TXNLIST), &elp)) != 0)
 			goto err;
@@ -2111,7 +2114,7 @@ __db_txnlist_pgnoadd(dbenv, hp, fileid, uid, fname, pgno)
 
 		elp->u.p.maxentry = 0;
 		elp->u.p.locked = 0;
-		elp->type = TXNLIST_PGNO;
+		elp->type = type;
 		if ((ret = __os_malloc(dbenv,
 		    8 * sizeof(db_pgno_t), &elp->u.p.pgno_array)) != 0)
 			goto err;
@@ -2202,6 +2205,9 @@ __db_txnlist_print(listp)
 				break;
 			case TXN_PREPARE:
 				txntype = "prepare";
+				break;
+			case TXN_DIST_PREPARE:
+				txntype = "dist_prepare";
 				break;
 			case TXN_ABORT:
 				txntype = "abort";

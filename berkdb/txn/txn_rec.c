@@ -285,13 +285,24 @@ __txn_dist_prepare_recover(dbenv, dbtp, lsnp, op, info)
 		/* Backwards roll to a point before the prepare .. we can ignore */
 #endif
 	} else if (op == DB_TXN_ABORT) {
-		/* Either aborted or unresolved */
+		/* Aborted */
 		ret = __txn_recover_abort_prepared(dbenv, argp->dist_txnid, lsnp, &argp->blkseq_key,
 			argp->coordinator_gen, &argp->coordinator_name, &argp->coordinator_tier);
 	} else{
+		assert(op == DB_TXN_BACKWARD_ROLL);
 		/* Either aborted or unresolved */
 		ret = __txn_recover_prepared(dbenv, argp->dist_txnid, lsnp, &argp->blkseq_key,
 			argp->coordinator_gen, &argp->coordinator_name, &argp->coordinator_tier);
+
+		/* Actually aborted - leave in the txnlist as aborted */
+		if (ret == 1) {
+		}
+
+		/* Unresolved - update txnlist to dist_prepared */
+		if (ret == 0) {
+			ret = __db_txnlist_update(dbenv,
+				info, argp->txnid->txnid, TXN_DIST_PREPARED, NULL);
+		}
 	}
 
 	if (ret == 0) {

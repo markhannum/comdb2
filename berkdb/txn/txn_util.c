@@ -529,7 +529,8 @@ int __txn_recover_prepared(dbenv, dist_txnid, prep_lsn, blkseq_key, coordinator_
 		   !!! TODO !!! need to write dist-abort to blkseq  */
 		logmsg(LOGMSG_DEBUG, "Removing aborted prepare from recovered txn list\n");
 		__free_prepared_txn(dbenv, p);
-		return (0);
+		/* Recovery changes to TXN_DIST_PREPARED for limbo */
+		return (1);
 	}
 
 	if ((ret = __os_calloc(dbenv, 1, sizeof(DB_TXN_PREPARED), &p)) != 0) {

@@ -48,7 +48,8 @@ typedef enum {
 	TXNLIST_DELETE,
 	TXNLIST_LSN,
 	TXNLIST_PGNO,
-	TXNLIST_TXNID
+	TXNLIST_TXNID,
+	TXNLIST_PGNO_PREPARED
 } db_txnlist_type;
 
 #define	DB_TXNLIST_MASK(hp, n)  (n % hp->nslots)
