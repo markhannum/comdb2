@@ -3550,8 +3550,8 @@ gap_check:		max_lsn_dbtp = NULL;
 		if ((ret = __txn_dist_prepare_read(dbenv, rec->data, &dist_prepare_args)) != 0) {
 			goto err;
 		}
-		if ((ret = __txn_recover_prepared(dbenv, dist_prepare_args->dist_txnid, &rp->lsn,
-			&dist_prepare_args->blkseq_key, dist_prepare_args->coordinator_gen,
+		if ((ret = __txn_recover_prepared(dbenv, dist_prepare_args->txnid, dist_prepare_args->dist_txnid,
+			&rp->lsn, &dist_prepare_args->blkseq_key, dist_prepare_args->coordinator_gen,
 			&dist_prepare_args->coordinator_name, &dist_prepare_args->coordinator_tier)) != 0) {
 			goto err;
 		}

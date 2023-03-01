@@ -590,6 +590,7 @@ __txn_begin_int_int(txn, prop, we_start_at_this_lsn, flags)
 		region->cur_maxid != TXN_MAXIMUM)
 		region->last_txnid = TXN_MINIMUM - 1;
 
+	/* Every recovered prepare emits txn_recycle */
 	if (prepared_txnid || ((region->last_txnid + 1) == region->cur_maxid)) {
 		if ((ret = __os_malloc(dbenv,
 			sizeof(u_int32_t) * (region->maxtxns + 1), &ids)) != 0)
@@ -1352,14 +1353,21 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 				goto err;
 			}
 		} else {
-
 			/* Log the commit in the parent! */
 			timestamp = comdb2_time_epoch();
 			if (!IS_ZERO_LSN(txnp->last_lsn)) {
-				if ((ret = __txn_child_log(dbenv,
-								txnp->parent, &txnp->parent->last_lsn,
-								0, txnp->txnid, &txnp->last_lsn)) != 0) {
-					goto err;
+				if (txnp->dist_txnid != 0) {
+					if ((ret = __txn_prepared_child_log(dbenv,
+									txnp->parent, &txnp->parent->last_lsn,
+									txnp->dist_txnid, 0, txnp->txnid, &txnp->last_lsn)) != 0) {
+						goto err;
+					}
+				} else {
+					if ((ret = __txn_child_log(dbenv,
+									txnp->parent, &txnp->parent->last_lsn,
+									0, txnp->txnid, &txnp->last_lsn)) != 0) {
+						goto err;
+					}
 				}
 #if defined DEBUG_STACK_AT_TXN_LOG
 				comdb2_cheapstack_sym(stderr, "CHILD-COMMIT TXNID %x LSN [%d:%d]",
@@ -1838,12 +1846,12 @@ __txn_dist_prepare_pp(txnp, dist_txnid, coordinator_name, coordinator_tier, coor
 	txnp->blkseq_key.size = 0;
 
 	if (blkseq_key != NULL) {
-	if ((ret = __os_calloc(dbenv, 1, blkseq_key->size, &txnp->blkseq_key.data)) != 0) {
-		__db_err(dbenv, "failed malloc");
-		return ret;
-	}
-	txnp->blkseq_key.size = blkseq_key->size;
-	memcpy(txnp->blkseq_key.data, blkseq_key->data, blkseq_key->size);
+		if ((ret = __os_calloc(dbenv, 1, blkseq_key->size, &txnp->blkseq_key.data)) != 0) {
+			__db_err(dbenv, "failed malloc");
+			return ret;
+		}
+		txnp->blkseq_key.size = blkseq_key->size;
+		memcpy(txnp->blkseq_key.data, blkseq_key->data, blkseq_key->size);
 	}
 
 	lflags |= DB_TXN_DIST_PREPARE;

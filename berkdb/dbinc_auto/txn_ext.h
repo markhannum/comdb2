@@ -64,6 +64,11 @@ int __txn_ckp_getpgnos __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
 int __txn_ckp_getallpgnos __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
 int __txn_ckp_print __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
 int __txn_ckp_read __P((DB_ENV *, void *, __txn_ckp_args **));
+int __txn_prepared_child_log __P((DB_ENV *, DB_TXN *, DB_LSN *, u_int64_t, u_int32_t, u_int32_t, DB_LSN *));
+int __txn_prepared_child_getpgnos __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
+int __txn_prepared_child_getallpgnos __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
+int __txn_prepared_child_print __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
+int __txn_prepared_child_read __P((DB_ENV *, void *, __txn_prepared_child_args **));
 int __txn_child_log __P((DB_ENV *, DB_TXN *, DB_LSN *, u_int32_t, u_int32_t, DB_LSN *));
 int __txn_child_getpgnos __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
 int __txn_child_getallpgnos __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
@@ -110,7 +115,7 @@ int __txn_stat_pp __P((DB_ENV *, DB_TXN_STAT **, u_int32_t));
 int __txn_closeevent __P((DB_ENV *, DB_TXN *, DB *));
 int __txn_recover_abort_prepared __P((DB_ENV *, u_int64_t dist_txnid, DB_LSN *prep_lsn,
 		DBT *blkseq_key, u_int32_t coordinator_gen, DBT *coordinator_name, DBT *coordinator_tier));
-int __txn_recover_prepared __P((DB_ENV *, u_int64_t dist_txnid, DB_LSN *prep_lsn,
+int __txn_recover_prepared __P((DB_ENV *, DB_TXN *, u_int64_t dist_txnid, DB_LSN *prep_lsn,
 		DBT *blkseq_key, u_int32_t coordinator_gen, DBT *coordinator_name, DBT *coordinator_tier));
 int __txn_master_prepared __P((DB_ENV *, u_int64_t dist_txnid, DB_LSN *prep_lsn,
 		DBT *blkseq_key, u_int32_t coordinator_gen, DBT *coordinator_name, DBT *coordinator_tier));
@@ -121,12 +126,14 @@ int __txn_upgrade_all_prepared __P((DB_ENV *));
 int __txn_downgrade_all_prepared __P((DB_ENV *));
 int __txn_downgrade_and_free_all_prepared __P((DB_ENV *));
 int __txn_abort_recovered_pp __P((DB_ENV *, u_int64_t dist_txnid));
+int __txn_is_prepared __P((DB_ENV *, u_int32_t txnid));
 int __txn_abort_recovered __P((DB_ENV *, u_int64_t dist_txnid));
 int __txn_rep_abort_recovered __P((DB_ENV *, u_int64_t dist_txnid));
 int __txn_rep_discard_recovered __P((DB_ENV *, u_int64_t dist_txnid));
 int __txn_commit_recovered_pp __P((DB_ENV *, u_int64_t dist_txnid));
 int __txn_commit_recovered __P((DB_ENV *, u_int64_t dist_txnid));
 int __txn_discard_recovered_pp __P((DB_ENV *, u_int64_t dist_txnid));
+int __txn_check_prepared_child __P((DB_ENV *, u_int32_t ctxnid, u_int32_t ptxnid));
 int __txn_discard_recovered __P((DB_ENV *, u_int64_t dist_txnid));
 int __txn_prepared_collect_pp __P((DB_ENV *, collect_prepared_f, void *));
 

@@ -290,8 +290,10 @@ __txn_dist_prepare_recover(dbenv, dbtp, lsnp, op, info)
 			argp->coordinator_gen, &argp->coordinator_name, &argp->coordinator_tier);
 	} else{
 		/* Either aborted or unresolved */
-		ret = __txn_recover_prepared(dbenv, argp->dist_txnid, lsnp, &argp->blkseq_key,
-			argp->coordinator_gen, &argp->coordinator_name, &argp->coordinator_tier);
+   		assert(op == DB_TXN_BACKWARD_ROLL);
+		if ((ret = __txn_recover_prepared(dbenv, argp->txnid, argp->dist_txnid, lsnp, &argp->blkseq_key,
+			argp->coordinator_gen, &argp->coordinator_name, &argp->coordinator_tier)) != 0)
+			abort();
 	}
 
 	if (ret == 0) {
@@ -997,6 +999,7 @@ __txn_child_recover(dbenv, dbtp, lsnp, op, info)
 		ret = __db_txnlist_lsnadd(dbenv, info,
 			&argp->c_lsn, TXNLIST_NEW);
 	} else if (op == DB_TXN_BACKWARD_ROLL) {
+		/* Remember if this is a prepared but unresolved transaction */
 		/* Child might exist -- look for it. */
 		c_stat = __db_txnlist_find(dbenv, info, argp->child);
 		p_stat = __db_txnlist_find(dbenv, info, argp->txnid->txnid);

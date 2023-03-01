@@ -121,4 +121,15 @@ typedef struct __txn_dist_commit_args {
 	u_int64_t	context;
 	u_int64_t	timestamp;
 } __txn_dist_commit_args;
+
+#define	DB___txn_prepared_child	20
+typedef struct ___txn_prepared_child_args {
+	u_int32_t type;
+	DB_TXN *txnid;
+	u_int64_t dist_txnid;
+	DB_LSN prev_lsn;
+	u_int32_t	child;
+	DB_LSN	c_lsn;
+} __txn_prepared_child_args;
+
 #endif

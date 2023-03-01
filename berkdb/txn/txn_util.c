@@ -489,19 +489,19 @@ int __txn_recover_abort_prepared(dbenv, dist_txnid, prep_lsn, blkseq_key, coordi
 	return 0;
 }
 
-
 /*
  * __txn_recover_prepared --
  *
  * Collect prepared transactions during recovery's backward-pass.  We should
  * only run this for aborted and unresolved dist-txns.
  *
- * PUBLIC: int __txn_recover_prepared __P((DB_ENV *,
+ * PUBLIC: int __txn_recover_prepared __P((DB_ENV *, DB_TXN *txnid,
  * PUBLIC:	  u_int64_t, DB_LSN *, DBT *, u_int32_t, DBT *, DBT *));
  */
-int __txn_recover_prepared(dbenv, dist_txnid, prep_lsn, blkseq_key, coordinator_gen,
+int __txn_recover_prepared(dbenv, txnid, dist_txnid, prep_lsn, blkseq_key, coordinator_gen,
 		coordinator_name, coordinator_tier)
 	DB_ENV *dbenv;
+	DB_TXN *txnid;
 	u_int64_t dist_txnid;
 	DB_LSN *prep_lsn;
 	DBT *blkseq_key;
@@ -538,6 +538,7 @@ int __txn_recover_prepared(dbenv, dist_txnid, prep_lsn, blkseq_key, coordinator_
 
 	p->dist_txnid = dist_txnid;
 	p->prepare_lsn = *prep_lsn;
+	p->txnid = txnid->txnid;
 
 	if ((ret = __os_calloc(dbenv, 1, blkseq_key->size, &p->blkseq_key.data)) != 0) {
 		__free_prepared_txn(dbenv, p);
@@ -577,6 +578,7 @@ int __txn_recover_prepared(dbenv, dist_txnid, prep_lsn, blkseq_key, coordinator_
 	F_SET(p, DB_DIST_RECOVERED);
 	hash_add(dbenv->prepared_txn_hash, p);
 	Pthread_mutex_unlock(&dbenv->prepared_txn_lk);
+	logmsg(LOGMSG_DEBUG, "%s added unresolved prepared txn %"PRIu64"\n", __func__, dist_txnid);
 	return 0;
 }
 
@@ -604,7 +606,6 @@ int __txn_clear_all_prepared(dbenv)
 	Pthread_mutex_unlock(&dbenv->prepared_txn_lk);
 	return 0;
 }
-
 
 /* 
  * __txn_clear_prepared --
@@ -829,6 +830,26 @@ int __txn_rep_abort_recovered(dbenv, dist_txnid)
 	return 0;
 }
 
+int __txn_is_prepared(dbenv, txnid)
+	DB_ENV *dbenv;
+	u_int32_t txnid;
+{
+/*
+	DB_TXN_PREPARED *p, fnd = {.txnid = txnid };;
+	int ret = 0;
+
+	Pthread_mutex_lock(&dbenv->prepared_txn_lk);
+	if ((p = hash_find(dbenv->txnid_to_dist_hash, &fnd)) != NULL && !F_ISSET(p, DB_DIST_ABORTED)) {
+		logmsg(LOGMSG_DEBUG, "Found unresolved prepared dist-txn %"PRIu64", txnid %"PRIu32"\n",
+			p->dist_txnid, txnid);
+		ret = 1;
+	}
+	Pthread_mutex_unlock(&dbenv->prepared_txn_lk);
+	return ret;
+*/
+	return 0;
+}
+
 int __txn_abort_recovered(dbenv, dist_txnid)
 	DB_ENV *dbenv;
 	u_int64_t dist_txnid;
@@ -905,6 +926,13 @@ int __txn_rep_discard_recovered(dbenv, dist_txnid)
 	return 0;
 }
 
+int __txn_check_prepared_child(dbenv, ctxnid, ptxnid)
+	DB_ENV *dbenv;
+	u_int32_t ctxnid;
+	u_int32_t ptxnid;
+{
+	return 0;
+}
 
 int __txn_discard_recovered(dbenv, dist_txnid)
 	DB_ENV *dbenv;
