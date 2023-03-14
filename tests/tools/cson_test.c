@@ -420,6 +420,25 @@ static void test_o(void)
     cson_output_FILE(arr_val, stdout);
     cson_value_free(arr_val);
 }
+static void test_p(void)
+{
+    puts(__func__);
+    double x;
+    uint64_t *p = (uint64_t *)&x;
+    *p = 0x7ff8000000000000;
+    char *type = "doublefloat", *name = "sp_conv";
+    cson_value *arr_val = cson_value_new_array();
+    cson_array *arr = cson_value_get_array(arr_val);
+    cson_value *binding = cson_value_new_object();
+    cson_object *bobj = cson_value_get_object(binding);
+    cson_object_set(bobj, "name", cson_value_new_string(name, strlen(name)));
+    cson_object_set(bobj, "type", cson_value_new_string(type, strlen(type)));
+    cson_value *value = cson_value_new_double(x);
+    cson_object_set(bobj, "value", value);
+    cson_array_append(arr, binding);
+    cson_output_FILE(arr_val, stdout);
+    cson_value_free(arr_val);
+}
 int main()
 {
     puts(__func__);
@@ -438,5 +457,6 @@ int main()
     test_m();
     test_n();
     test_o();
+    test_p();
     return 0;
 }
