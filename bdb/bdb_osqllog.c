@@ -2324,8 +2324,7 @@ void bdb_update_ltran_lsns(bdb_state_type *bdb_state, DB_LSN regop_lsn,
         return;
 
     if (rectype != DB___txn_regop && rectype != DB___txn_regop_rowlocks &&
-        rectype != DB___txn_regop_gen && rectype != DB___txn_dist_commit && 
-        rectype != DB___txn_dist_prepare)
+        rectype != DB___txn_regop_gen && rectype != DB___txn_dist_commit)
         return;
 
     if (rectype == DB___txn_regop)
@@ -2334,8 +2333,6 @@ void bdb_update_ltran_lsns(bdb_state_type *bdb_state, DB_LSN regop_lsn,
         arggenp = (__txn_regop_gen_args *)args;
     else if (rectype == DB___txn_dist_commit)
         argdistp = (__txn_dist_commit_args *)args;
-    else if (rectype == DB___txn_dist_prepare)
-        argprepp = (__txn_dist_prepare_args *)args;
     else
         argrlp = (__txn_regop_rowlocks_args *)args;
 
