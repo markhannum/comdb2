@@ -2518,6 +2518,7 @@ int broadcast_sc_start(const char *table, uint64_t seed, uint32_t host,
                        time_t t);
 int broadcast_sc_ok(void);
 int broadcast_flush_all(void);
+int broadcast_abort_all(void);
 
 int send_forgetmenot(void);
 

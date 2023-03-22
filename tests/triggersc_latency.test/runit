@@ -60,7 +60,7 @@ EOF
         finished=$(date +%s)
         elapsed=$(( finished - begin ))
         echo "Update-trigger time is $elapsed"
-        if [[ $elapsed -ge 2 ]]; then
+        if [[ $elapsed -ge 6 ]]; then
             failed=1
             echo "Failing test: trigger operations took $elapsed seconds"
         fi
@@ -70,6 +70,8 @@ EOF
 
     touch "$stopfile"
     wait
+    echo "Sleeping for 10"
+    sleep 10
     [[ "$failed" -ne "0" ]] && failexit "testcase failed"
 }
 

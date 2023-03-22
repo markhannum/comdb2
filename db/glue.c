@@ -773,8 +773,8 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
                                    timeoutms, adaptive, &ss);
 
     if (release_schema_lk && gbl_debug_add_replication_latency) {
-        logmsg(LOGMSG_USER, "Adding 5 seconds of 'replication' latency\n");
-        sleep(5);
+        logmsg(LOGMSG_USER, "Adding 10 seconds of 'replication' latency\n");
+        sleep(10);
     }
 
     if (cnonce) {
@@ -3272,6 +3272,17 @@ void net_prefault2_ops(void *hndl, void *uptr, char *fromnode, int usertype,
     process_broadcast_prefault(thedb, dta, dtalen, is_tcp);
 }
 
+void net_abort_task(void *hndl, void *uptr, char *fromnode, int usertype,
+                      void *dtap, int dtalen, uint8_t is_tcp)
+{
+    logmsg(LOGMSG_INFO, "Received NET_ABORT_TASK from %s\n", fromnode);
+#if (NET_ALLOW_ABORT_TASK)
+    logmsg(LOGMSG_FATAL, "ABORTING on NET_ABORT_TASK message\n");
+    flush_db();
+    abort();
+#endif
+}
+
 void net_add_consumer(void *hndl, void *uptr, char *fromnode, int usertype,
                       void *dtap, int dtalen, uint8_t is_tcp)
 {
@@ -3481,6 +3492,12 @@ int broadcast_add_new_queue(char *table, int avgitemsz)
     strncpy0(msg.name, table, sizeof(msg.name));
     msg.avgitemsz = avgitemsz;
     return send_to_all_nodes(&msg, sizeof(msg), NET_NEW_QUEUE, gbl_msgwaittime);
+}
+
+int broadcast_abort_all(void)
+{
+    int i = 0;
+    return send_to_all_nodes(&i, sizeof(int), NET_ABORT_TASK, gbl_msgwaittime);
 }
 
 int broadcast_flush_all(void)
@@ -3756,6 +3773,9 @@ int open_bdb_env(struct dbenv *dbenv)
                 "authentication_check", net_authentication_check))
             return -1;
         if (net_register_allow(dbenv->handle_sibling, net_allow_node))
+            return -1;
+        if (net_register_handler(dbenv->handle_sibling, NET_ABORT_TASK,
+                                 "abort_task", net_abort_task))
             return -1;
     }
 

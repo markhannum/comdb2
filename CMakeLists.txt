@@ -144,6 +144,12 @@ if(DEBUG_SC)
     add_definitions(-DDEBUG_SC)
 endif()
 
+option(NET_ALLOW_ABORT_TASK "Abort task on abort net-messages" OFF)
+mark_as_advanced(NET_ALLOW_ABORT_TASK)
+if(NET_ALLOW_ABORT_TASK)
+  add_definitions(-DNET_ALLOW_ABORT_TASK)
+endif()
+
 option(UFID_HASH_DEBUG "Enable ufid-hash debug trace" OFF)
 mark_as_advanced(UFID_HASH_DEBUG)
 if(UFID_HASH_DEBUG)

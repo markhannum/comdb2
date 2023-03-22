@@ -709,9 +709,33 @@ done:
     // depending on where it is being executed from.
 }
 
+#include <unistd.h>
+#include <poll.h>
+
+void *ck_schema_lk(void *x)
+{
+    int target = comdb2_time_epoch() + 5;
+    while (comdb2_time_epoch() < target) {
+        int rc = tryrdlock_schema_lk();
+        if (rc == 0) {
+            unlock_schema_lk();
+            return NULL;
+        }
+        poll(NULL, 0, 10);
+    }
+    logmsg(LOGMSG_USER, "%s: cannot get schema lock\n", __func__);
+    broadcast_abort_all();
+    abort();
+}
+
 int perform_trigger_update(struct schema_change_type *sc, struct ireq *unused)
 {
     wrlock_schema_lk();
+    pthread_t thread_id;
+    pthread_attr_t attr;
+    Pthread_attr_init(&attr);
+    Pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    Pthread_create(&thread_id, &attr, ck_schema_lk, NULL);
     javasp_splock_wrlock();
     int rc = perform_trigger_update_int(sc);
     javasp_splock_unlock();
