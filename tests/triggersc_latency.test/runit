@@ -10,6 +10,25 @@ bash -n "$0" | exit 1
 
 export stopfile=./stopfile.txt
 
+core_all_nodes() {
+    local node
+    local pidfl=${TMPDIR}/${DBNAME}.pid
+    if [[ -z "$CLUSTER" ]] || [[ `echo $CLUSTER | grep $HOSTNAME ` ]]; then
+        if [[ -n "$CLUSTER" ]] ; then
+            pidfl=${TMPDIR}/${DBNAME}.$HOSTNAME.pid
+        fi
+        cat ${pidfl} | xargs kill -6 
+    fi
+
+    for node in ${CLUSTER} ; do
+        if [ $node == $HOSTNAME ] ; then
+            continue
+        fi
+        pidfl=${TMPDIR}/${DBNAME}.pid
+        ssh -n -o StrictHostKeyChecking=no $node "cat ${pidfl} | xargs kill -6 "
+    done
+}
+
 function failexit
 {
     [[ $debug == "1" ]] && set -x
@@ -23,6 +42,50 @@ function insert_records
     while [[ ! -f $stopfile ]]; do
         $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "insert into t1(a) values(1)" > /dev/null 2>&1
     done
+}
+
+function drop_trigger
+{
+    typeset pid=0
+    typeset j=0
+    typeset killed=0
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop lua trigger sp" > /dev/null 2>&1 &
+    pid=$!
+    while [ "$killed" -eq 0 -a "$j" -lt 5 ]; do
+        kill -0 $pid >/dev/null 2>&1
+        if [[ $? == 0 ]]; then
+            sleep 1
+        else
+            export killed=1
+        fi
+        let j=j+1
+    done
+    if [[ "$killed" == 0 ]]; then
+        core_all_nodes
+        failexit "Cored all nodes"
+    fi
+}
+
+function create_trigger
+{
+    typeset pid=0
+    typeset j=0
+    typeset killed=0
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create lua trigger sp on (table t1 for insert)" >/dev/null 2>&1 &
+    pid=$!
+    while [ "$killed" -eq 0 -a "$j" -lt 5 ]; do
+        kill -0 $pid >/dev/null 2>&1
+        if [[ $? == 0 ]]; then
+            sleep 1
+        else
+            export killed=1
+        fi
+        let j=j+1
+    done
+    if [[ "$killed" == 0 ]]; then
+        core_all_nodes
+        failexit "Cored all nodes"
+    fi
 }
 
 function run_test
@@ -53,9 +116,11 @@ EOF
         mod=$(( j % 2 ))
         begin=$(date +%s)
         if [[ "$mod" == "0" ]]; then
-            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create lua trigger sp on (table t1 for insert)"
+            #$CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create lua trigger sp on (table t1 for insert)"
+            create_trigger
         else
-            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop lua trigger sp"
+            #$CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop lua trigger sp"
+            drop_trigger
         fi
         finished=$(date +%s)
         elapsed=$(( finished - begin ))
