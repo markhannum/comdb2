@@ -144,6 +144,12 @@ if(DEBUG_SC)
     add_definitions(-DDEBUG_SC)
 endif()
 
+option(DEBUG_TRIGGERSC_LATENCY "Code which debugs triggersc-latency test" OFF)
+mark_as_advanced(DEBUG_TRIGGERSC_LATENCY)
+if(DEBUG_TRIGGERSC_LATENCY)
+  add_definitions(-DDEBUG_TRIGGERSC_LATENCY)
+endif()
+
 option(NET_ALLOW_ABORT_TASK "Abort task on abort net-messages" OFF)
 mark_as_advanced(NET_ALLOW_ABORT_TASK)
 if(NET_ALLOW_ABORT_TASK)

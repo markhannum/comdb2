@@ -724,6 +724,36 @@ int gbl_javasp_early_release = 1;
 int gbl_debug_add_replication_latency = 0;
 uint32_t gbl_written_rows_warn = 0;
 
+#if (DEBUG_TRIGGERSC_LATENCY)
+
+static __thread int waiting_for_seqnum = 0;
+
+void *ck_dist_commit(void *x)
+{
+    int *waiting = (int *)x;
+    int target = comdb2_time_epoch() + 5;
+    while (comdb2_time_epoch() < target) {
+        if (*waiting == 0) {
+            return NULL;
+        }
+        poll(NULL, 0, 10);
+    }
+    logmsg(LOGMSG_USER, "%s: long dist-commit for tranddl\n", __func__);
+    broadcast_abort_all();
+    abort();
+}
+
+static void debug_triggersc_latency(int *waiting)
+{
+    pthread_t thread_id;
+    pthread_attr_t attr;
+    Pthread_attr_init(&attr);
+    Pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    Pthread_create(&thread_id, &attr, ck_dist_commit, (void *)waiting);
+}
+
+#endif
+
 static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
                             int timeoutms, int adaptive, int logical,
                             void *blkseq, int blklen, void *blkkey,
@@ -769,8 +799,19 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
         return rc;
     }
 
+#if (DEBUG_TRIGGERSC_LATENCY)
+    waiting_for_seqnum = 1;
+    if (iq->tranddl) {
+        debug_triggersc_latency(&waiting_for_seqnum);
+    }
+#endif
+
     rc = trans_wait_for_seqnum_int(bdb_handle, thedb, iq, source_host,
                                    timeoutms, adaptive, &ss);
+
+#if (DEBUG_TRIGGERSC_LATENCY)
+    waiting_for_seqnum = 0;
+#endif
 
     if (release_schema_lk && gbl_debug_add_replication_latency) {
         logmsg(LOGMSG_USER, "Adding 10 seconds of 'replication' latency\n");
