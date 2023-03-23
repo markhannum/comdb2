@@ -814,8 +814,8 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
 #endif
 
     if (release_schema_lk && gbl_debug_add_replication_latency) {
-        logmsg(LOGMSG_USER, "Adding 10 seconds of 'replication' latency\n");
-        sleep(10);
+        logmsg(LOGMSG_USER, "Adding 30 seconds of 'replication' latency\n");
+        sleep(30);
     }
 
     if (cnonce) {
