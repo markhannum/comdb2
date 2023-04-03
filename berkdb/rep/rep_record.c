@@ -147,6 +147,7 @@ static inline int wait_for_running_transactions(DB_ENV *dbenv);
 	DB___txn_ckp && (R) != DB___dbreg_register)
 
 int gbl_rep_process_msg_print_rc;
+extern int gbl_utxnid_log;
 
 #define PRINT_RETURN(retrc, fromline)										\
 	do {																	\
@@ -386,6 +387,17 @@ lc_free(DB_ENV *dbenv, struct __recovery_processor *rp, LSN_COLLECTION * lc)
 	lc->nalloc = 0;
 	lc->memused = 0;
 	lc->nalloc = 0;
+}
+
+int normalize_rectype(u_int32_t *rectype) {
+	if (*rectype > 12000 || (*rectype > 2000 && *rectype < 10000)) {
+		assert (gbl_utxnid_log);
+		// Don't -1000 from +3000 records. Existing ufid code works with rectypes > 1000. 
+		*rectype -= 2000;
+		return 1;
+	} else {
+		return 0;
+	}
 }
 
 int gbl_match_on_ckp = 1;
@@ -964,6 +976,7 @@ __rep_verify_will_recover(dbenv, control, rec)
 		will_recover = 1;
 
 	LOGCOPY_32(&rectype, mylog.data);
+	normalize_rectype(&rectype);
 
 	if ((will_recover == 1 && !matchable_log_type(rectype)) &&
 			((ret = __log_c_get(logc, &lsn, &mylog, DB_PREV)) == 0)){
@@ -1938,6 +1951,8 @@ more:
 		match = 0;
 
 		LOGCOPY_32(&rectype, mylog.data);
+
+		int utxnid_logged = normalize_rectype(&rectype);
 		if (rectype == DB___txn_regop) {
 			/* If it's a commit, copy the timestamp - if we're about to unroll too
 			 * far, we want to notice and not do it. */
@@ -1952,7 +1967,7 @@ more:
 			LOGCOPY_32(&timestamp,
 				(uint8_t *)mylog.data + sizeof(a.type) +
 				sizeof(a.txnid->txnid) + sizeof(DB_LSN) +
-				sizeof(u_int32_t));
+				(utxnid_logged ? sizeof(u_int64_t) : 0) + sizeof(u_int32_t));
 			t = timestamp;
 			if (dbenv->newest_rep_verify_tran_time == 0) {
 				dbenv->newest_rep_verify_tran_time = t;
@@ -1978,10 +1993,12 @@ more:
 
 			if (gbl_berkdb_verify_skip_skipables) {
 				LOGCOPY_32(&rectype, mylog.data);
+				normalize_rectype(&rectype);
 				while (!matchable_log_type(rectype) && (ret =
 					__log_c_get(logc, &lsn, &mylog,
 						DB_PREV)) == 0) {
 					LOGCOPY_32(&rectype, mylog.data);
+					normalize_rectype(&rectype);
 				}
 
 				if (ret == DB_NOTFOUND) {
@@ -2589,6 +2606,7 @@ __rep_check_applied_lsns(dbenv, lc, in_recovery_verify)
 			ERR;
 
 		LOGCOPY_32(&type, logrec.data);
+		int utxnid_logged = normalize_rectype(&type);
 
 		t.npages = 0;
 
@@ -2700,7 +2718,7 @@ __rep_check_applied_lsns(dbenv, lc, in_recovery_verify)
 					(u_int8_t *)logrec.data +
 					sizeof(u_int32_t) /*type */ +
 					sizeof(u_int32_t) /*txn */ +sizeof(DB_LSN)
-					/*prevlsn */ );
+					/*prevlsn */ + (utxnid_logged ? sizeof(u_int64_t) : 0) /*utxnid*/);
 				if (opcode == DB_REM_BIG &&
 					strcmp(t.array[i].comment,
 					"prev_pgno") == 0) {
@@ -2930,6 +2948,7 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 	u_int32_t rectype = 0, txnid;
 	int cmp, do_req, gap, ret, t_ret, rc;
 	int num_retries;
+	int utxnid_logged = 0;
 	int disabled_minwrite_noread = 0;
 	char *eid;
 
@@ -2956,8 +2975,10 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 		return 0;
 	}
 
-	if (gbl_verify_rep_log_records && rec->size >= HDR_NORMAL_SZ)
+	if (gbl_verify_rep_log_records && rec->size >= HDR_NORMAL_SZ) {
 		LOGCOPY_32(&rectype, rec->data);
+		normalize_rectype(&rectype);
+	}
 
 	if (gbl_verify_rep_log_records && IS_SIMPLE(rectype) &&
 		rec->size >= HDR_NORMAL_SZ) {
@@ -3065,6 +3086,7 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 			}
 
 			LOGCOPY_32(&rectype, rec->data);
+			normalize_rectype(&rectype);
 
 			/* 
 			 * If the rectype is DB___txn_ckp and out-of-band checkpoints are
@@ -3143,6 +3165,7 @@ gap_check:		max_lsn_dbtp = NULL;
 			rp = (REP_CONTROL *)control_dbt.data;
 			rec = &rec_dbt;
 			LOGCOPY_32(&rectype, rec->data);
+			utxnid_logged = normalize_rectype(&rectype);
 
 			if (rp->rectype != REP_NEWFILE) {
 
@@ -3900,6 +3923,7 @@ worker_thd(struct thdpool *pool, void *work, void *thddata, int op)
 				abort();
 			}
 			LOGCOPY_32(&rectype, tmpdbt.data);
+			normalize_rectype(&rectype);
 			tmpdbt.app_data = &rp->context;
 
 			/* Map the txnid to the context */
@@ -3912,6 +3936,7 @@ worker_thd(struct thdpool *pool, void *work, void *thddata, int op)
 		} else {
 
 			LOGCOPY_32(&rectype, rr->logdbt.data);
+			normalize_rectype(&rectype);
 
 			rr->logdbt.app_data = &rp->context;
 			if (dispatch_rectype(rectype)) {
@@ -4162,14 +4187,16 @@ processor_thd(struct thdpool *pool, void *work, void *thddata, int op)
 				goto err;
 			}
 			LOGCOPY_32(&rectype, data_dbt.data);
+			int utxnid_logged = normalize_rectype(&rectype);
 			found_ufid =
 				(int)ufid_for_recovery_record(dbenv, NULL,
-				rectype, fuid, &data_dbt);
+				rectype, fuid, &data_dbt, utxnid_logged);
 		} else {
 			LOGCOPY_32(&rectype, rp->lc.array[i].rec.data);
+			int utxnid_logged = normalize_rectype(&rectype);
 			found_ufid =
 				(int)ufid_for_recovery_record(dbenv, NULL,
-				rectype, fuid, &rp->lc.array[i].rec);
+				rectype, fuid, &rp->lc.array[i].rec, utxnid_logged);
 		}
 		if (found_ufid) {
 			if (!fuid_hash)
@@ -4551,6 +4578,7 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 	 * Check which and behave appropriately.
 	 */
 	LOGCOPY_32(&rectype, rec->data);
+	normalize_rectype(&rectype);
 	memset(&lc, 0, sizeof(lc));
 
 	if (rectype == DB___txn_regop_rowlocks) {
@@ -4910,6 +4938,7 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 			LOGCOPY_32(&rectype, lcin_dbt.data);
 			needed_to_get_record_from_log = 0;
 		}
+		normalize_rectype(&rectype);
 
 		if (dispatch_rectype(rectype)) {
 			if ((ret = __db_dispatch(dbenv, dbenv->recover_dtab,
@@ -5330,6 +5359,7 @@ bad_resize:	;
 	 * Check which and behave appropriately.
 	 */
 	LOGCOPY_32(&rectype, rec->data);
+	normalize_rectype(&rectype);
 	if (rectype == DB___txn_regop_rowlocks) {
 		if ((ret =
 			__txn_regop_rowlocks_read(dbenv, rec->data,
@@ -5898,6 +5928,7 @@ __rep_collect_txn_from_log(dbenv, lsnp, lc, had_serializable_records, rp)
 			goto err;
 		}
 		LOGCOPY_32(&rectype, data.data);
+		int utxnid_logged = normalize_rectype(&rectype);
 		if (rectype == DB___txn_child) {
 			if ((ret = __txn_child_read(dbenv,
 					data.data, &argp)) != 0)
@@ -5914,7 +5945,7 @@ __rep_collect_txn_from_log(dbenv, lsnp, lc, had_serializable_records, rp)
 			if (gbl_ufid_add_on_collect && rectype < 10000 && rectype > 1000) {
 				DB *file_dbp;
 				u_int8_t ufid[DB_FILE_ID_LEN] = {0};
-				if ((int)ufid_for_recovery_record(dbenv, NULL, rectype, ufid, &data)) {
+				if ((int)ufid_for_recovery_record(dbenv, NULL, rectype, ufid, &data, utxnid_logged)) {
 					__ufid_to_db(dbenv, NULL, &file_dbp, ufid, NULL);
 				}
 			}
@@ -6592,6 +6623,7 @@ restart:
 		logflags = DB_PREV;
 		lockcnt = 0;
 		LOGCOPY_32(&rectype, mylog.data);
+		normalize_rectype(&rectype);
 		if (rectype == DB___txn_regop_rowlocks) {
 			if ((ret =
 				__txn_regop_rowlocks_read(dbenv, mylog.data,
@@ -6795,6 +6827,7 @@ get_committed_lsns(dbenv, inlsns, n_lsns, epoch, file, offset)
 		while (!done &&
 			   (lsn.file > file || (lsn.file == file && lsn.offset > offset))) {
 			LOGCOPY_32(&rectype, mylog.data);
+			normalize_rectype(&rectype);
 			switch (rectype) {
 			case DB___txn_regop_rowlocks: {
 				if ((ret = __txn_regop_rowlocks_read(dbenv, mylog.data,
@@ -7108,6 +7141,7 @@ get_lsn_context_from_timestamp(dbenv, timestamp, ret_lsn, ret_context)
 
 	for (rc = 0; rc == 0; rc = logc->get(logc, &lsn, &logdta, DB_NEXT)) {
 		LOGCOPY_32(&rectype, logdta.data);
+		normalize_rectype(&rectype);
 		if (rectype == DB___txn_regop) {
 			if ((rc =
 				__txn_regop_read(dbenv, logdta.data,
@@ -7229,6 +7263,7 @@ get_context_from_lsn(dbenv, lsn, ret_context)
 	}
 
 	LOGCOPY_32(&rectype, logdta.data);
+	normalize_rectype(&rectype);
 	while (rectype != DB___txn_regop && rectype != DB___txn_regop_gen && 
 			rectype != DB___txn_regop_rowlocks) {
 		if ((rc = logc->get(logc, &lsn, &logdta, DB_PREV)) != 0) {
@@ -7242,6 +7277,7 @@ get_context_from_lsn(dbenv, lsn, ret_context)
 			return -1;
 		}
 		LOGCOPY_32(&rectype, logdta.data);
+		normalize_rectype(&rectype);
 	}
 
 	assert(rectype == DB___txn_regop || rectype == DB___txn_regop_gen ||
