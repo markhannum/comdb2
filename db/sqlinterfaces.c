@@ -758,9 +758,6 @@ static int vtable_search(char **vtables, int ntables, const char *table)
 static void record_locked_vtable(struct sql_authorizer_state *pAuthState, const char *table)
 {
     const char *vtable_lock = vtable_lockname(pAuthState->db, table);
-    if (table != NULL && (strcmp(table, "comdb2_triggers") == 0)) {
-        pAuthState->flags |= PREPARE_ACQUIRE_SPLOCK;
-    }
     if (vtable_lock && !vtable_search(pAuthState->vTableLocks, pAuthState->numVTableLocks, vtable_lock)) {
         pAuthState->vTableLocks =
             (char **)realloc(pAuthState->vTableLocks, sizeof(char *) * (pAuthState->numVTableLocks + 1));
@@ -3123,8 +3120,7 @@ static int get_prepared_stmt_int(struct sqlthdstate *thd,
         }
 
         if (rec->stmt) {
-            int flags = (thd->authState.flags & PREPARE_ACQUIRE_SPLOCK) ? VTABLE_FLAGS_GETSPLOCK : 0;
-            stmt_set_vlock_tables(rec->stmt, thd->authState.vTableLocks, thd->authState.numVTableLocks, flags);
+            stmt_set_vlock_tables(rec->stmt, thd->authState.vTableLocks, thd->authState.numVTableLocks, 0);
             thd->authState.numVTableLocks = 0;
             thd->authState.vTableLocks = NULL;
         } else {
