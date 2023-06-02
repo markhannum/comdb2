@@ -107,6 +107,7 @@ int gbl_req_delay_count_threshold = 5;
 int gbl_getlock_latencyms = 0;
 int gbl_flush_log_at_checkpoint = 1;
 int gbl_flush_on_prepare = 0;
+int gbl_flush_replicant_on_prepare = 0;
 extern int request_delaymore(void *bdb_state);
 int __rep_set_last_locked(DB_ENV *dbenv, DB_LSN *lsn);
 
@@ -664,7 +665,6 @@ static void *apply_thread(void *arg)
 				ret = __rep_apply(dbenv, q->rp, &rec, &ret_lsnp, &q->gen, 1);
 				Pthread_mutex_unlock(&rep_candidate_lock);
 				if (ret == 0 || ret == DB_REP_ISPERM) {
-					bdb_set_seqnum(dbenv->app_private);
 
 					if (ret == DB_REP_ISPERM && !gbl_early && !gbl_reallyearly) {
 						/* Call this but not really early anymore */
@@ -2614,6 +2614,7 @@ dispatch_rectype(int rectype)
 }
 
 int gbl_early_ack_trace = 0;
+extern int gbl_debug_disttxn_trace;
 
 
 // PUBLIC: void __rep_classify_type __P((u_int32_t, int *));
@@ -3184,8 +3185,10 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 				 * don't currently hold the rep mutex.
 				 */
 				rep->stat.st_log_records++;
-				if (!is_commit(rectype))
+				if (!is_commit(rectype)) {
 					__rep_set_last_locked(dbenv, &(rp->lsn));
+					bdb_set_seqnum(dbenv->app_private);
+				}
 			}
 
 			if (dbenv->attr.cache_lc)
@@ -3265,8 +3268,10 @@ gap_check:		max_lsn_dbtp = NULL;
 				 */
 				if (ret == 0) {
 					rep->stat.st_log_records++;
-					if (!is_commit(rectype))
+					if (!is_commit(rectype)) {
 						__rep_set_last_locked(dbenv, &(rp->lsn));
+						bdb_set_seqnum(dbenv->app_private);
+					}
 				}
 
 				if (dbenv->attr.cache_lc)
@@ -3662,10 +3667,9 @@ gap_check:		max_lsn_dbtp = NULL;
 		}
 		__os_free(dbenv, dist_prepare_args);
 		dist_prepare_args = NULL;
-		if (gbl_flush_on_prepare) {
+		if (gbl_flush_replicant_on_prepare) {
 			ret = __log_flush(dbenv, NULL);
 		}
-		comdb2_early_ack(dbenv, rp->lsn, rep->committed_gen);
 		break;
 	case DB___txn_dist_abort:
 		if ((ret = __txn_dist_abort_read(dbenv, rec->data, &dist_abort_args)) != 0) {
@@ -3983,9 +3987,6 @@ int __dbenv_apply_log(DB_ENV* dbenv, unsigned int file, unsigned int offset,
 	int ret = __rep_apply(dbenv, &rp, &rec, &ret_lsnp,
 			      (gbl_is_physical_replicant) ? &rep->log_gen : &rep->gen, 2);
 
-	if (ret == 0 || ret == DB_REP_ISPERM) {
-		bdb_set_seqnum(dbenv->app_private);
-	}
 	return ret;
 }
 
@@ -5089,14 +5090,17 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 				!(txn_rl_args->lflags & DB_TXN_SCHEMA_LOCK)) ||
 			F_ISSET(rctl, DB_LOG_REP_ACK))
 			) {
+            /*
 			static int lastpr = 0;
 			int now;
+            */
 
-			if (gbl_early_ack_trace && ((now = time(NULL)) - lastpr)) {
-				logmsg(LOGMSG_USER, "%s line %d send early-ack for %d:%d "
-						"commit-gen %d\n", __func__, __LINE__, maxlsn.file,
-						maxlsn.offset, *commit_gen);
-				lastpr = now;
+            /* TODO revert this */
+			if (gbl_early_ack_trace && gbl_debug_disttxn_trace) {
+				logmsg(LOGMSG_USER, "%s DISTTXN line %d send early-ack for %d:%d "
+						"commit-gen %d dist-txn %s\n", __func__, __LINE__, maxlsn.file,
+						maxlsn.offset, *commit_gen, dist_txnid ? dist_txnid : "(none)");
+				//lastpr = now;
 			}
 			comdb2_early_ack(dbenv, maxlsn, *commit_gen);
 		} 

@@ -1,0 +1,1882 @@
+#include <disttxn.h>
+#include <sqlquery.pb-c.h>
+#include <pthread.h>
+#include <epochlib.h>
+#include <plhash.h>
+#include <stdlib.h>
+#include <string.h>
+#include <locks_wrap.h>
+#include <assert.h>
+#include <bdb_int.h>
+#include <cdb2api.h>
+#include <unistd.h>
+#include <alloca.h>
+#include <sql.h>
+
+/**
+ * coordinator:
+ * 1 add participants to data-structures
+ * 2 tell participants to execute
+ * 3 collect results
+ * 4 write record to distributed_transactions table and commit
+ * 5 notify participants of results
+ * 6 distributed wait-for-seqnum (but can't mark anything incoherent)
+ *
+ * participant:
+ * 1 prepare schedule and notify coordinator
+ * 2 wait for coordinator response
+ * 3 either commit or abort
+ */
+
+#define DISTRIBUTED_TRANSACTIONS_TABLE "comdb2_distributed_transactions"
+#define DISTRIBUTED_TRANSACTIONS_SCHEMA "{ schema { cstring dist_txnid[129] } keys{ \"ix0\" = dist_txnid }}"
+#define COORDINATOR_LOCAL "_coordinator_local"
+#define DISTTXN_DEBUG
+
+/* States for the transaction tracked on the coordinator */
+enum transaction_states {
+    DISTTXN_COLLECTED = 0,
+    DISTTXN_PREPARING = 1,
+    DISTTXN_ABORTED = 2,
+    DISTTXN_COMMITTING = 3,
+    DISTTXN_COMMITTED = 4,
+    DISTTXN_PROPAGATED = 5,
+    DISTTXN_PROPAGATE_TIMEOUT = 6,
+    DISTTXN_ABORT_RESOLVED = 7
+};
+
+/* States for each participant tracked on the coordinator */
+enum participant_states {
+    PARTICIPANT_INIT = 0,
+    PARTICIPANT_FAILED_PREPARE = 1,
+    PARTICIPANT_FAILED_SEND_PREPARE = 2,
+    PARTICIPANT_PREPARING = 3,
+    PARTICIPANT_PREPARED = 4,
+    PARTICIPANT_PROPAGATED = 5,
+    PARTICIPANT_FAILED = 6
+};
+
+/* States for each participant as tracked by participant */
+enum { I_AM_PREPARED = 1, I_AM_ABORTED = 2, I_AM_COMMITTED = 3 };
+
+/* Coordinator tracking structure for a distributed transaction */
+typedef struct distributed_transaction {
+
+    char *dist_txnid;
+
+    int state;
+
+    time_t start_time;
+    time_t resolved_time;
+
+    participant_list_t participants;
+    struct participant *coordinator_local;
+
+    int prepared_count;
+    int propagated_count;
+    int failed_count;
+
+    int coordinator_waiting;
+    pthread_mutex_t lk;
+    pthread_cond_t cd;
+    LINKC_T(struct distributed_transaction) linkv;
+
+    int failrc;
+    int outrc;
+    char *errstr;
+    char *failpart_name;
+    char *failpart_tier;
+
+} transaction_t;
+
+/* Simple structure which blocks participant */
+typedef struct block_participant {
+    char *dist_txnid;
+    int state;
+    int start_wait;
+    pthread_mutex_t lk;
+    pthread_cond_t cd;
+} participant_t;
+
+/* Simple structure which maps dist-txnid to local rqid+uuid */
+typedef struct sanctioned {
+    char *dist_txnid;
+    unsigned long long rqid;
+    uuid_t uuid;
+    char *coordinator_dbname;
+    char *coordinator_tier;
+    char *coordinator_master;
+    int sanctioned;
+    int time_added;
+} sanctioned_t;
+
+/* Handle-cache might go away */
+typedef struct hndlnode {
+    int donate_time;
+    cdb2_hndl_tp *hndl;
+    LINKC_T(struct hndlnode) linkv;
+} hndlnode_t;
+
+typedef struct hndlcache {
+    char *dbname;
+    char *machine;
+    LISTC_T(struct hndlnode) handles;
+} hndlcache_t;
+
+/* Coordinator table containing active transactions */
+static hash_t *active_transactions_hash = NULL;
+static pthread_mutex_t active_transactions_lk = PTHREAD_MUTEX_INITIALIZER;
+
+/* Participant hash table containing prepared transactions */
+static hash_t *participant_hash = NULL;
+static pthread_mutex_t part_lk = PTHREAD_MUTEX_INITIALIZER;
+
+/* Osql sanctioned hash maps dist-txn to rqid+uuid */
+static hash_t *sanctioned_hash = NULL;
+static pthread_mutex_t sanc_lk = PTHREAD_MUTEX_INITIALIZER;
+
+/* Hndl hash retains cdb2api handles */
+static hash_t *handle_hash = NULL;
+static pthread_mutex_t hndl_lk = PTHREAD_MUTEX_INITIALIZER;
+
+/* Tunables */
+int gbl_2pc = 0;
+int gbl_coordinator_timeout_ms = 5000;
+int gbl_coordinator_propagate_timeout_ms = 5000;
+int gbl_disttxn_linger_time = 10;
+int gbl_disttxn_sanctioned_linger_time = 600;
+int gbl_disttxn_handle_linger_time = 60;
+int gbl_coordinator_notify = POSTCOMMIT;
+int gbl_disttxn_handle_cache = 1;
+int gbl_disttxn_async_prepare = 0;
+int gbl_disttxn_async_messages = 0;
+int gbl_coordinator_sync_on_commit = 1;
+
+/* Debug tunables */
+int gbl_debug_exit_participant_after_prepare = 0;
+int gbl_debug_exit_coordinator_before_commit = 0;
+int gbl_debug_exit_coordinator_after_commit = 0;
+int gbl_debug_disttxn_trace = 0;
+
+/* Externs */
+extern char gbl_dbname[MAX_DBNAME_LENGTH];
+extern char *gbl_machine_class;
+extern char *gbl_myhostname;
+
+/* Check for distributed transactions table */
+static int have_disttxn_table = 0;
+
+/* Create the distributed transactions table */
+static void create_distributed_transactions_table(void)
+{
+    int rc;
+    struct sqlclntstate clnt;
+    start_internal_sql_clnt(&clnt);
+    clnt.dbtran.mode = TRANLEVEL_SOSQL;
+    clnt.admin = 1;
+    clnt.skip_eventlog = 1;
+    char *create_sql = "create table " DISTRIBUTED_TRANSACTIONS_TABLE DISTRIBUTED_TRANSACTIONS_SCHEMA;
+    rc = run_internal_sql_clnt(&clnt, create_sql);
+    end_internal_sql_clnt(&clnt);
+    if (rc != 0) {
+        logmsg(LOGMSG_ERROR, "Error creating distributed-transactions table: %d\n", rc);
+    }
+}
+
+void disttxn_verify_table(void)
+{
+    if (!gbl_2pc) {
+        return;
+    }
+    char *conf = getenv("CDB2_CONFIG");
+    if (conf) {
+        cdb2_set_comdb2db_config(conf);
+    }
+
+    if (get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE) == NULL) {
+        create_distributed_transactions_table();
+    }
+    have_disttxn_table = get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE) ? 1 : 0;
+}
+
+static void disttxn_recover_prepared(void)
+{
+    thedb->bdb_env->dbenv->txn_recover_all_prepared(thedb->bdb_env->dbenv);
+}
+
+static int retrieve_handle(cdb2_hndl_tp **hndl, const char *dbname, const char *type, int flags)
+{
+    if (gbl_disttxn_handle_cache) {
+        hndlcache_t fnd = {.dbname = (char *)dbname, .machine = (char *)type}, *h;
+        hndlnode_t *n = NULL;
+        Pthread_mutex_lock(&hndl_lk);
+        if ((h = hash_find(handle_hash, &fnd)) != NULL) {
+            n = listc_rtl(&h->handles);
+        }
+        Pthread_mutex_unlock(&hndl_lk);
+        if (n) {
+            (*hndl) = n->hndl;
+            free(n);
+            return 0;
+        }
+    }
+    return cdb2_open(hndl, dbname, type, flags);
+}
+
+static int donate_handle(cdb2_hndl_tp *hndl, const char *dbname, const char *machine)
+{
+    if (!gbl_disttxn_handle_cache) {
+        return cdb2_close(hndl);
+    }
+    hndlcache_t fnd = {.dbname = (char *)dbname, .machine = (char *)machine}, *h;
+    Pthread_mutex_lock(&hndl_lk);
+    if ((h = hash_find(handle_hash, &fnd)) == NULL) {
+        h = calloc(sizeof(*h), 1);
+        h->dbname = strdup(dbname);
+        h->machine = strdup(machine);
+        listc_init(&h->handles, offsetof(hndlnode_t, linkv));
+        hash_add(handle_hash, h);
+    }
+    hndlnode_t *n = calloc(sizeof(*n), 1);
+    n->donate_time = comdb2_time_epoch();
+    n->hndl = hndl;
+    listc_abl(&h->handles, n);
+    Pthread_mutex_unlock(&hndl_lk);
+    return 0;
+}
+
+/* Create and send a disttxn message */
+static void send_2pc_message(const char *dist_txnid, const char *dbname, const char *pname, const char *ptier,
+                             const char *master, int op, int rcode, int outrc, const char *errmsg, int async)
+{
+    cdb2_hndl_tp *hndl = NULL;
+    int flags = CDB2_DIRECT_CPU | CDB2_ADMIN, rc;
+
+    if (gbl_debug_disttxn_trace) {
+        flags |= CDB2_DEBUG;
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s dbname=%s pname=%s ptier=%s master=%s op=%d\n", __func__,
+               dist_txnid, dbname, pname, ptier, master, op);
+    }
+
+    if ((rc = retrieve_handle(&hndl, dbname, master, flags)) != 0) {
+        logmsg(LOGMSG_INFO, "%s error opening handle to %s %s, rc=%d\n", __func__, dbname, master, rc);
+        return;
+    }
+
+    if ((rc = cdb2_send_2pc(hndl, (char *)dbname, (char *)pname, (char *)ptier, gbl_myhostname, op, (char *)dist_txnid,
+                            rcode, outrc, (char *)errmsg, async)) != 0) {
+        logmsg(LOGMSG_INFO, "%s dist-txn %s error sending to %s mach %s, rc=%d\n", __func__, dist_txnid, dbname, master,
+               rc);
+        cdb2_close(hndl);
+        return;
+    }
+    donate_handle(hndl, dbname, master);
+}
+
+/* This coordinator is telling this participant to commit */
+static void send_participant_commit(const char *dist_txnid, const char *dbname, const char *master)
+{
+    send_2pc_message(dist_txnid, dbname, NULL, NULL, master, CDB2_DIST__COMMIT, 0, 0, NULL, gbl_disttxn_async_messages);
+}
+
+/* This coordinator is telling this participant to abort */
+static void send_participant_abort(const char *dist_txnid, const char *dbname, const char *master)
+{
+    send_2pc_message(dist_txnid, dbname, NULL, NULL, master, CDB2_DIST__ABORT, 0, 0, NULL, gbl_disttxn_async_messages);
+}
+
+/* This participant is telling the coordinator that it has prepared */
+static void send_coordinator_prepared(const char *dist_txnid, const char *dbname, const char *master)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s dbname=%s tier=%s\n", __func__, dist_txnid, dbname, master);
+    }
+    char *pname = gbl_dbname, *ptier = gbl_machine_class ? gbl_machine_class : gbl_myhostname;
+    send_2pc_message(dist_txnid, dbname, pname, ptier, master, CDB2_DIST__PREPARED, 0, 0, NULL, gbl_disttxn_async_messages);
+}
+
+/* Find coordinator master & tell it that we have prepared */
+static void send_coordinator_prepared_find_master(const char *dist_txnid, const char *coordinator_dbname,
+                                                  const char *coordinator_tier)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s dbname=%s tier=%s\n", __func__, dist_txnid, coordinator_dbname,
+               coordinator_tier);
+    }
+    cdb2_hndl_tp *hndl = NULL;
+    int flags = CDB2_MASTER | CDB2_ADMIN, rc;
+
+    if ((rc = cdb2_open(&hndl, coordinator_dbname, coordinator_tier, flags)) != 0) {
+        logmsg(LOGMSG_INFO, "%s dist-txn %s error opening handle to %s:%s, rc=%d\n", __func__, dist_txnid,
+               coordinator_dbname, coordinator_tier, rc);
+        return;
+    }
+    char *pname = gbl_dbname, *ptier = gbl_machine_class ? gbl_machine_class : gbl_myhostname;
+    if ((rc = cdb2_send_2pc(hndl, (char *)coordinator_dbname, pname, ptier, gbl_myhostname, CDB2_DIST__PREPARED,
+                            (char *)dist_txnid, 0, 0, NULL, gbl_disttxn_async_messages)) != 0) {
+        logmsg(LOGMSG_INFO, "%s dist-txn %s error sending to %s tier %s, rc=%d\n", __func__, dist_txnid,
+               coordinator_dbname, coordinator_tier, rc);
+    }
+    cdb2_close(hndl);
+}
+
+/* Return true if comdb2_distributed_transactions has this record */
+static int transaction_has_committed(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s slow-path\n", __func__, dist_txnid);
+    }
+    char key[MAXKEYLEN] = {0}, fndkey[MAXKEYLEN];
+    int keylen, rrn;
+    tran_type *trans = NULL;
+    struct ireq iq = {0};
+    struct schema *s;
+    struct field *f;
+    unsigned long long genid;
+
+    init_fake_ireq(thedb, &iq);
+    iq.usedb = get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE);
+
+    if (!iq.usedb) {
+        logmsg(LOGMSG_ERROR, "%s: couldn't find dist-transaction table\n", __func__);
+        return 0;
+    }
+
+    bzero(fndkey, sizeof(fndkey));
+    keylen = 0;
+
+    s = iq.usedb->ixschema[0];
+    f = &s->member[0];
+    set_data(key + f->offset, dist_txnid, strlen(dist_txnid) + 1);
+    keylen += f->len;
+
+    int rc = ix_find_flags(&iq, trans, 0, key, keylen, fndkey, &rrn, &genid, NULL, 0, 0, IX_FIND_IGNORE_INCOHERENT);
+
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s slow-path find rcode=%d\n", __func__, dist_txnid, rc);
+    }
+
+    return (rc == IX_FND);
+}
+
+static void recover_prepared_transaction(const char *dist_txnid, const char *coordinator_dbname,
+                                         const char *coordinator_tier)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s %s %s %s\n", __func__, dist_txnid, coordinator_dbname, coordinator_tier);
+    }
+    if (!strcmp(coordinator_tier, COORDINATOR_LOCAL)) {
+        int committed = transaction_has_committed(dist_txnid);
+        if (committed) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s txn %s coordinator-local txn has committed\n", __func__, dist_txnid);
+            }
+            thedb->bdb_env->dbenv->txn_commit_recovered(thedb->bdb_env->dbenv, dist_txnid);
+        } else {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s txn %s coordinator-local txn has aborted\n", __func__, dist_txnid);
+            }
+            thedb->bdb_env->dbenv->txn_abort_recovered(thedb->bdb_env->dbenv, dist_txnid);
+        }
+        return;
+    }
+    send_coordinator_prepared_find_master(dist_txnid, coordinator_dbname, coordinator_tier);
+}
+
+/* This participant is telling the coordinator that it failed to prepare */
+static void send_coordinator_failed_prepare(const char *dist_txnid, const char *dbname, const char *master, int rcode, int outrc, const char *errmsg)
+{
+    char *pname = gbl_dbname, *ptier = gbl_machine_class ? gbl_machine_class : gbl_myhostname;
+    send_2pc_message(dist_txnid, dbname, pname, ptier, master, CDB2_DIST__FAILED_PREPARE, rcode, outrc, errmsg, gbl_disttxn_async_messages);
+}
+
+/* This participant is telling the coordinator that it has propagated the txn */
+static void send_coordinator_propagated(const char *dist_txnid, const char *dbname, const char *master)
+{
+    char *pname = gbl_dbname, *ptier = gbl_machine_class ? gbl_machine_class : gbl_myhostname;
+    send_2pc_message(dist_txnid, dbname, pname, ptier, master, CDB2_DIST__PROPAGATED, 0, 0, NULL, gbl_disttxn_async_messages);
+}
+
+/* This coordinator asks this participant to begin preparing its osql schedule */
+static int send_prepare_message(transaction_t *dtran, struct participant *part, int op)
+{
+    cdb2_hndl_tp *hndl = NULL;
+    int flags = CDB2_MASTER | CDB2_ADMIN, rc;
+
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s pname %s tier %s op %d\n", __func__, dtran->dist_txnid,
+               part->participant_name, part->participant_tier, op);
+        flags |= CDB2_DEBUG;
+    }
+
+    if ((rc = cdb2_open(&hndl, part->participant_name, part->participant_tier, flags)) != 0) {
+        part->status = PARTICIPANT_FAILED_PREPARE;
+        return -1;
+    }
+
+    char *tier = gbl_machine_class ? gbl_machine_class : gbl_myhostname;
+    if ((rc = cdb2_send_2pc(hndl, part->participant_name, gbl_dbname, tier, gbl_myhostname, op, dtran->dist_txnid,
+                            0, 0, NULL, gbl_disttxn_async_prepare)) != 0) {
+        part->status = PARTICIPANT_FAILED_SEND_PREPARE;
+    }
+
+    if (gbl_debug_disttxn_trace) {
+        const char *host = cdb2_host(hndl);
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s pname %s connected to host %s\n", __func__, dtran->dist_txnid,
+               part->participant_name, host);
+    }
+
+    if (!rc) {
+        part->participant_master = strdup(cdb2_host(hndl));
+        part->status = PARTICIPANT_PREPARING;
+    } else if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s rcode from cdb2_send_2pc is %d %s\n", __func__, rc, cdb2_errstr(hndl));
+    }
+    cdb2_close(hndl);
+    return rc;
+}
+
+/* Tell all participants to commit */
+static void commit_participants_lk(transaction_t *dtran)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dtran->dist_txnid);
+    }
+    struct participant *part = NULL, *tmp = NULL;
+    if (dtran->state == DISTTXN_COMMITTING) {
+        dtran->state = DISTTXN_COMMITTED;
+        LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
+        {
+            send_participant_commit(dtran->dist_txnid, part->participant_name, part->participant_master);
+        }
+    }
+}
+
+static int need_to_cancel_osql(struct participant *part)
+{
+    return (part->status == PARTICIPANT_INIT || part->status == PARTICIPANT_FAILED_PREPARE ||
+            part->status == PARTICIPANT_FAILED_SEND_PREPARE);
+}
+
+static int need_to_cancel_prepare(struct participant *part)
+{
+    return (part->status == PARTICIPANT_PREPARING || part->status == PARTICIPANT_PREPARED);
+}
+
+static void abort_transaction_lk(transaction_t *dtran, int abort_only_prepared)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dtran->dist_txnid);
+    }
+    struct participant *part = NULL, *tmp = NULL;
+
+    LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
+    {
+        if (abort_only_prepared && part->status == PARTICIPANT_PREPARED) {
+            send_participant_abort(dtran->dist_txnid, part->participant_name, part->participant_master);
+            continue;
+        }
+        if (need_to_cancel_osql(part)) {
+            send_prepare_message(dtran, part, CDB2_DIST__DISCARD);
+        }
+        if (need_to_cancel_prepare(part)) {
+            assert(part->participant_master);
+            send_participant_abort(dtran->dist_txnid, part->participant_name, part->participant_master);
+        }
+    }
+    /* Signal coordinator_local */
+    dtran->state = DISTTXN_ABORTED;
+    dtran->resolved_time = comdb2_time_epochms();
+    Pthread_cond_signal(&dtran->cd);
+}
+
+static void prepare_participants_lk(transaction_t *dtran)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dtran->dist_txnid);
+    }
+    struct participant *part = NULL, *tmp = NULL;
+    int rc = 0;
+    LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
+    {
+        if ((rc = send_prepare_message(dtran, part, CDB2_DIST__PREPARE)) != 0) {
+            logmsg(LOGMSG_INFO, "%s fail send-prepare disttxn=%s db=%s tier=%s rc=%d\n", __func__, dtran->dist_txnid,
+                   part->participant_name, part->participant_tier, rc);
+            break;
+        }
+    }
+    if (rc) {
+        abort_transaction_lk(dtran, 0);
+    }
+}
+
+int dispatch_participants(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    transaction_t *dtran;
+    Pthread_mutex_lock(&active_transactions_lk);
+    if ((dtran = hash_find(active_transactions_hash, &dist_txnid)) != NULL) {
+        Pthread_mutex_lock(&dtran->lk);
+    }
+    Pthread_mutex_unlock(&active_transactions_lk);
+    if (dtran) {
+        dtran->start_time = comdb2_time_epochms();
+        if (dtran->state == DISTTXN_COLLECTED)
+            dtran->state = DISTTXN_PREPARING;
+        prepare_participants_lk(dtran);
+        Pthread_mutex_unlock(&dtran->lk);
+    } else {
+        logmsg(LOGMSG_INFO, "%s missing dist_txnid %s?\n", __func__, dist_txnid);
+        return -1;
+    }
+    return 0;
+}
+
+int collect_participants(const char *dist_txnid, participant_list_t *participants)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    int have_table = get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE) ? 1 : 0;
+
+    /* Punt immediately if not possible */
+    if (!gbl_2pc || !have_table) {
+        logmsg(LOGMSG_ERROR, "%s cannot begin disttxn %s, gbl_2pc=%d, have_table=%d\n", __func__, dist_txnid, gbl_2pc,
+               have_table);
+        return -1;
+    }
+
+    /* Don't double add */
+    transaction_t *dtran;
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran) {
+        Pthread_mutex_unlock(&active_transactions_lk);
+        logmsg(LOGMSG_INFO, "%s duplicate disttxn for %s\n", __func__, dist_txnid);
+        return 0;
+    }
+
+    /* Prepare dist-txn struct */
+    dtran = calloc(sizeof(*dtran), 1);
+    listc_init(&dtran->participants, offsetof(struct participant, linkv));
+    dtran->dist_txnid = strdup(dist_txnid);
+    Pthread_mutex_init(&dtran->lk, NULL);
+    Pthread_cond_init(&dtran->cd, NULL);
+    dtran->state = DISTTXN_COLLECTED;
+
+    /* Grab participant list */
+    struct participant *part;
+    while ((part = listc_rtl(participants)) != NULL) {
+        part->status = PARTICIPANT_INIT;
+        listc_atl(&dtran->participants, part);
+    }
+
+    /* Coordinator local */
+    dtran->coordinator_local = calloc(sizeof(struct participant), 1);
+    dtran->coordinator_local->participant_name = strdup(gbl_dbname);
+    dtran->coordinator_local->participant_tier = strdup(COORDINATOR_LOCAL);
+    dtran->coordinator_local->status = PARTICIPANT_PREPARING;
+    dtran->coordinator_waiting = 0;
+
+    /* Add to txn hash */
+    hash_add(active_transactions_hash, dtran);
+    Pthread_mutex_unlock(&active_transactions_lk);
+
+    return 0;
+}
+
+void destroy_dtran(transaction_t *dtran)
+{
+    Pthread_mutex_destroy(&dtran->lk);
+    Pthread_cond_destroy(&dtran->cd);
+    free(dtran->dist_txnid);
+    if (dtran->errstr)
+        free(dtran->errstr);
+    if (dtran->failpart_name)
+        free(dtran->failpart_name);
+    if (dtran->failpart_tier)
+        free(dtran->failpart_tier);
+    struct participant *part;
+    while ((part = listc_rtl(&dtran->participants)) != NULL) {
+        free(part->participant_name);
+        free(part->participant_tier);
+        free(part->participant_master);
+    }
+    free(dtran);
+}
+
+void destroy_sanc(sanctioned_t *sanc)
+{
+    free(sanc->dist_txnid);
+    free(sanc->coordinator_dbname);
+    free(sanc->coordinator_tier);
+    free(sanc->coordinator_master);
+    free(sanc);
+}
+
+static struct participant *find_participant_lk(transaction_t *dtran, const char *dbname)
+{
+    struct participant *part = NULL, *tmp = NULL;
+    LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
+    {
+        if (!strcmp(part->participant_name, dbname))
+            return part;
+    }
+    return NULL;
+}
+
+int disttxn_ondisk_record(struct ireq *iq, char *dist_txnid, unsigned char *rec)
+{
+    struct schema *s;
+    int rc, fix;
+
+    s = iq->usedb->schema;
+    if (!s) {
+        logmsg(LOGMSG_ERROR, "%s: cannot find schema?\n", __func__);
+        return -1;
+    }
+
+    /* Borrowing Adi sqlstat1 scheme */
+    for (fix = 0; fix < s->nmembers; fix++) {
+        struct field *f = &s->member[fix];
+        char *cur = NULL;
+        int outdtsz = 0, null = 0;
+
+        if (0 == strcmp(f->name, "dist_txnid")) {
+            cur = dist_txnid;
+        } else {
+            logmsg(LOGMSG_ERROR, "%s: unknown field '%s' in " DISTRIBUTED_TRANSACTIONS_TABLE "\n", __func__, f->name);
+        }
+
+        rc = CLIENT_to_SERVER(cur, strlen(cur) + 1, CLIENT_CSTR, null, NULL, NULL, rec + f->offset, f->len, f->type, 0,
+                              &outdtsz, &f->convopts, NULL);
+
+        if (-1 == rc) {
+            logmsg(LOGMSG_ERROR, "%s: CLIENT_to_SERVER returns %d\n", __func__, rc);
+            free(rec);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static void flush_log(void)
+{
+    thedb->bdb_env->dbenv->log_flush(thedb->bdb_env->dbenv, NULL);
+}
+
+/* Commit == write the dist-txnid to comdb2_distributed_transactions */
+static int commit_distributed_transaction(transaction_t *dtran)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dtran->dist_txnid);
+    }
+    struct ireq iq = {0};
+    char *tagname = ".ONDISK";
+    uint8_t *p_tagname_buf = (uint8_t *)tagname;
+    uint8_t *p_tagname_buf_end = p_tagname_buf + 7;
+    uint8_t *p_buf_data, *p_buf_data_end;
+    unsigned long long genid = 0LL;
+    tran_type *trans;
+    int opcodefail = 0, ixfailnum = 0, rrn = 0;
+
+    /* TODO create record */
+    init_fake_ireq(thedb, &iq);
+    iq.usedb = get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE);
+
+    if (!iq.usedb) {
+        logmsg(LOGMSG_ERROR, "%s: couldn't find dist-txn table\n", __func__);
+        return -1;
+    }
+
+    p_buf_data = alloca(iq.usedb->schema->recsize);
+    p_buf_data_end = p_buf_data + iq.usedb->schema->recsize;
+
+    int rc = disttxn_ondisk_record(&iq, dtran->dist_txnid, p_buf_data);
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "%s: couldn't create ondisk record for dist-txn table, rc=%d\n", __func__, rc);
+        return rc;
+    }
+
+    rc = trans_start(&iq, NULL, &trans);
+    if (rc != 0) {
+        logmsg(LOGMSG_INFO, "%s error starting transaction, %d\n", __func__, rc);
+        return -1;
+    }
+
+    int addflags = (RECFLAGS_NO_TRIGGERS | RECFLAGS_NO_BLOBS | RECFLAGS_INLINE_CONSTRAINTS);
+
+    rc = add_record(&iq, trans, p_tagname_buf, p_tagname_buf_end, p_buf_data, p_buf_data_end, NULL, NULL, 0,
+                    &opcodefail, &ixfailnum, &rrn, &genid, -1ULL, BLOCK2_ADDKL, 0, addflags, 0);
+
+    if (rc != 0) {
+        logmsg(LOGMSG_ERROR, "%s error adding dist-txn %s, rc=%d\n", __func__, dtran->dist_txnid, rc);
+        trans_abort(&iq, trans);
+        return -1;
+    }
+
+    /*
+     * "absolute-correctness" would require something like durable-lsn logic: we wouldn't ever return
+     * a good rcode until we've determined that a commit has propagated to a quorum.  To do this here,
+     * I'd be forced to wait-forever.  Durable lsn will just retry using the same cnonce.
+     *
+     * A solution might be to generate the commit-cnonce in the API adding it inline here to make this
+     * part retryable.  For now, sync-on-commit will adopt normal coherency logic.
+     */
+    if (gbl_coordinator_sync_on_commit) {
+        trans_commit_adaptive(&iq, trans, gbl_myhostname);
+        flush_log();
+    } else {
+        trans_commit_nowait(&iq, trans, gbl_myhostname);
+    }
+    return 0;
+}
+
+/* Signal coordinator when this has completely propagated */
+static int disttxn_check_propagated_lk(transaction_t *dtran)
+{
+    int rtn = 0;
+    if (dtran->state == DISTTXN_COMMITTED && dtran->propagated_count == listc_size(&dtran->participants)) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s has propagated\n", __func__, dtran->dist_txnid);
+        }
+        dtran->state = DISTTXN_PROPAGATED;
+        rtn = 1;
+    } else if (gbl_debug_disttxn_trace) {
+        struct participant *part = NULL, *tmp = NULL;
+        char *hosts = calloc(1024, 1);
+        int count = 0;
+        LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
+        {
+            if (part->status != PARTICIPANT_PROPAGATED) {
+                strcat(hosts, part->participant_name);
+                strcat(hosts, " ");
+                count++;
+            }
+        }
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s has not yet propagated, waiting for %s\n", __func__,
+               dtran->dist_txnid, hosts);
+        free(hosts);
+    }
+    return rtn;
+}
+
+/* Signal coordinator if this is committable */
+static int disttxn_check_commitable_lk(transaction_t *dtran)
+{
+    int rtn = 0;
+    if (dtran->state == DISTTXN_PREPARING && dtran->prepared_count == listc_size(&dtran->participants) &&
+        dtran->coordinator_local->status == PARTICIPANT_PREPARED) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s commitable\n", __func__, dtran->dist_txnid);
+        }
+        /* Signal coordinator_local */
+        rtn = 1;
+        dtran->state = DISTTXN_COMMITTING;
+        Pthread_cond_signal(&dtran->cd);
+    } else if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s not-yet commitable\n", __func__, dtran->dist_txnid);
+    }
+    return rtn;
+}
+
+static void participant_propagated_lk(transaction_t *dtran, struct participant *part)
+{
+    if (part->status == PARTICIPANT_PREPARED) {
+        part->status = PARTICIPANT_PROPAGATED;
+        dtran->propagated_count++;
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s %s/%s/%s count %d\n", __func__, dtran->dist_txnid,
+                   part->participant_name, part->participant_tier, part->participant_master, dtran->propagated_count);
+        }
+        Pthread_cond_signal(&dtran->cd);
+    } else if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_INFO, "DISTTXN %s disttxn %s participant propagate for %s ignored because status = %d\n",
+               __func__, dtran->dist_txnid, part->participant_name, part->status);
+    }
+}
+
+static void participant_prepared_lk(transaction_t *dtran, struct participant *part)
+{
+    if (part->status == PARTICIPANT_PREPARING) {
+        part->status = PARTICIPANT_PREPARED;
+        dtran->prepared_count++;
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s %s:%s from %s count %d\n", __func__, dtran->dist_txnid,
+                   part->participant_name, part->participant_tier, part->participant_master, dtran->prepared_count);
+        }
+    }
+}
+
+static void participant_failed_lk(transaction_t *dtran, struct participant *part)
+{
+    if (part->status == PARTICIPANT_PREPARING) {
+        part->status = PARTICIPANT_FAILED;
+        dtran->failed_count++;
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s %s:%s from %s count %d\n", __func__, dtran->dist_txnid,
+                    part->participant_name, part->participant_tier, part->participant_master, dtran->failed_count);
+        }
+    }
+}
+
+/* Tell participants to commit if we haven't already */
+void coordinator_notify(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    transaction_t *dtran;
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    assert(dtran != NULL);
+    Pthread_mutex_lock(&dtran->lk);
+    Pthread_mutex_unlock(&active_transactions_lk);
+    commit_participants_lk(dtran);
+    Pthread_mutex_unlock(&dtran->lk);
+    return;
+}
+
+/* The coordinator was unable to execute it's osql stream */
+void coordinator_failed(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    transaction_t *dtran;
+
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran)
+        Pthread_mutex_lock(&dtran->lk);
+    Pthread_mutex_unlock(&active_transactions_lk);
+
+    /* Aborted before coordinator finished preparing .. */
+    if (!dtran) {
+        logmsg(LOGMSG_INFO, "%s unable to find disttxn %s, assume abort\n", __func__, dist_txnid);
+        return;
+    }
+
+    dtran->coordinator_local->status = PARTICIPANT_FAILED;
+
+    assert(dtran->state != DISTTXN_COMMITTING && dtran->state != DISTTXN_COMMITTED &&
+           dtran->state != DISTTXN_PROPAGATED);
+
+    if (dtran->state == DISTTXN_PREPARING) {
+        abort_transaction_lk(dtran, 0);
+    }
+    dtran->state = DISTTXN_ABORT_RESOLVED;
+
+    Pthread_mutex_unlock(&dtran->lk);
+}
+
+int coordinator_wait_propagate(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    transaction_t *dtran;
+    int state;
+
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran)
+        Pthread_mutex_lock(&dtran->lk);
+    Pthread_mutex_unlock(&active_transactions_lk);
+
+    /* Aborted before coordinator finished preparing .. */
+    if (!dtran) {
+        logmsg(LOGMSG_FATAL, "%s unable to find disttxn %s, aborting\n", __func__, dist_txnid);
+        abort();
+    }
+
+    disttxn_check_propagated_lk(dtran);
+    dtran->coordinator_waiting = 1;
+
+    int startwait = comdb2_time_epochms(), elapsed = 0, remaining;
+
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s coordinator propagate-wait for %s\n", __func__, dist_txnid);
+    }
+
+    while (dtran->state == DISTTXN_COMMITTED && (elapsed < gbl_coordinator_propagate_timeout_ms)) {
+        if ((elapsed / 1000 > 5)) {
+            logmsg(LOGMSG_ERROR, "%s: dist-txnid %s waiting for participants to propagate for %d seconds\n", __func__,
+                   dist_txnid, elapsed / 1000);
+        }
+        struct timespec ts;
+        remaining = (gbl_coordinator_timeout_ms - elapsed);
+        clock_gettime(CLOCK_REALTIME, &ts);
+
+        if (remaining < 1000) {
+            ts.tv_nsec += (1000000L * remaining);
+            if (ts.tv_nsec >= 1000000000) {
+                ts.tv_nsec -= 1000000000;
+                ts.tv_sec += 1;
+            }
+        } else {
+            ts.tv_sec += 1;
+        }
+        pthread_cond_timedwait(&dtran->cd, &dtran->lk, &ts);
+        elapsed = (comdb2_time_epochms() - startwait);
+        disttxn_check_propagated_lk(dtran);
+    }
+    if (dtran->state != DISTTXN_PROPAGATED) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s propagate timeout state=%d\n", __func__, dist_txnid,
+                   dtran->state);
+        }
+        dtran->state = DISTTXN_PROPAGATE_TIMEOUT;
+    }
+    state = dtran->state;
+    dtran->coordinator_waiting = 0;
+    dtran->resolved_time = comdb2_time_epochms();
+    Pthread_mutex_unlock(&dtran->lk);
+    return !(state == DISTTXN_PROPAGATED);
+}
+
+int retryable_rcode(int rcode, int outrc)
+{
+    /* TODO verify this */
+    //return (rcode == 0 || rcode == ERR_VERIFY || rcode == ERR_NOTSERIAL);
+    return (outrc == ERR_NOTSERIAL || (outrc == ERR_BLOCK_FAILED && rcode == ERR_VERIFY));
+}
+
+static int coordinator_should_wait_lk(transaction_t *dtran, int can_retry)
+{
+    if (dtran->state == DISTTXN_COLLECTED || dtran->state == DISTTXN_PREPARING) {
+        logmsg(LOGMSG_USER, "DISTTXN %s returning true because state=%s\n",
+            __func__, dtran->state == DISTTXN_COLLECTED ? "collected" : "preparing");
+        return 1;
+    }
+    if (dtran->state == DISTTXN_ABORTED && can_retry && retryable_rcode(dtran->failrc, dtran->outrc) &&
+        (dtran->prepared_count + dtran->failed_count) < listc_size(&dtran->participants)) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s returning true because prepared=%d failed=%d sz=%d\n", __func__, dtran->dist_txnid, dtran->prepared_count, dtran->failed_count, listc_size(&dtran->participants));
+        return 1;
+    }
+    return 0;
+}
+
+/* This blocks the coordinator's bp until we know whether this can commit, or until a timeout */
+static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen, int force_failure)
+{
+    int returnzero = 0;
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    transaction_t *dtran;
+    int state;
+
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran)
+        Pthread_mutex_lock(&dtran->lk);
+    Pthread_mutex_unlock(&active_transactions_lk);
+
+    /* Aborted before coordinator finished preparing .. */
+    if (!dtran) {
+        logmsg(LOGMSG_FATAL, "%s unable to find disttxn %s, aborting\n", __func__, dist_txnid);
+        abort();
+    }
+
+    dtran->coordinator_local->status = PARTICIPANT_PREPARED;
+
+    /* This can toggle the state to COMMITTING */
+    disttxn_check_commitable_lk(dtran);
+
+    dtran->coordinator_waiting = 1;
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s coordinator waiting for %s\n", __func__, dist_txnid);
+    }
+
+    /* Measured from beginning of txn */
+    /* TODO .. dorin says use heartbeats instead of timeouts */
+    int elapsed = (comdb2_time_epochms() - dtran->start_time), remaining;
+    int start_timer = comdb2_time_epochms();
+    while (coordinator_should_wait_lk(dtran, can_retry) && (elapsed < gbl_coordinator_timeout_ms)) {
+        if ((elapsed / 1000 > 3)) {
+            logmsg(LOGMSG_ERROR, "%s: dist-txnid %s waiting for participants for %d seconds\n", __func__, dist_txnid,
+                   elapsed / 1000);
+        }
+        struct timespec ts;
+        remaining = (gbl_coordinator_timeout_ms - elapsed);
+        clock_gettime(CLOCK_REALTIME, &ts);
+        if (remaining < 1000) {
+            ts.tv_nsec += (1000000L * remaining);
+            if (ts.tv_nsec >= 1000000000) {
+                ts.tv_nsec -= 1000000000;
+                ts.tv_sec += 1;
+            }
+        } else {
+            ts.tv_sec += 1;
+        }
+        pthread_cond_timedwait(&dtran->cd, &dtran->lk, &ts);
+        elapsed = (comdb2_time_epochms() - dtran->start_time);
+    }
+    int stop_timer = comdb2_time_epochms();
+    logmsg(LOGMSG_USER, "DISTTXN %s wait took %d ms\n", __func__, stop_timer - start_timer);
+    /* Aborted or timeout -> RESOLVED */
+    if (dtran->state == DISTTXN_ABORTED) {
+        *rcode = dtran->failrc;
+        *outrc = dtran->outrc;
+        snprintf(errmsg, errmsglen, "%s:%s %s", dtran->failpart_name, dtran->failpart_tier, dtran->errstr);
+        logmsg(LOGMSG_USER, "DISTTXN %s setting rc=%d outrc=%d errmsg=%s\n", __func__, *rcode, *outrc, errmsg);
+        dtran->state = DISTTXN_ABORT_RESOLVED;
+    }
+
+    /* force-failure: this is a replayable rcode and all other participants succeeded
+     * returning 0 asks toblock to use it's original rcode */
+    if (dtran->state == DISTTXN_COMMITTING && force_failure)
+    {
+        *rcode = ERR_DIST_ABORT;
+        *outrc = ERR_BLOCK_FAILED;
+        abort_transaction_lk(dtran, 0);
+        returnzero = 1;
+    }
+
+    /* Timeout case */
+    if (dtran->state == DISTTXN_PREPARING) {
+        *rcode = ERR_DIST_ABORT;
+        *outrc = ERR_BLOCK_FAILED;
+        snprintf(errmsg, errmsglen, "coordinator timeout");
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "%s DISTTXN coordinator timing out %s\n", __func__, dtran->dist_txnid);
+        }
+        logmsg(LOGMSG_USER, "DISTTXN %s setting rc=%d outrc=%d errmsg=%s\n", __func__, *rcode, *outrc, errmsg);
+        dtran->state = DISTTXN_ABORT_RESOLVED;
+    }
+    state = dtran->state;
+    Pthread_mutex_unlock(&dtran->lk);
+
+    /* Everything prepared successfully, write disttxn record */
+    if (state == DISTTXN_COMMITTING && !force_failure) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "%s DISTTXN coordinator committing %s\n", __func__, dtran->dist_txnid);
+        }
+        if (gbl_debug_exit_coordinator_before_commit) {
+            flush_log();
+            logmsg(LOGMSG_FATAL, "%s exiting coordinator before commit on debug tunable\n", __func__);
+            sleep(3);
+            exit(1);
+        }
+        start_timer = comdb2_time_epochms();
+        int rc = commit_distributed_transaction(dtran);
+        stop_timer = comdb2_time_epochms();
+        logmsg(LOGMSG_USER, "DISTTXN %s commit took %d ms\n", __func__, stop_timer - start_timer);
+
+        if (gbl_debug_exit_coordinator_after_commit) {
+            flush_log();
+            logmsg(LOGMSG_FATAL, "%s exiting coordinator after commit on debug tunable\n", __func__);
+            sleep(3);
+            exit(1);
+        }
+
+        /* XXX maybe just make POSTCOMMIT only codepath */
+        if (rc || gbl_coordinator_notify == POSTCOMMIT) {
+            Pthread_mutex_lock(&dtran->lk);
+            if (rc) {
+                *rcode = ERR_DIST_ABORT;
+                *outrc = ERR_BLOCK_FAILED;
+                snprintf(errmsg, errmsglen, "failed writing to disttxn table");
+                start_timer = comdb2_time_epochms();
+                abort_transaction_lk(dtran, 0);
+                stop_timer = comdb2_time_epochms();
+                logmsg(LOGMSG_USER, "DISTTXN %s abort txn took %d ms\n", __func__, stop_timer - start_timer);
+            } else {
+                start_timer = comdb2_time_epochms();
+                commit_participants_lk(dtran);
+                stop_timer = comdb2_time_epochms();
+                logmsg(LOGMSG_USER, "DISTTXN %s commit participants took %d ms\n", __func__, stop_timer - start_timer);
+            }
+            dtran->resolved_time = comdb2_time_epochms();
+            state = dtran->state;
+            Pthread_mutex_unlock(&dtran->lk);
+        }
+    } else {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "%s DISTTXN coordinator aborting %s state=%d force-failure=%d\n", __func__, dtran->dist_txnid, state, force_failure);
+        }
+    }
+    dtran->coordinator_waiting = 0;
+    return !(state == DISTTXN_COMMITTED || returnzero);
+}
+
+
+int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen, int force_failure)
+{
+    int startms = comdb2_time_epochms();
+    int rc = coordinator_wait_int(dist_txnid, can_retry, rcode, outrc, errmsg, errmsglen, force_failure);
+    int endms = comdb2_time_epochms();
+    logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    return rc;
+}
+
+
+struct disttxn_collect {
+    char **disttxns;
+    int count;
+};
+
+static int collect_disttxn(void *obj, void *arg)
+{
+    struct disttxn_collect *collect = (struct disttxn_collect *)arg;
+    transaction_t *dtran = (transaction_t *)obj;
+    collect->disttxns[collect->count++] = strdup(dtran->dist_txnid);
+    return 0;
+}
+
+static int collect_handles(void *obj, void *arg)
+{
+    hndlnode_t *hndl = NULL, *tmp = NULL;
+    hndlcache_t *hcache = (hndlcache_t *)obj;
+    LISTC_T(struct hndlnode) *oldhandles = arg;
+    int now = comdb2_time_epoch();
+
+    LISTC_FOR_EACH_SAFE(&hcache->handles, hndl, tmp, linkv)
+    {
+        if ((now - hndl->donate_time) > gbl_disttxn_handle_linger_time) {
+            listc_rfl(&hcache->handles, hndl);
+            listc_abl(oldhandles, hndl);
+        }
+    }
+    return 0;
+}
+
+int collect_sanc(void *obj, void *arg)
+{
+    struct disttxn_collect *collect = (struct disttxn_collect *)arg;
+    sanctioned_t *sanc = (sanctioned_t *)obj;
+    if ((comdb2_time_epoch() - sanc->time_added) > gbl_disttxn_sanctioned_linger_time) {
+        collect->disttxns[collect->count++] = strdup(sanc->dist_txnid);
+    }
+    return 0;
+}
+
+/* This is required to prevent distributed deadlocks */
+static void disttxn_timeout(void)
+{
+    struct disttxn_collect collect = {0};
+    int alloc;
+    Pthread_mutex_lock(&active_transactions_lk);
+    hash_info(active_transactions_hash, NULL, NULL, NULL, NULL, &alloc, NULL, NULL);
+    collect.disttxns = malloc(sizeof(char *) * alloc);
+    hash_for(active_transactions_hash, collect_disttxn, &collect);
+    Pthread_mutex_unlock(&active_transactions_lk);
+    for (int i = 0; i < collect.count; i++) {
+        transaction_t *dtran;
+        Pthread_mutex_lock(&active_transactions_lk);
+        dtran = hash_find(active_transactions_hash, &collect.disttxns[i]);
+        if (dtran) {
+            Pthread_mutex_lock(&dtran->lk);
+        }
+        Pthread_mutex_unlock(&active_transactions_lk);
+
+        if (dtran && dtran->state == DISTTXN_PREPARING && !dtran->coordinator_waiting &&
+            (comdb2_time_epochms() - dtran->start_time) > gbl_coordinator_timeout_ms) {
+            abort_transaction_lk(dtran, 0);
+            logmsg(LOGMSG_INFO, "DISTTXN %s disttxn %s aborted by timeout\n", __func__, dtran->dist_txnid);
+        }
+        if (dtran) {
+            Pthread_mutex_unlock(&dtran->lk);
+        }
+    }
+    for (int i = 0; i < collect.count; i++) {
+        free(collect.disttxns[i]);
+    }
+    free(collect.disttxns);
+}
+
+int disttxn_purgeable_lk(transaction_t *dtran)
+{
+    if (dtran->coordinator_waiting) {
+        return 0;
+    }
+    switch (dtran->state) {
+    case DISTTXN_ABORT_RESOLVED:
+    case DISTTXN_PROPAGATED:
+    case DISTTXN_PROPAGATE_TIMEOUT:
+        return (((comdb2_time_epochms() - dtran->resolved_time) / 1000) > gbl_disttxn_linger_time);
+        break;
+    }
+    return 0;
+}
+
+static void disttxn_purge(void)
+{
+    struct disttxn_collect collect = {0};
+    int alloc, deleted = 0;
+    char **deleted_disttxns;
+    Pthread_mutex_lock(&active_transactions_lk);
+    hash_info(active_transactions_hash, NULL, NULL, NULL, NULL, &alloc, NULL, NULL);
+    collect.disttxns = malloc(sizeof(char *) * alloc);
+    hash_for(active_transactions_hash, collect_disttxn, &collect);
+    Pthread_mutex_unlock(&active_transactions_lk);
+    deleted_disttxns = malloc(sizeof(char *) * alloc);
+
+    /* Purge completed transactions */
+    for (int i = 0; i < collect.count; i++) {
+        transaction_t *dtran;
+
+        Pthread_mutex_lock(&active_transactions_lk);
+        dtran = hash_find(active_transactions_hash, &collect.disttxns[i]);
+        if (dtran) {
+            Pthread_mutex_lock(&dtran->lk);
+        }
+        if (dtran && disttxn_purgeable_lk(dtran)) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s deleting disttxn %s\n", __func__, collect.disttxns[i]);
+            }
+            deleted_disttxns[deleted++] = collect.disttxns[i];
+            hash_del(active_transactions_hash, dtran);
+            Pthread_mutex_unlock(&dtran->lk);
+            destroy_dtran(dtran);
+            dtran = NULL;
+        }
+        if (dtran) {
+            Pthread_mutex_unlock(&dtran->lk);
+        }
+        Pthread_mutex_unlock(&active_transactions_lk);
+    }
+
+    /* Purge sanctioned hash */
+    for (int i = 0; i < deleted; i++) {
+        Pthread_mutex_lock(&sanc_lk);
+        sanctioned_t *sanc = hash_find(sanctioned_hash, &deleted_disttxns[i]);
+        if (sanc) {
+            hash_del(sanctioned_hash, sanc);
+        }
+        Pthread_mutex_unlock(&sanc_lk);
+        if (sanc) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s deleting disttxn %s from sanc\n", __func__, deleted_disttxns[i]);
+            }
+            destroy_sanc(sanc);
+        }
+    }
+
+    /* Free dup'd strings */
+    for (int i = 0; i < collect.count; i++) {
+        free(collect.disttxns[i]);
+    }
+
+    /* Free deleted list */
+    free(deleted_disttxns);
+
+    /* Collect old sanctioned */
+    Pthread_mutex_lock(&sanc_lk);
+    hash_info(sanctioned_hash, NULL, NULL, NULL, NULL, &alloc, NULL, NULL);
+    collect.disttxns = realloc(collect.disttxns, sizeof(char *) * alloc);
+    collect.count = 0;
+    hash_for(sanctioned_hash, collect_sanc, &collect);
+    Pthread_mutex_unlock(&sanc_lk);
+
+    /* Free old sanctioned */
+    for (int i = 0; i < collect.count; i++) {
+        Pthread_mutex_lock(&sanc_lk);
+        sanctioned_t *sanc = hash_find(sanctioned_hash, &collect.disttxns[i]);
+        if (sanc) {
+            hash_del(sanctioned_hash, sanc);
+        }
+        Pthread_mutex_unlock(&sanc_lk);
+        if (sanc) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s deleting disttxn %s from sanc (old)\n", __func__, sanc->dist_txnid);
+            }
+            destroy_sanc(sanc);
+        }
+    }
+
+    /* Free dup'd strings */
+    for (int i = 0; i < collect.count; i++) {
+        free(collect.disttxns[i]);
+    }
+
+    /* Free collect list */
+    free(collect.disttxns);
+
+    /* Collect old handles */
+    LISTC_T(struct hndlnode) oldhandles;
+    listc_init(&oldhandles, offsetof(hndlnode_t, linkv));
+    Pthread_mutex_lock(&hndl_lk);
+    hash_for(handle_hash, collect_handles, &oldhandles);
+    Pthread_mutex_unlock(&hndl_lk);
+
+    /* Close and delete */
+    hndlnode_t *hndl;
+    while ((hndl = listc_rtl(&oldhandles))) {
+        cdb2_close(hndl->hndl);
+        free(hndl);
+    }
+}
+
+static int is_committed(transaction_t *dtran)
+{
+    switch (dtran->state) {
+    case DISTTXN_COMMITTED:
+    case DISTTXN_PROPAGATED:
+    case DISTTXN_PROPAGATE_TIMEOUT:
+        return 1;
+    }
+    return 0;
+}
+
+static int is_aborted(transaction_t *dtran)
+{
+    switch (dtran->state) {
+    case DISTTXN_ABORTED:
+    case DISTTXN_ABORT_RESOLVED:
+        return 1;
+    }
+    return 0;
+}
+
+static void signal_coordinator_wakeup_lk(transaction_t *dtran)
+{
+    if ((dtran->prepared_count + dtran->failed_count) == listc_size(&dtran->participants)) {
+        Pthread_cond_signal(&dtran->cd);
+    }
+}
+
+/* Core coordinator state machine */
+static int participant_result(const char *dist_txnid, const char *dbname, const char *tier, const char *master,
+                              int prepare_success, int partrc, int outrc, const char *errstr)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s from %s/%s/%s dist_txnid %s success=%d rc=%d outrc=%d errstr=%s\n", __func__, dbname, tier, master,
+               dist_txnid, prepare_success, partrc, outrc, errstr);
+    }
+    transaction_t *dtran;
+
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran)
+        Pthread_mutex_lock(&dtran->lk);
+    Pthread_mutex_unlock(&active_transactions_lk);
+
+    if (dtran) {
+        /* Register success for ongoing transaction */
+        if (prepare_success && dtran->state == DISTTXN_PREPARING) {
+            struct participant *part = find_participant_lk(dtran, dbname);
+            participant_prepared_lk(dtran, part);
+            disttxn_check_commitable_lk(dtran);
+            signal_coordinator_wakeup_lk(dtran);
+            Pthread_mutex_unlock(&dtran->lk);
+            return 0;
+        }
+
+        /* Notify participant of abort  */
+        if (prepare_success && is_aborted(dtran)) {
+            struct participant *part = find_participant_lk(dtran, dbname);
+            participant_failed_lk(dtran, part);
+            signal_coordinator_wakeup_lk(dtran);
+            Pthread_mutex_unlock(&dtran->lk);
+            send_participant_abort(dist_txnid, dbname, master);
+            return 0;
+        }
+
+        /* Tell this participant to commit */
+        if (prepare_success && is_committed(dtran)) {
+            Pthread_mutex_unlock(&dtran->lk);
+            send_participant_commit(dist_txnid, dbname, master);
+            return 0;
+        }
+
+        /* Tell all participants to abort */
+        if (!prepare_success && dtran->state == DISTTXN_PREPARING) {
+            struct participant *part = find_participant_lk(dtran, dbname);
+            participant_failed_lk(dtran, part);
+            dtran->failrc = partrc;
+            dtran->outrc = outrc;
+            dtran->errstr = strdup(errstr);
+            dtran->failpart_name = strdup(dbname);
+            dtran->failpart_tier = strdup(tier);
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s disttxn %s aborted by %s tier %s\n", __func__, dist_txnid, dbname,
+                       tier);
+            }
+            /* If this can be retried, only cancel participants we have gotten results from.
+             * This is because a different participant may have a non-retryable rcode */
+            abort_transaction_lk(dtran, retryable_rcode(partrc, outrc));
+            signal_coordinator_wakeup_lk(dtran);
+            Pthread_mutex_unlock(&dtran->lk);
+            return 0;
+        }
+
+        /* Don't need to abort already failed txn */
+        if (!prepare_success) {
+            struct participant *part = find_participant_lk(dtran, dbname);
+            participant_failed_lk(dtran, part);
+
+            /* Switch from retryable to non-retryable rcode */
+            if (retryable_rcode(dtran->failrc, dtran->outrc) && !retryable_rcode(partrc, outrc)) {
+
+                /* Free old data */
+                free(dtran->errstr);
+                free(dtran->failpart_name);
+                free(dtran->failpart_tier);
+                
+                /* Store new data */
+                dtran->errstr = strdup(errstr);
+                dtran->failpart_name = strdup(dbname);
+                dtran->failpart_tier = strdup(tier);
+                dtran->failrc = partrc;
+                dtran->outrc = outrc;
+
+            }
+
+            /* Signal coordinator */
+            signal_coordinator_wakeup_lk(dtran);
+            assert(is_aborted(dtran));
+            Pthread_mutex_unlock(&dtran->lk);
+            return 0;
+        }
+
+        /* Waiting for coordinator to write commit record */
+        assert(dtran->state == DISTTXN_COMMITTING);
+        Pthread_mutex_unlock(&dtran->lk);
+        return 0;
+    }
+
+    /* Slow path: either dist-txn has aged out or something crashed */
+    if (prepare_success) {
+        if (transaction_has_committed(dist_txnid)) {
+            send_participant_commit(dist_txnid, dbname, master);
+        } else {
+            send_participant_abort(dist_txnid, dbname, master);
+        }
+    }
+
+    /* Audit: TODO, remove this.. a participant should only give one answer, not 2 */
+    if (!prepare_success) {
+        if (transaction_has_committed(dist_txnid)) {
+            logmsg(LOGMSG_FATAL, "%s committed an aborted dist-txnid %s\n", __func__, dist_txnid);
+            abort();
+        }
+    }
+
+    return 0;
+}
+
+/* Participant master tells me (coordinator master) it has prepared */
+int participant_prepared(const char *dist_txnid, const char *dbname, const char *tier, const char *master)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    return participant_result(dist_txnid, dbname, tier, master, 1, 0, 0, NULL);
+}
+
+/* Participant master tells me (coordinator master) it has failed */
+int participant_failed(const char *dist_txnid, const char *dbname, const char *tier, int rc, int outrc, const char *errstr)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s rc %d outrc %d retryable %d\n", __func__, dist_txnid, rc, outrc, retryable_rcode(rc, outrc));
+    }
+    return participant_result(dist_txnid, dbname, tier, NULL, 0, rc, outrc, errstr);
+}
+
+/* Participant master tells me (coordinator master) it has propagated */
+int participant_propagated(const char *dist_txnid, const char *dbname, const char *tier)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    transaction_t *dtran;
+
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran)
+        Pthread_mutex_lock(&dtran->lk);
+    Pthread_mutex_unlock(&active_transactions_lk);
+
+    if (dtran) {
+        struct participant *part = find_participant_lk(dtran, dbname);
+        participant_propagated_lk(dtran, part);
+        Pthread_mutex_unlock(&dtran->lk);
+    }
+    return 0;
+}
+
+int coordinator_notify_algo(const char *a)
+{
+    if (strcasecmp(a, "postcommit"))
+        return POSTCOMMIT;
+    if (strcasecmp(a, "postdistcommit"))
+        return POSTDISTCOMMIT;
+    return POSTCOMMIT;
+}
+
+const char *coordinator_notify_string(int alg)
+{
+    switch (alg) {
+    case POSTCOMMIT:
+        return "postcommit";
+    case POSTDISTCOMMIT:
+        return "postdistcommit";
+    default:
+        logmsg(LOGMSG_ERROR, "%s called with invalid algorithm %d\n", __func__, alg);
+        return "?invalid?";
+    }
+}
+
+static participant_t *add_participant_lk(const char *dist_txnid, int state)
+{
+    participant_t *p = calloc(sizeof(participant_t), 1);
+    p->dist_txnid = strdup(dist_txnid);
+    p->state = state;
+    Pthread_mutex_init(&p->lk, NULL);
+    Pthread_cond_init(&p->cd, NULL);
+    hash_add(participant_hash, p);
+    return p;
+}
+
+static void rem_participant_lk(participant_t *p)
+{
+    hash_del(participant_hash, p);
+    free(p->dist_txnid);
+    free(p);
+}
+
+/* Participant block-processor has failed */
+int participant_has_failed(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master, int rcode, int outrc, const char *errmsg)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s rcode=%d outrc=%d errmsg=%s\n", __func__, dist_txnid, rcode, outrc, errmsg);
+    }
+    Pthread_mutex_lock(&part_lk);
+    participant_t *p = hash_find(participant_hash, &dist_txnid);
+    if (p) {
+        p->state = I_AM_ABORTED;
+        rem_participant_lk(p);
+    }
+    Pthread_mutex_unlock(&part_lk);
+    send_coordinator_failed_prepare(dist_txnid, coordinator_name, coordinator_master, rcode, outrc, errmsg);
+    return 0;
+}
+
+void participant_has_propagated(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    send_coordinator_propagated(dist_txnid, coordinator_name, coordinator_master);
+}
+
+/* Participant block-processor blocks on coordinator */
+static int participant_wait_int(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,
+                     const char *coordinator_master)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    int rtn = 0, first = 1;
+
+    /* Because this isn't sent under lock, a coordinator commit can arrive before we get the lock */
+    send_coordinator_prepared(dist_txnid, coordinator_name, coordinator_master);
+
+    if (gbl_debug_exit_participant_after_prepare) {
+        logmsg(LOGMSG_FATAL, "%s exiting participant on debug tunable\n", __func__);
+        /* Sleep to make sure all replicants have gotten the prepare */
+        sleep(3);
+        exit(1);
+    }
+
+    Pthread_mutex_lock(&part_lk);
+
+    participant_t *p = hash_find(participant_hash, &dist_txnid);
+    if (!p) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s line %d adding participant %s\n", __func__, __LINE__, dist_txnid);
+        }
+        p = add_participant_lk(dist_txnid, I_AM_PREPARED);
+        p->start_wait = comdb2_time_epochms();
+    } 
+
+    Pthread_mutex_lock(&p->lk);
+    Pthread_mutex_unlock(&part_lk);
+
+    while (p->state == I_AM_PREPARED) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s line %d sending prepared %s first=%d\n", __func__, __LINE__, dist_txnid,
+                   first);
+        }
+        Pthread_mutex_unlock(&p->lk);
+        if (first == 1) {
+            first = 0;
+        } else {
+            send_coordinator_prepared_find_master(dist_txnid, coordinator_name, coordinator_tier);
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s line %d finish sending prepared %s first=%d\n", __func__, __LINE__,
+                        dist_txnid, first);
+            }
+        }
+        Pthread_mutex_lock(&p->lk);
+        if (p->state == I_AM_PREPARED) {
+            int elapsed = comdb2_time_epochms() - p->start_wait;
+            if ((elapsed / 1000 > 3)) {
+                logmsg(LOGMSG_ERROR, "%s: dist-txnid %s blocked on coordinator for %d seconds\n", __func__, dist_txnid,
+                        elapsed / 1000);
+            }
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += 1;
+            pthread_cond_timedwait(&p->cd, &p->lk, &ts);
+        }
+    }
+    rtn = p->state;
+    Pthread_mutex_unlock(&p->lk);
+
+    Pthread_mutex_lock(&part_lk);
+    rem_participant_lk(p);
+    Pthread_mutex_unlock(&part_lk);
+
+    return rtn == I_AM_COMMITTED ? 0 : -1;
+}
+
+int participant_wait(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,
+                     const char *coordinator_master)
+{
+    int startms = comdb2_time_epochms();
+    int rc = participant_wait_int(dist_txnid, coordinator_name, coordinator_tier, coordinator_master);
+    int endms = comdb2_time_epochms();
+    logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    return rc;
+}
+
+/* Coordinator master tells me (participant master) to abort */
+int coordinator_aborted(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    Pthread_mutex_lock(&part_lk);
+    participant_t *p = hash_find(participant_hash, &dist_txnid);
+    if (!p) {
+
+        /* Abort recovered transactions immediately */
+        Pthread_mutex_unlock(&part_lk);
+        int rc = thedb->bdb_env->dbenv->txn_abort_recovered(thedb->bdb_env->dbenv, dist_txnid);
+        if (rc == 0) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s aborted recovered txn\n", __func__, dist_txnid);
+            }
+            return 0;
+        }
+
+        /* Add this as aborted */
+        Pthread_mutex_lock(&part_lk);
+        p = hash_find(participant_hash, &dist_txnid);
+        if (!p) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s line %d adding aborted participant %s\n", __func__, __LINE__,
+                       dist_txnid);
+            }
+            p = add_participant_lk(dist_txnid, I_AM_ABORTED);
+            Pthread_mutex_unlock(&part_lk);
+            return 0;
+        }
+    }
+
+    /* Signal participant */
+    Pthread_mutex_lock(&p->lk);
+    Pthread_mutex_unlock(&part_lk);
+    if (p->state == I_AM_COMMITTED) {
+        logmsg(LOGMSG_FATAL, "%s committed txn %s told to abort?\n", __func__, dist_txnid);
+        abort();
+    }
+    p->state = I_AM_ABORTED;
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s line %d signaling existing participant %s\n", __func__, __LINE__, dist_txnid);
+    }
+
+    Pthread_cond_signal(&p->cd);
+    Pthread_mutex_unlock(&p->lk);
+
+    return 0;
+}
+
+/* Coordinator master tells me (participant master) to commit */
+int coordinator_committed(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    Pthread_mutex_lock(&part_lk);
+    participant_t *p = hash_find(participant_hash, &dist_txnid);
+    if (!p) {
+        p = add_participant_lk(dist_txnid, I_AM_COMMITTED);
+        if (gbl_debug_disttxn_trace)
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s commit occurred prior to wait\n", __func__, dist_txnid);
+        Pthread_mutex_unlock(&part_lk);
+        /* Possibly a recovered prepare */
+        int rc = thedb->bdb_env->dbenv->txn_commit_recovered(thedb->bdb_env->dbenv, dist_txnid);
+        if (rc == 0) {
+            logmsg(LOGMSG_INFO, "%s coordinator-commit for recovered transaction %s\n", __func__, dist_txnid);
+            Pthread_mutex_lock(&part_lk);
+            rem_participant_lk(p);
+            Pthread_mutex_unlock(&part_lk);
+        }
+        return rc;
+    }
+    Pthread_mutex_lock(&p->lk);
+    Pthread_mutex_unlock(&part_lk);
+
+    assert(p->state != I_AM_ABORTED);
+    p->state = I_AM_COMMITTED;
+
+    Pthread_cond_signal(&p->cd);
+    Pthread_mutex_unlock(&p->lk);
+
+    return 0;
+}
+
+/* osql session registers this disttxn- it may have already been sanctioned by coordinator */
+int osql_register_disttxn(const char *dist_txnid, unsigned long long rqid, uuid_t uuid, char **coordinator_dbname,
+                          char **coordinator_tier, char **coordinator_master)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    int rtn = 0;
+    sanctioned_t *sanc;
+    Pthread_mutex_lock(&sanc_lk);
+    sanc = hash_find(sanctioned_hash, &dist_txnid);
+    if (sanc == NULL) {
+        sanc = (sanctioned_t *)calloc(sizeof(*sanc), 1);
+        sanc->dist_txnid = strdup(dist_txnid);
+        sanc->time_added = comdb2_time_epoch();
+        sanc->rqid = rqid;
+        comdb2uuidcpy(sanc->uuid, uuid);
+        hash_add(sanctioned_hash, sanc);
+    } else {
+        rtn = sanc->sanctioned;
+        sanc->rqid = rqid;
+        comdb2uuidcpy(sanc->uuid, uuid);
+        if (sanc->sanctioned == 1) {
+            (*coordinator_dbname) = strdup(sanc->coordinator_dbname);
+            (*coordinator_tier) = strdup(sanc->coordinator_tier);
+            (*coordinator_master) = strdup(sanc->coordinator_master);
+        }
+    }
+    Pthread_mutex_unlock(&sanc_lk);
+    return rtn;
+}
+
+/* Called from osql_discard- coordinator master tells me (participant master) to discard */
+int osql_cancel_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    int rtn = 0;
+    sanctioned_t *sanc;
+    Pthread_mutex_lock(&sanc_lk);
+    sanc = hash_find(sanctioned_hash, &dist_txnid);
+    if (sanc != NULL) {
+        (*rqid) = sanc->rqid;
+        comdb2uuidcpy((*uuid), sanc->uuid);
+        sanc->sanctioned = -1;
+        rtn = 1;
+    } else {
+        sanc = (sanctioned_t *)calloc(sizeof(*sanc), 1);
+        sanc->dist_txnid = strdup(dist_txnid);
+        sanc->time_added = comdb2_time_epoch();
+        hash_add(sanctioned_hash, sanc);
+        sanc->sanctioned = -1;
+        rtn = 0;
+    }
+    Pthread_mutex_unlock(&sanc_lk);
+    return rtn;
+}
+
+/* Called from osql_prepare- coordinator master tells me (participant master) to prepare */
+int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid,
+                          const char *coordinator_dbname, const char *coordinator_tier, const char *coordinator_master)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    int rtn = 0;
+    sanctioned_t *sanc;
+    Pthread_mutex_lock(&sanc_lk);
+    sanc = hash_find(sanctioned_hash, &dist_txnid);
+    if (sanc != NULL) {
+        (*rqid) = sanc->rqid;
+        comdb2uuidcpy((*uuid), sanc->uuid);
+        sanc->sanctioned = 1;
+        if (sanc->coordinator_master) {
+            assert(!strcmp(coordinator_master, sanc->coordinator_master));
+        } else {
+            sanc->coordinator_master = strdup(coordinator_master);
+        }
+        rtn = 1;
+    } else {
+        sanc = (sanctioned_t *)calloc(sizeof(*sanc), 1);
+        sanc->dist_txnid = strdup(dist_txnid);
+        sanc->time_added = comdb2_time_epoch();
+        sanc->coordinator_dbname = strdup(coordinator_dbname);
+        sanc->coordinator_tier = strdup(coordinator_tier);
+        sanc->coordinator_master = strdup(coordinator_master);
+        sanc->sanctioned = 1;
+        hash_add(sanctioned_hash, sanc);
+        rtn = 0;
+    }
+    Pthread_mutex_unlock(&sanc_lk);
+    return rtn;
+}
+
+enum { PRIME = 8388013 };
+static inline unsigned int hash_two_strptr(const char *s1, const char *s2)
+{
+    unsigned hash = 0;
+    const char *key1 = s1;
+    for (; *key1; key1++)
+        hash = ((hash % PRIME) << 8) + (*key1);
+    const char *key2 = s2;
+    for (; *key2; key2++)
+        hash = ((hash % PRIME) << 8) + (*key2);
+    return hash;
+}
+
+static inline unsigned int hndl_hash(const void *key, int len)
+{
+    hndlcache_t *h = (hndlcache_t *)key;
+    return hash_two_strptr(h->dbname, h->machine);
+}
+
+static int hndl_cmp(const void *key1, const void *key2, int len)
+{
+    hndlcache_t *h1 = (hndlcache_t *)key1;
+    hndlcache_t *h2 = (hndlcache_t *)key2;
+    int cmp;
+    if ((cmp = strcmp(h1->dbname, h2->dbname)))
+        return cmp;
+    return strcmp(h1->machine, h2->machine);
+}
+
+void disttxn_timer(void)
+{
+    /* Create disttributed transactions table */
+    static int checked_disttxn_table = 0;
+    if (!checked_disttxn_table) {
+        checked_disttxn_table = 1;
+        disttxn_verify_table();
+    }
+
+    disttxn_timeout();
+    disttxn_purge();
+    disttxn_recover_prepared();
+}
+
+/* Initialize coordinator and participant data structures */
+void disttxn_init()
+{
+    participant_hash = hash_init_strptr(0);
+    active_transactions_hash = hash_init_strptr(0);
+    sanctioned_hash = hash_init_strptr(0);
+    handle_hash = hash_init_user((hashfunc_t *)hndl_hash, (cmpfunc_t *)hndl_cmp, 0, 0);
+    have_disttxn_table = get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE) ? 1 : 0;
+    thedb->bdb_env->dbenv->set_recover_prepared_callback(thedb->bdb_env->dbenv, recover_prepared_transaction);
+}

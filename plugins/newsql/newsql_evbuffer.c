@@ -37,11 +37,15 @@
 #include <str0.h>
 #include <timer_util.h>
 #include <pb_alloc.h>
+#include <comdb2uuid.h>
+#include <osqlsession.h>
+#include <disttxn.h>
 
 #include <newsql.h>
 #include <fsnapf.h>
 
 extern int gbl_nid_dbname;
+extern int gbl_debug_disttxn_trace;
 extern SSL_CTX *gbl_ssl_ctx;
 extern ssl_mode gbl_client_ssl_mode;
 extern uint64_t gbl_ssl_num_full_handshakes;
@@ -124,6 +128,9 @@ static void free_newsql_appdata_evbuffer(int dummyfd, short what, void *arg)
     free_newsql_appdata(clnt);
     sqlwriter_free(appdata->writer);
     free(appdata);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s closing fd %d\n", __func__, fd);
+    }
     shutdown(fd, SHUT_RDWR);
     close(fd);
 }
@@ -482,21 +489,109 @@ out:
     }
 }
 
+static void process_disttxn(struct newsql_appdata_evbuffer *appdata, CDB2DISTTXN *disttxn)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s txnid %s name=%s tier=%s master=%s fd %d op %d rcode=%d errstr=%s\n", __func__,
+               disttxn->disttxn->txnid, disttxn->disttxn->name ? disttxn->disttxn->name : "(null)",
+               disttxn->disttxn->tier ? disttxn->disttxn->tier : "(null)",
+               disttxn->disttxn->master ? disttxn->disttxn->master : "(null)", appdata->fd,
+               disttxn->disttxn->operation, disttxn->disttxn->rcode,
+               disttxn->disttxn->errmsg ? disttxn->disttxn->errmsg : "(null)");
+    }
+
+    struct evbuffer *buf = sql_wrbuf(appdata->writer);
+    CDB2DISTTXNRESPONSE response = CDB2__DISTTXNRESPONSE__INIT;
+    int rcode = 0;
+    if (!bdb_amimaster(thedb->bdb_env)) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s disttxn %s ignoring operation %d because i am not master\n", __func__,
+                   disttxn->disttxn->txnid, disttxn->disttxn->operation);
+        }
+        rcode = -1;
+        goto sendresponse;
+    }
+
+    switch (disttxn->disttxn->operation) {
+
+    /* Coordinator master tells me (participant master) to prepare */
+    case (CDB2_DIST__PREPARE):
+        rcode = osql_prepare(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier,
+                             disttxn->disttxn->master);
+        break;
+
+    /* Coordinator master tells me (participant master) to discard */
+    case (CDB2_DIST__DISCARD):
+        rcode = osql_discard(disttxn->disttxn->txnid);
+        break;
+
+    /* Participant master tells me (coordinator master) it has prepared */
+    case (CDB2_DIST__PREPARED):
+        rcode = participant_prepared(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier,
+                                     disttxn->disttxn->master);
+        break;
+
+    /* Participant master tells me (coordinator master) it has failed */
+    case (CDB2_DIST__FAILED_PREPARE):
+        rcode = participant_failed(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier, disttxn->disttxn->rcode, disttxn->disttxn->outrc, disttxn->disttxn->errmsg);
+        break;
+
+    /* Coordinator master tells me (participant master) to commit */
+    case (CDB2_DIST__COMMIT):
+        rcode = coordinator_committed(disttxn->disttxn->txnid);
+        break;
+
+    /* Coordinator master tells me (participant master) to abort */
+    case (CDB2_DIST__ABORT):
+        rcode = coordinator_aborted(disttxn->disttxn->txnid);
+        break;
+
+    /* Participant master tells me (coordinator master) it has propagated */
+    case (CDB2_DIST__PROPAGATED):
+        rcode = participant_propagated(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier);
+        break;
+    }
+
+sendresponse:
+    if (disttxn->disttxn->async) {
+        rd_hdr(-1, 0, appdata);
+        return;
+    }
+
+    response.rcode = rcode;
+    int len = cdb2__disttxnresponse__get_packed_size(&response);
+    struct newsqlheader hdr = {0};
+    hdr.type = htonl(RESPONSE_HEADER__DISTTXN_RESPONSE);
+    hdr.length = htonl(len);
+    uint8_t out[len];
+    cdb2__disttxnresponse__pack(&response, out);
+    evbuffer_add(buf, &hdr, sizeof(hdr));
+    evbuffer_add(buf, out, len);
+    event_base_once(appdata->base, appdata->fd, EV_WRITE, wr_dbinfo, appdata, NULL);
+}
+
 static void process_cdb2query(struct newsql_appdata_evbuffer *appdata, CDB2QUERY *query)
 {
     if (!query) {
         newsql_cleanup(appdata);
         return;
     }
+    CDB2DISTTXN *disttxn = query->disttxn;
     CDB2DBINFO *dbinfo = query->dbinfo;
-    if (!dbinfo) {
+
+    if (!dbinfo && !disttxn) {
         process_query(appdata, query);
         return;
     }
-    if (dbinfo->has_want_effects && dbinfo->want_effects) {
-        process_get_effects(appdata);
-    } else {
-        process_dbinfo(appdata);
+    if (dbinfo) {
+        if (dbinfo->has_want_effects && dbinfo->want_effects) {
+            process_get_effects(appdata);
+        } else {
+            process_dbinfo(appdata);
+        }
+    }
+    if (disttxn) {
+        process_disttxn(appdata, disttxn);
     }
     cdb2__query__free_unpacked(query, &pb_alloc);
 }
@@ -657,7 +752,16 @@ static int rd_evbuffer_ssl(struct newsql_appdata_evbuffer *appdata)
 
 static int rd_evbuffer_plaintext(struct newsql_appdata_evbuffer *appdata)
 {
-    return evbuffer_read(appdata->rd_buf, appdata->fd, -1);
+    EVUTIL_SET_SOCKET_ERROR(0);
+    int n = evbuffer_read(appdata->rd_buf, appdata->fd, -1), e = 0;
+    if (n <= 0) {
+        e = EVUTIL_SOCKET_ERROR();
+        int len = evbuffer_get_length(appdata->rd_buf);
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s fd %d errno=%d len=%d\n", __func__, appdata->fd, e, len);
+        }
+    }
+    return n;
 }
 
 static void process_ssl_request(struct newsql_appdata_evbuffer *appdata)
@@ -725,6 +829,9 @@ static void rd_payload(int dummyfd, short what, void *arg)
         goto payload;
     }
     if (rd_evbuffer(appdata) <= 0 && (what & EV_READ)) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s cleanup for fd %d\n", __func__, appdata->fd);
+        }
         newsql_cleanup(appdata);
         return;
     }
@@ -737,6 +844,10 @@ payload:
         int len = appdata->hdr.length;
         void *data = evbuffer_pullup(appdata->rd_buf, len);
         if (data == NULL || (query = cdb2__query__unpack(&pb_alloc, len, data)) == NULL) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s data-null=%s query-null=%s\n", __func__, data ? "N" : "Y",
+                       query ? "N" : "Y");
+            }
             newsql_cleanup(appdata);
             return;
         }
@@ -752,7 +863,11 @@ static void rd_hdr(int dummyfd, short what, void *arg)
     if (evbuffer_get_length(appdata->rd_buf) >= sizeof(struct newsqlheader)) {
         goto hdr;
     }
-    if (rd_evbuffer(appdata) <= 0 && (what & EV_READ)) {
+    int cnt;
+    if ((cnt = rd_evbuffer(appdata)) <= 0 && (what & EV_READ)) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s cleanup for fd %d cnt=%d\n", __func__, appdata->fd, cnt);
+        }
         newsql_cleanup(appdata);
         return;
     }

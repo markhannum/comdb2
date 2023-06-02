@@ -628,7 +628,11 @@ struct user {
 struct string_ref;
 
 struct session_tbl;
+
 void clear_session_tbls(struct sqlclntstate *);
+
+void clear_participants(struct sqlclntstate *);
+void add_participant(struct sqlclntstate *, const char *dbname, const char *tier);
 
 /* Client specific sql state */
 struct sqlclntstate {
@@ -939,6 +943,19 @@ struct sqlclntstate {
 
     int lastresptype;
     char *externalAuthUser;
+
+    // fdb 2pc
+    int use_2pc;
+    int is_participant;
+    int is_coordinator;
+
+    char *dist_txnid;
+    char *coordinator_dbname;
+    char *coordinator_tier;
+    char *coordinator_master;
+
+    // coordinator participant information
+    LISTC_T(struct participant) participants;
 };
 
 /* Query stats. */
