@@ -230,11 +230,42 @@ REGISTER_TUNABLE("disable_page_latches", "Disables 'page_latches'",
 REGISTER_TUNABLE("disable_partial_indexes", "Disables 'enable_partial_indexes'",
                  TUNABLE_BOOLEAN, &gbl_partial_indexes,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("disable_prefault_udp", "Disables 'enable_prefault_udp'",
-                 TUNABLE_BOOLEAN, &gbl_prefault_udp, INVERSE_VALUE | NOARG,
-                 NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("disable_replicant_latches", "Disables 'replicant_latches'",
-                 TUNABLE_BOOLEAN, &gbl_replicant_latches,
+REGISTER_TUNABLE("enable_2pc", "Enable 2pc fdb transactions.  (Default: off)", TUNABLE_BOOLEAN, &gbl_2pc,
+                 READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("coordinator_sync_on_commit", "Coordinator syncs log and waits on commit.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_coordinator_sync_on_commit, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("coordinator_timeout_ms", "Coordinator timeout for 2pc.  (Default: 5000ms)", TUNABLE_INTEGER,
+                 &gbl_coordinator_timeout_ms, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("coordinator_propagate_timeout_ms", "Coordinator max wait for propagating txns.  (Default: 5000ms)",
+                 TUNABLE_INTEGER, &gbl_coordinator_propagate_timeout_ms, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug_exit_participant_after_prepare", "Participant exits after successful prepare.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_debug_exit_participant_after_prepare, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL,
+                 NULL);
+REGISTER_TUNABLE("debug_exit_coordinator_before_commit", "Coordinator exits before committing.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_debug_exit_coordinator_before_commit, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL,
+                 NULL);
+REGISTER_TUNABLE("debug_exit_coordinator_after_commit", "Coordinator exits after committing.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_debug_exit_coordinator_after_commit, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL,
+                 NULL);
+REGISTER_TUNABLE("debug_disttxn_trace", "Print disttxn debug information.  (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_debug_disttxn_trace, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("disttxn_linger", "Time disttxns persist in-memory after resolution.  (Default: 10s)", TUNABLE_INTEGER,
+                 &gbl_disttxn_linger_time, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("disttxn_sanctioned_linger", "Time sanctioned disttxns persist prior to resolution.  (Default: 600s)",
+                 TUNABLE_INTEGER, &gbl_disttxn_sanctioned_linger_time, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("disttxn_handle_cache", "Enable the disttxn handle-cache.  (Default: on)", TUNABLE_BOOLEAN,
+                 &gbl_disttxn_handle_cache, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("disttxn_handle_linger_time", "Time that unused handles persist.  (Default: 60s)", TUNABLE_INTEGER,
+                 &gbl_disttxn_handle_linger_time, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("disttxn_async_prepare", "Send prepare asynchronously.  (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_disttxn_async_prepare, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("disttxn_async_messages", "Send disttxn messages asynchronously.  (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_disttxn_async_messages, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("coordinator_notify", "Coordinator notify algorithm.  (Default: postcommit)", TUNABLE_ENUM,
+                 &gbl_coordinator_notify, 0, coordinator_notify_value, NULL, coordinator_notify_update, NULL);
+REGISTER_TUNABLE("disable_prefault_udp", "Disables 'enable_prefault_udp'", TUNABLE_BOOLEAN, &gbl_prefault_udp,
+                 INVERSE_VALUE | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("disable_replicant_latches", "Disables 'replicant_latches'", TUNABLE_BOOLEAN, &gbl_replicant_latches,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("disable_rowlock_locking", NULL, TUNABLE_BOOLEAN,
                  &gbl_disable_rowlocks, READONLY | NOARG, NULL, NULL, NULL,
@@ -1391,18 +1422,15 @@ REGISTER_TUNABLE("debug_all_prepare_abort", "Prepare and abort all transactions.
                  &gbl_all_prepare_abort, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug_all_prepare_leak", "Prepare and leak all transactions. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_all_prepare_leak, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("flush_on_prepare", "Flush replicant log on prepare. (Default: off)", TUNABLE_BOOLEAN,
+REGISTER_TUNABLE("flush_replicant_on_prepare", "Flush replicant log on prepare. (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_flush_replicant_on_prepare, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("flush_on_prepare", "Flush master log on prepare. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_flush_on_prepare, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("abort_on_unset_ha_flag",
-                 "Abort in snap_uid_retry if ha is unset. (Default: off)",
-                 TUNABLE_BOOLEAN, &gbl_abort_on_unset_ha_flag, INTERNAL, NULL,
-                 NULL, NULL, NULL);
-REGISTER_TUNABLE("write_dummy_trace",
-                 "Print trace when doing a dummy write. (Default: off)",
-                 TUNABLE_BOOLEAN, &gbl_write_dummy_trace, INTERNAL, NULL, NULL,
-                 NULL, NULL);
-REGISTER_TUNABLE("seed_genid", "Set genid-seed in hex for genid48 test.",
-                 TUNABLE_STRING, NULL, EXPERIMENTAL | INTERNAL,
+REGISTER_TUNABLE("abort_on_unset_ha_flag", "Abort in snap_uid_retry if ha is unset. (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_abort_on_unset_ha_flag, INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("write_dummy_trace", "Print trace when doing a dummy write. (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_write_dummy_trace, INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("seed_genid", "Set genid-seed in hex for genid48 test.", TUNABLE_STRING, NULL, EXPERIMENTAL | INTERNAL,
                  next_genid_value, NULL, genid_seed_update, NULL);
 REGISTER_TUNABLE("abort_on_bad_upgrade",
                  "Abort in upgrade current-generation exceeds ctrl-gen.",
@@ -2420,26 +2448,24 @@ REGISTER_TUNABLE("pgcomp_dbg_ctrace", "Enable debugging ctrace for page compacti
 REGISTER_TUNABLE("dump_history_on_too_many_verify_errors",
                  "Dump osql history and client info on too many verify errors (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_dump_history_on_too_many_verify_errors, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("warn_on_equiv_type_mismatch", "Warn about mismatch of different but equivalent data types "
-                 "returned by different sqlite versions (Default off)", TUNABLE_BOOLEAN,
-                 &gbl_warn_on_equiv_type_mismatch, NOARG | EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("seekscan_maxsteps",
-                 "Overrides the max number of steps for a seekscan optimization", TUNABLE_INTEGER,
-                 &gbl_seekscan_maxsteps, SIGNED, NULL, NULL, NULL,
+REGISTER_TUNABLE("warn_on_equiv_type_mismatch",
+                 "Warn about mismatch of different but equivalent data types "
+                 "returned by different sqlite versions (Default off)",
+                 TUNABLE_BOOLEAN, &gbl_warn_on_equiv_type_mismatch, NOARG | EXPERIMENTAL | INTERNAL, NULL, NULL, NULL,
                  NULL);
+REGISTER_TUNABLE("seekscan_maxsteps", "Overrides the max number of steps for a seekscan optimization", TUNABLE_INTEGER,
+                 &gbl_seekscan_maxsteps, SIGNED, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("wal_osync", "Open WAL files using the O_SYNC flag (Default: off)", TUNABLE_BOOLEAN, &gbl_wal_osync, 0,
                  NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("sc_headroom", 
-                 "Percentage threshold for low headroom calculation. (Default: 10)",
-                 TUNABLE_DOUBLE, &gbl_sc_headroom, INTERNAL | SIGNED, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("fdb_incoherence_percentage",
-                 "Generate random incoherent errors in remsql", TUNABLE_INTEGER,
+REGISTER_TUNABLE("sc_headroom", "Percentage threshold for low headroom calculation. (Default: 10)", TUNABLE_DOUBLE,
+                 &gbl_sc_headroom, INTERNAL | SIGNED, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("fdb_incoherence_percentage", "Generate random incoherent errors in remsql", TUNABLE_INTEGER,
                  &gbl_fdb_incoherence_percentage, INTERNAL, NULL, percent_verify, NULL, NULL);
-REGISTER_TUNABLE("fdb_io_error_retries",
-                 "Number of retries for io error remsql", TUNABLE_INTEGER,
+REGISTER_TUNABLE("fdb_socket_timeout_ms", "Timeout ms for fdb communications.  (Default: 10000)", TUNABLE_INTEGER,
+                 &gbl_fdb_socket_timeout_ms, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("fdb_io_error_retries", "Number of retries for io error remsql", TUNABLE_INTEGER,
                  &gbl_fdb_io_error_retries, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("fdb_io_error_retries_phase_1",
-                 "Number of immediate retries; capped by fdb_io_error_retries",
+REGISTER_TUNABLE("fdb_io_error_retries_phase_1", "Number of immediate retries; capped by fdb_io_error_retries",
                  TUNABLE_INTEGER, &gbl_fdb_io_error_retries_phase_1, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("fdb_io_error_retries_phase_2_poll",
                  "Poll initial value for slow retries in phase 2; doubled for each retry", TUNABLE_INTEGER,

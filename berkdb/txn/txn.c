@@ -1278,6 +1278,8 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 						if ((ret = __txn_discard_recovered(dbenv, txnp->dist_txnid)) != 0) {
 							abort();
 						}
+                        logmsg(LOGMSG_USER, "DISTTXN %s committed %s at %d:%d\n",
+                                __func__, txnp->dist_txnid, lsn_out->file, lsn_out->offset);
 					} else {
 						ret =
 							__txn_regop_rowlocks_log(dbenv,
@@ -2566,6 +2568,22 @@ err:	if (logc != NULL && (t_ret = __log_c_close(logc)) != 0 && ret == 0)
 	if (ptxn == NULL && txnlist != NULL)
 		__db_txnlist_end(dbenv, txnlist);
 	return (ret);
+}
+
+/*
+ * __txn_set_recover_prepared_callback --
+ *  DB_ENV->set_recover_prepared_callback function
+ *
+ * PUBLIC: int __txn_set_recover_prepared_callback
+ * PUBLIC:   __P((DB_ENV *, void (*)(const char *, const char *, const char *)));
+ */
+int
+__txn_set_recover_prepared_callback(dbenv, func)
+	DB_ENV *dbenv;
+	void (*func)(const char *, const char *, const char *);
+{
+	dbenv->recover_prepared_callback = func;
+	return 0;
 }
 
 /*

@@ -718,6 +718,7 @@ static int max_pending_connections = 1024;
 static TAILQ_HEAD(, accept_info) accept_list = TAILQ_HEAD_INITIALIZER(accept_list);
 static void do_read(int, short, void *);
 static void accept_info_free(struct accept_info *);
+extern int gbl_debug_disttxn_trace;
 
 static int close_oldest_pending_connection(void)
 {
@@ -725,13 +726,19 @@ static int close_oldest_pending_connection(void)
     if (!a) {
         return -1;
     }
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s closing oldest pending connection [outstanding:%d] fd=%d\n", __func__,
+               pending_connections, a->fd);
+    }
     accept_info_free(a);
-    logmsg(LOGMSG_USER, "%s closed oldest pending connection [outstanding:%d]\n", __func__, pending_connections);
     return 0;
 }
 
 static struct accept_info *accept_info_new(netinfo_type *netinfo_ptr, struct sockaddr_in *addr, int fd)
 {
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s fd %d\n", __func__, fd);
+    }
     check_base_thd();
     if (pending_connections > max_pending_connections) {
         close_oldest_pending_connection();
@@ -1826,11 +1833,13 @@ static void fdb_heartbeat(int dummyfd, short what, void *data)
 {
     check_fdb_thd();
 
+/*
     fdb_hbeats_type *hb = data; 
     Pthread_mutex_lock(&hb->sb_mtx);
     logmsg(LOGMSG_INFO, "Sending fdb heartbeat for tran %p\n", hb);
     fdb_heartbeats(hb);
     Pthread_mutex_unlock(&hb->sb_mtx);
+    */
 }
 
 static void do_enable_fdb_heartbeats(int dummyfd, short what, void *data)
@@ -2550,6 +2559,9 @@ static void read_len(int fd, short what, void *data)
     if (need > 0) {
         n = evbuffer_read(a->buf, fd, need);
         if (n <= 0 && (what & EV_READ)) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s net-case need-case closing fd %d\n", __func__, a->fd);
+            }
             accept_info_free(a);
             return;
         }
@@ -2571,6 +2583,9 @@ static void read_len(int fd, short what, void *data)
         }
         read_connect(fd, 0, a);
     } else if (event_base_once(base, fd, EV_READ, read_len, a, NULL)) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s net-case failed-event base closing fd %d\n", __func__, a->fd);
+        }
         accept_info_free(a);
     }
 }
@@ -2590,7 +2605,9 @@ int do_appsock_evbuffer(struct evbuffer *buf, struct sockaddr_in *ss, int fd, in
         info = get_appsock_info(key);
     }
 
-    if (info == NULL) return 1;
+    if (info == NULL) {
+        return 1;
+    }
 
     evbuffer_drain(buf, b.pos + 1);
     struct appsock_handler_arg *arg = malloc(sizeof(*arg));
@@ -2606,13 +2623,23 @@ int do_appsock_evbuffer(struct evbuffer *buf, struct sockaddr_in *ss, int fd, in
     return 0;
 }
 
+#include <fsnapf.h>
 static void do_read(int fd, short what, void *data)
 {
     check_base_thd();
     struct accept_info *a = data;
     struct evbuffer *buf = evbuffer_new();
+    EVUTIL_SET_SOCKET_ERROR(0);
     ssize_t n = evbuffer_read(buf, fd, SBUF2UNGETC_BUF_MAX);
     if (n <= 0) {
+        /* This has gotta be the 'dropped-packet' error I keep seeing- guessing the
+         * error is EAGAIN.. but instead of re-reading we just discard ..
+         * an alternative is that somehow the control info ('reset' caused by the socket closing)
+         * beat the packet */
+        int e = EVUTIL_SOCKET_ERROR();
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s evbuffer_read returns %ld errno=%d fd %d, closing\n", __func__, n, e, fd);
+        }
         accept_info_free(a);
         return;
     }
@@ -2634,14 +2661,26 @@ static void do_read(int fd, short what, void *data)
         return;
     }
     if (should_reject_request()) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s should-reject fd %d, closing\n", __func__, fd);
+        }
         evbuffer_free(buf);
         shutdown_close(fd);
         return;
     }
 
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s fd=%d calling do appsock evbuffer\n", __func__, fd);
+    }
     if ((do_appsock_evbuffer(buf, &ss, fd, 0)) == 0)
         return;
 
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s didn't read appsock key fd=%d bytes-read=%ld\n", __func__, fd, n);
+    }
+    char snap[n];
+    evbuffer_copyout(buf, snap, n);
+    fsnapf(stderr, snap, n);
     handle_appsock(netinfo_ptr, &ss, first_byte, buf, fd);
 }
 
@@ -2758,6 +2797,9 @@ static void do_recvfd(int pmux_fd, short what, void *data)
     check_base_thd();
     struct net_info *n = data;
     int newfd = recvfd(pmux_fd);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s recvfd returns %d\n", __func__, newfd);
+    }
     switch (newfd) {
     case 0: return;
     case -1: reopen_unix(pmux_fd, n); return;
@@ -2774,6 +2816,9 @@ static void do_recvfd(int pmux_fd, short what, void *data)
     struct sockaddr *addr = (struct sockaddr *)&saddr;
     socklen_t addrlen = sizeof(saddr);
     getpeername(newfd, addr, &addrlen);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s accepted newfd %d\n", __func__, newfd);
+    }
     accept_cb(NULL, newfd, addr, addrlen, n);
 }
 

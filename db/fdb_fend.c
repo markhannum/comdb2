@@ -3883,6 +3883,21 @@ static void _free_fdb_tran(fdb_distributed_tran_t *dtran, fdb_tran_t *tran)
     disable_fdb_heartbeats_and_free(&tran->hbeats);
 }
 
+extern char gbl_dbname[];
+
+static char *fdb_generate_dist_txnid()
+{
+    uuid_t u;
+    uuidstr_t uuidstr;
+    comdb2uuid(u);
+    comdb2uuidstr(u, uuidstr);
+    int rc, sz = strlen(gbl_dbname) + 1 + sizeof(uuidstr_t) + 1;
+    char *r = calloc(sz, 1);
+    rc = snprintf(r, sz, "%s-%s", gbl_dbname, uuidstr);
+    assert(rc < sz);
+    return r;
+}
+
 int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
 {
     fdb_distributed_tran_t *dtran = clnt->dbtran.dtran;
@@ -3924,32 +3939,45 @@ int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
         if (sideeffects == TRANS_CLNTCOMM_CHUNK && tran->nwrites == 0)
             continue;
 
-        rc = fdb_send_commit(msg, tran, clnt->dbtran.mode, tran->sb);
-
-        if (gbl_fdb_track)
-            logmsg(LOGMSG_USER, "%s Send Commit tid=%llx db=\"%s\" rc=%d\n",
-                    __func__, *(unsigned long long *)tran->tid,
-                    tran->fdb->dbname, rc);
+        if (clnt->use_2pc) {
+            assert(!clnt->is_participant);
+            clnt->is_coordinator = 1;
+            if (!clnt->dist_txnid) {
+                clnt->dist_txnid = fdb_generate_dist_txnid();
+            }
+            rc = fdb_send_prepare(msg, tran, clnt->dist_txnid, clnt->dbtran.mode, tran->sb);
+            if (!rc) {
+                const char *tier = fdb_dbname_class_routing(tran->fdb);
+                add_participant(clnt, tran->fdb->dbname, tier);
+            }
+            if (gbl_fdb_track)
+                logmsg(LOGMSG_USER, "%s Send Prepare tid=%llx db=\"%s\" rc=%d\n", __func__,
+                       *(unsigned long long *)tran->tid, tran->fdb->dbname, rc);
+        } else {
+            rc = fdb_send_commit(msg, tran, clnt->dbtran.mode, tran->sb);
+            if (gbl_fdb_track)
+                logmsg(LOGMSG_USER, "%s Send Commit tid=%llx db=\"%s\" rc=%d\n", __func__,
+                       *(unsigned long long *)tran->tid, tran->fdb->dbname, rc);
+        }
     }
 
-    LISTC_FOR_EACH(&dtran->fdb_trans, tran, lnk)
-    {
-        if (sideeffects == TRANS_CLNTCOMM_CHUNK && tran->nwrites == 0)
-            continue;
+    if (!clnt->dist_txnid) {
+        LISTC_FOR_EACH(&dtran->fdb_trans, tran, lnk)
+        {
+            if (sideeffects == TRANS_CLNTCOMM_CHUNK && tran->nwrites == 0)
+                continue;
 
-        rc = fdb_recv_rc(msg, tran);
+            rc = fdb_recv_rc(msg, tran);
 
-        if (gbl_fdb_track) {
-            uuidstr_t us;
-            logmsg(LOGMSG_USER, "%s Commit RC=%d tid=%s db=\"%s\"\n",
-                   __func__, rc,
-                   comdb2uuidstr((unsigned char *)tran->tid, us),
-                   tran->fdb->dbname);
-        }
+            if (gbl_fdb_track) {
+                uuidstr_t us;
+                logmsg(LOGMSG_USER, "%s Commit RC=%d tid=%s db=\"%s\"\n", __func__, rc,
+                       comdb2uuidstr((unsigned char *)tran->tid, us), tran->fdb->dbname);
+            }
 
-        if (rc) {
-            /* rollback all in 2PC here */
-            break;
+            if (rc) {
+                break;
+            }
         }
     }
 
