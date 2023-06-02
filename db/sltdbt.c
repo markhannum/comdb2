@@ -24,6 +24,7 @@
 #include "sltpck.h"
 #include <poll.h>
 
+#include <disttxn.h>
 #include "socket_interfaces.h"
 #include "sqloffload.h"
 #include "osqlcomm.h"
@@ -129,6 +130,8 @@ static void adjust_maxwthreadpenalty(int *totpen_p,
     Pthread_mutex_unlock(&delay_lock);
 }
 
+__thread int waitdie_deadlock;
+
 static int handle_op_local(struct ireq *iq, int (*init)(struct ireq *),
                            int (*run)(struct ireq *))
 {
@@ -162,6 +165,11 @@ static int handle_op_local(struct ireq *iq, int (*init)(struct ireq *),
             goto done;
     }
 
+    if (iq->sorese && iq->sorese->is_coordinator) {
+        dispatch_participants(iq->sorese->dist_txnid);
+    }
+
+    waitdie_deadlock = 0;
 retry:
     startus = comdb2_time_epochus();
     rc = run(iq);
@@ -190,7 +198,12 @@ retry:
             avg_toblock_us = 25000;
     } else if (rc == RC_INTERNAL_RETRY) {
         iq->retries++;
-        if (++retries < gbl_maxretries) {
+        if (waitdie_deadlock) {
+            rc = ERR_VERIFY;
+            logmsg(LOGMSG_DEBUG, "Returning verify error on waitdie_deadlock\n");
+            goto done;
+        }
+        else if (++retries < gbl_maxretries) {
             if (!bdb_attr_get(thedb->bdb_attr,
                               BDB_ATTR_DISABLE_WRITER_PENALTY_DEADLOCK)) {
                 adjust_maxwthreadpenalty(&totpen, lcl_penaltyincpercent_d,

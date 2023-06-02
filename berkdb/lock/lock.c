@@ -2111,6 +2111,7 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 	DB_LOCK *lock;
 {
 	extern __thread int disable_random_deadlocks;
+	extern __thread int waitdie_deadlock;
 	if (disable_random_deadlocks == 0 && 
 		unlikely(gbl_ddlk && !LF_ISSET(DB_LOCK_NOWAIT) &&
 		rand() % gbl_ddlk == 0)) {
@@ -2118,6 +2119,7 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 	}
 	u_int32_t partition = gbl_lk_parts, lpartition = gbl_lkr_parts;
 	int handlelock = 0, writelock = 0;
+	int waitdie;
 	uint64_t x1 = 0, x2;
 	struct __db_lock *newl, *lp, *firstlp, *wwrite;
 	DB_ENV *dbenv;
@@ -2316,6 +2318,7 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 	holdix = 0;
 	holdsz = 0;
 	wwrite = NULL;
+	waitdie = 0;
 
 	/*
 	 * SWITCH is a special case, used by the queue access method
@@ -2390,12 +2393,26 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 			ihold = 1;
 
 		else if (CONFLICTS(lt, region, lp->mode, lock_mode)) {
+			int cntue = 0;
+			if (sh_locker->timestamp > 0) {
+				/* Younger lockid not allowed to block on older */
+				if (lp->holderp->timestamp > 0 && sh_locker->timestamp >= lp->holderp->timestamp) {
+					/* TODO delete this trace after testing */
+					logmsg(LOGMSG_DEBUG, "%s: setting waitdie, my-ts=%"PRId64", holder-ts=%"PRId64"\n",
+						__func__, sh_locker->timestamp, lp->holderp->timestamp);
+					waitdie = 1;
+				} else {
+					cntue = 1;
+				}
+			}
 			if (gbl_locks_check_waiters) {
 				ADD_TO_HOLDARR(lp->holderp->id);
 				if (!firstlp)
 					firstlp = lp;
-				continue;
+				cntue = 1;
 			}
+			if (cntue)
+				continue;
 			break;
 		} else if (lp->mode == DB_LOCK_READ ||
 		    lp->mode == DB_LOCK_WWRITE) {
@@ -2420,7 +2437,7 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 		else {
 			action = TAIL;
 
-			if (gbl_locks_check_waiters) {
+			if (gbl_locks_check_waiters || (sh_locker->timestamp > 0 && !waitdie)) {
 				firstlp = lp;
 				for (lp =
 				    SH_TAILQ_FIRST(&sh_obj->waiters, __db_lock);
@@ -2430,6 +2447,14 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 						lock_mode) &&
 					    locker != lp->holderp->id) {
 						ADD_TO_HOLDARR(lp->holderp->id);
+						if (sh_locker->timestamp > 0) {
+							if (lp->holderp->timestamp > 0 && sh_locker->timestamp >= lp->holderp->timestamp) {
+								/* TODO delete this trace after testing */
+								logmsg(LOGMSG_DEBUG, "%s: setting waitdie, my-ts=%"PRId64", holder-ts=%"PRId64"\n",
+									__func__, sh_locker->timestamp, lp->holderp->timestamp);
+								waitdie = 1;
+							}
+						}
 					}
 				}
 				lp = firstlp;
@@ -2455,15 +2480,29 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 				if (CONFLICTS(lt, region, lp->mode,
 					lock_mode) &&
 				    locker != lp->holderp->id) {
+					int cntue = 0;
+					/* wait-die check */
+					if (sh_locker->timestamp > 0) {
+						if (lp->holderp->timestamp > 0 && sh_locker->timestamp >= lp->holderp->timestamp) {
+							/* TODO delete this trace after testing */
+							logmsg(LOGMSG_DEBUG, "%s: setting waitdie, my-ts=%"PRId64", holder-ts=%"PRId64"\n",
+								__func__, sh_locker->timestamp, lp->holderp->timestamp);
+							waitdie = 1;
+						} else {
+							cntue = 1;
+						}
+					}
 					/* DB_LOCK_DIRTY goes to head */
 					if (gbl_locks_check_waiters &&
-					    lock_mode != DB_LOCK_DIRTY) {
+						lock_mode != DB_LOCK_DIRTY) {
 						ADD_TO_HOLDARR(lp->holderp->id);
 						if (!firstlp) {
 							firstlp = lp;
 						}
-						continue;
+						cntue = 1;
 					}
+					if (cntue)
+						continue;
 					break;
 				}
 			}
@@ -2518,6 +2557,9 @@ __lock_get_internal_int(lt, locker, in_locker, flags, obj, lock_mode, timeout,
 			else
 				action = TAIL;
 		}
+	}
+	if (waitdie) {
+		goto done;
 	}
 
 	switch (action) {
@@ -2994,7 +3036,11 @@ err:
 	if (holdarr)
 		__os_free(dbenv, holdarr);
 
-	return (ret);
+	if (waitdie) {
+		waitdie_deadlock = 1;
+	}
+
+	return waitdie ? DB_LOCK_DEADLOCK : (ret);
 }
 
 /* Return 1 if this lockid holds this lockobj in this lock_mode, 0 otherwise */
@@ -3141,6 +3187,69 @@ __lock_get_internal(lt, locker, sh_locker, flags, obj, lock_mode, timeout, lock)
 	return rc;
 }
 
+/*
+ * __locker_set_timestamp --
+ *  DB_ENV->locker_set_timestamp.
+ *
+ * PUBLIC: int __locker_set_timestamp __P((DB_ENV *, u_int32_t, int64_t));
+ */
+int
+__locker_set_timestamp(dbenv, locker, timestamp)
+	DB_ENV *dbenv;
+	u_int32_t locker;
+	int64_t timestamp;
+{
+	DB_LOCKTAB *lt;
+	DB_LOCKER *sh_locker;
+	DB_LOCKREGION *region;
+	u_int32_t indx;
+	int ret;
+
+	lt = dbenv->lk_handle;
+	region = lt->reginfo.primary;
+
+	LOCKREGION(dbenv, lt);
+	LOCKER_INDX(lt, region, locker, indx);
+
+	u_int32_t flags = GETLOCKER_KEEP_PART|GETLOCKER_CREATE;
+	if ((ret = __lock_getlocker(lt, locker, indx, flags, &sh_locker)) != 0 || sh_locker == NULL) {
+		logmsg(LOGMSG_FATAL, "%s couldn't find locker %"PRIu32"\n", __func__, locker);
+		abort();
+		goto err;
+	}
+
+	sh_locker->timestamp = timestamp;
+	unlock_locker_partition(region, sh_locker->partition);
+
+err:
+	UNLOCKREGION(dbenv, lt);
+	return ret;
+}
+
+/*
+ * __locker_set_timestamp_pp --
+ *
+ * PUBLIC: int  __locker_set_timestamp_pp __P((DB_ENV *, u_int32_t, int64_t));
+ */
+int
+__locker_set_timestamp_pp(dbenv, locker, timestamp)
+	DB_ENV *dbenv;
+	u_int32_t locker;
+	int64_t timestamp;
+{
+	int rep_check, ret;
+	PANIC_CHECK(dbenv);
+	ENV_REQUIRES_CONFIG(dbenv,
+		dbenv->lk_handle, "DB_LOCK->locker_set_timestamp", DB_INIT_LOCK);
+
+	rep_check = IS_ENV_REPLICATED(dbenv) ? 1 : 0;
+	if (rep_check)
+		__env_rep_enter(dbenv);
+	ret = __locker_set_timestamp(dbenv, locker, timestamp);
+	if (rep_check)
+		__env_rep_exit(dbenv);
+	return (ret);
+}
 
 /*
  * __lock_put_pp --
@@ -4076,6 +4185,7 @@ __lock_getlocker_int(lt, locker, indx, partition, create, prop, retp,
 		SH_LIST_INIT(&sh_locker->heldby);
 		sh_locker->nlocks = 0;
 		sh_locker->npagelocks = 0;
+		sh_locker->timestamp = -1;
 		sh_locker->nhandlelocks = 0;
 		sh_locker->nwrites = 0;
 		sh_locker->has_waiters = 0;
@@ -6356,6 +6466,87 @@ __lock_to_dbt(dbenv, lock, dbt)
 }
 
 static int
+__lock_count_waiters(dbenv, locker, count, flags)
+	DB_ENV *dbenv;
+	u_int32_t locker;
+	u_int32_t *count;
+	u_int32_t flags;
+{
+	DB_LOCKREGION *region;
+	DB_LOCKTAB *lt;
+	u_int32_t partition;
+	struct __db_lock *lp, *wlp;
+	DB_LOCKER *sh_locker;
+	u_int32_t locker_ndx;
+	int ret;
+
+	(*count) = 0;
+
+	lt = dbenv->lk_handle;
+	region = lt->reginfo.primary;
+
+	/* Check if locks have been globally turned off. */
+	if (F_ISSET(dbenv, DB_ENV_NOLOCKING))
+		return (0);
+
+	/* Get the locker. */
+	LOCKER_INDX(lt, region, locker, locker_ndx);
+
+	/* Retrieve the locker */
+	if ((ret = __lock_getlocker(lt, locker, locker_ndx,
+			GETLOCKER_KEEP_PART, &sh_locker)) != 0) {
+		__db_err(dbenv, "Error in lock_getlocker for lid %u", locker);
+        abort();
+	}
+	partition = sh_locker->partition;
+
+	if (NULL == sh_locker) {
+		unlock_locker_partition(region, partition);
+		__db_err(dbenv, "Locker does not exist");
+		ret = EINVAL;
+		abort();
+	}
+
+	/* Mark the locker as deleted temporarily so I can unlock the partition */
+	F_SET(sh_locker, DB_LOCKER_DELETED);
+
+	/* Unlock the partition */
+	unlock_locker_partition(region, partition);
+
+	/* Loop through all locks held by this locker */
+	for (lp = SH_LIST_FIRST(&sh_locker->heldby, __db_lock); lp != NULL;
+		lp = SH_LIST_NEXT(lp, locker_links, __db_lock)) {
+		DB_LOCKOBJ *lockobj;
+		u_int32_t ndx, part;
+
+		/* Get the object associated with this lock */
+		lockobj = lp->lockobj;
+
+		/* Get the index & partition */
+		ndx = lockobj->index;
+		part = lockobj->partition;
+
+		/* Lock the partition */
+		lock_obj_partition(region, part);
+
+		/* Count waiters list */
+		for (wlp = SH_TAILQ_FIRST(&lockobj->waiters, __db_lock);
+			 wlp != NULL; wlp = SH_TAILQ_NEXT(wlp, links, __db_lock)) {
+			 if (IS_WRITELOCK(wlp->mode) || !flags) {
+				(*count)++;
+			}
+		}
+
+		/* Unlock the partition */
+		unlock_obj_partition(region, part);
+	}
+
+	F_CLR(sh_locker, DB_LOCKER_DELETED);
+
+	return 0;
+}
+
+static int
 __lock_abort_waiters(dbenv, locker, flags)
 	DB_ENV *dbenv;
 	u_int32_t locker;
@@ -6381,7 +6572,7 @@ __lock_abort_waiters(dbenv, locker, flags)
 
 	/* Retrieve the locker */
 	if ((ret = __lock_getlocker(lt, locker, locker_ndx,
-		    GETLOCKER_KEEP_PART, &sh_locker)) != 0) {
+			GETLOCKER_KEEP_PART, &sh_locker)) != 0) {
 		__db_err(dbenv, "Error in lock_getlocker for lid %u", locker);
 		goto err;
 	}
@@ -6403,7 +6594,7 @@ __lock_abort_waiters(dbenv, locker, flags)
 
 	/* Loop through all locks held by this locker */
 	for (lp = SH_LIST_FIRST(&sh_locker->heldby, __db_lock); lp != NULL;
-	    lp = SH_LIST_NEXT(lp, locker_links, __db_lock)) {
+		lp = SH_LIST_NEXT(lp, locker_links, __db_lock)) {
 		DB_LOCKOBJ *lockobj;
 		u_int32_t ndx, part;
 
@@ -6419,6 +6610,7 @@ __lock_abort_waiters(dbenv, locker, flags)
 
 		/* Abort anything blocked on its rowlocks */
 		if (!LF_ISSET(DB_LOCK_ABORT_LOGICAL) || is_comdb2_rowlock(lockobj->lockobj.size)) {
+			//logmsg(LOGMSG_DEBUG, "%s aborting 
 			/* This releases the lockobj */
 			if ((ret = __dd_abort_waiters(dbenv, lockobj)) != 0) {
 				__db_err(dbenv, "Error aborting waiters\n");
@@ -6435,6 +6627,48 @@ err:
 	return ret;
 }
 
+// PUBLIC: int __lock_count_waiters_pp __P((DB_ENV *, u_int32_t, u_int32_t *));
+int
+__lock_count_waiters_pp(dbenv, locker, count)
+	DB_ENV *dbenv;
+	u_int32_t locker;
+	u_int32_t *count;
+{
+	int ret;
+
+	PANIC_CHECK(dbenv);
+	ENV_REQUIRES_CONFIG(dbenv,
+		dbenv->lk_handle, "DB_ENV->lock_abort_waiters",
+		DB_INIT_LOCK);
+
+	LOCKREGION(dbenv, (DB_LOCKTAB *)dbenv->lk_handle);
+	ret = __lock_count_waiters(dbenv, locker, count, 0);
+	UNLOCKREGION(dbenv, (DB_LOCKTAB *)dbenv->lk_handle);
+
+	return (ret);
+}
+
+// PUBLIC: int __lock_count_write_waiters_pp __P((DB_ENV *, u_int32_t, u_int32_t *));
+int
+__lock_count_write_waiters_pp(dbenv, locker, count)
+	DB_ENV *dbenv;
+	u_int32_t locker;
+	u_int32_t *count;
+{
+	int ret;
+
+	PANIC_CHECK(dbenv);
+	ENV_REQUIRES_CONFIG(dbenv,
+		dbenv->lk_handle, "DB_ENV->lock_abort_waiters",
+		DB_INIT_LOCK);
+
+	LOCKREGION(dbenv, (DB_LOCKTAB *)dbenv->lk_handle);
+	ret = __lock_count_waiters(dbenv, locker, count, 1);
+	UNLOCKREGION(dbenv, (DB_LOCKTAB *)dbenv->lk_handle);
+
+	return (ret);
+}
+
 
 // PUBLIC: int __lock_abort_waiters_pp __P((DB_ENV *, u_int32_t, u_int32_t));
 int
@@ -6447,8 +6681,8 @@ __lock_abort_waiters_pp(dbenv, locker, flags)
 
 	PANIC_CHECK(dbenv);
 	ENV_REQUIRES_CONFIG(dbenv,
-	    dbenv->lk_handle, "DB_ENV->lock_abort_waiters",
-	    DB_INIT_LOCK);
+		dbenv->lk_handle, "DB_ENV->lock_abort_waiters",
+		DB_INIT_LOCK);
 
 	LOCKREGION(dbenv, (DB_LOCKTAB *)dbenv->lk_handle);
 	ret = __lock_abort_waiters(dbenv, locker, flags);

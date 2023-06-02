@@ -259,6 +259,11 @@ static int srs_tran_replay_int(struct sqlclntstate *clnt, int(dispatch_fn)(struc
 
     do {
         reset_query_effects(clnt); /* Reset it for each retry*/
+
+        /* Change timestamp in case collided with a different dist-txnid */
+        if (clnt->dist_txnid) {
+            clnt->dist_timestamp += ((rand() % 100) - (clnt->dist_timestamp % 100));
+        }
         if (!osql->history) {
             logmsg(LOGMSG_ERROR, "Trying to replay, but no history?\n");
             abort();
