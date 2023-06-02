@@ -630,6 +630,20 @@ static void *thd_req(void *vthd)
                 pool_free(thd->iq->vfy_genid_pool);
                 thd->iq->vfy_genid_pool = NULL;
             }
+            /*
+            if (thd->iq->dist_txnid) {
+                free(thd->iq->dist_txnid);
+                thd->iq->dist_txnid = NULL;
+            }
+            if (thd->iq->coordinator_dbname) {
+                free(thd->iq->coordinator_dbname);
+                thd->iq->coordinator_dbname = NULL;
+            }
+            if (thd->iq->coordinator_tier) {
+                free(thd->iq->coordinator_tier);
+                thd->iq->coordinator_tier = NULL;
+            }
+            */
             thd->iq->vfy_genid_track = 0;
 #if 0
             fprintf(stderr, "%s:%d: THD=%p relablk iq=%p\n", __func__, __LINE__, pthread_self(), thd->iq);

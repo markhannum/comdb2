@@ -148,6 +148,9 @@ int gbl_osql_random_restart = 0;
 static inline int osql_should_restart(struct sqlclntstate *clnt, int rc,
                                       int keep_rqid)
 {
+    if (clnt->dist_txnid) {
+        return 0;
+    }
     if (rc == OSQL_SEND_ERROR_WRONGMASTER &&
         (clnt->dbtran.mode == TRANLEVEL_SOSQL ||
          clnt->dbtran.mode == TRANLEVEL_RECOM)) {
@@ -1109,7 +1112,7 @@ retry:
                         rc = osql_sock_restart(
                             clnt, 1,
                             1 /*no new rqid*/); /* retry at higher level */
-                        if (sock_restart_retryable_rcode(rc)) {
+                        if (sock_restart_retryable_rcode(rc) && !clnt->is_coordinator) {
                             if (gbl_master_swing_sock_restart_sleep) {
                                 sleep(gbl_master_swing_sock_restart_sleep);
                             }
@@ -1534,7 +1537,28 @@ static int osql_send_commit_logic(struct sqlclntstate *clnt, int is_retry,
     do {
         rc = 0;
 
-        if (gbl_osql_send_startgen && clnt->start_gen > 0) {
+        if (clnt->use_2pc && clnt->dist_txnid) {
+            assert((clnt->is_coordinator + clnt->is_participant) == 1);
+            if (clnt->is_participant) {
+                osql->replicant_numops++;
+                rc = osql_send_prepare(&osql->target, osql->rqid, osql->uuid, clnt->dist_txnid,
+                                       clnt->coordinator_dbname, clnt->coordinator_tier, nettype);
+            }
+            if (clnt->is_coordinator) {
+                struct participant *p;
+                assert(listc_size(&clnt->participants) > 0);
+                osql->replicant_numops++;
+
+                rc = osql_send_dist_txnid(&osql->target, osql->rqid, osql->uuid, clnt->dist_txnid, nettype);
+
+                for (p = clnt->participants.top; rc == 0 && p != NULL; p = p->linkv.next) {
+                    rc = osql_send_participant(&osql->target, osql->rqid, osql->uuid, p->participant_name,
+                                               p->participant_tier, nettype);
+                }
+            }
+        }
+
+        if (rc == 0 && gbl_osql_send_startgen && clnt->start_gen > 0) {
             osql->replicant_numops++;
             rc = osql_send_startgen(&osql->target, osql->rqid, osql->uuid,
                                     clnt->start_gen, nettype);

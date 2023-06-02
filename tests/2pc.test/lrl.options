@@ -1,0 +1,59 @@
+enable_2pc
+nowatch
+maxosqltransfer 10000000
+
+# Long-deletes require long timeouts
+coordinator_timeout_ms 120000
+
+# 2pc requires utxnid & ufid log
+utxnid_log on
+ufid_log on
+
+# Most conservative maybe should become default
+flush_replicant_on_prepare 1
+flush_on_prepare 1
+
+# Ridiculous timeout to find bugs
+# coordinator_timeout_ms 20000000
+
+# The will probably default to sync-prepare, async-messages
+#disttxn_async_prepare 1
+disttxn_async_messages 1
+
+# Verbose backouts
+verbose_toblock_backouts 1
+
+# Handle cache 
+disttxn_enable_handle_cache 1
+
+# Disabling parallel rep provides more predictable behavior
+setattr REP_WORKERS 0
+setattr REP_PROCESSORS 0
+
+# Try to understand the 'lie about failure' case I'm seeing
+dump_blkseq 1
+
+# Enable early-ack trace
+early_ack_trace 1
+
+# Enable disttxn trace
+debug_disttxn_trace 1
+
+# Need this to debug 
+set_seqnum_trace 1
+
+# Need this to debug
+ack_trace 1
+
+# Also need this
+set_coherent_state_trace 1
+
+# Also wait-for-seqnum trace
+wait_for_seqnum_trace 1
+
+# 'lost-connection + restart' seems to return 'success' to the client prior to the
+# commit record being written .. wth?
+gbl_extended_sql_debug_trace 1
+
+# extended fdb trace
+fdbdebg 1

@@ -725,10 +725,8 @@ int gbl_javasp_early_release = 1;
 int gbl_debug_add_replication_latency = 0;
 uint32_t gbl_written_rows_warn = 0;
 
-static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
-                            int timeoutms, int adaptive, int logical,
-                            void *blkseq, int blklen, void *blkkey,
-                            int blkkeylen, int release_schema_lk)
+static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int timeoutms, int adaptive, int logical,
+                            void *blkseq, int blklen, void *blkkey, int blkkeylen, int release_schema_lk, int nowait)
 {
     int rc;
     db_seqnum_type ss;
@@ -770,8 +768,9 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host,
         return rc;
     }
 
-    rc = trans_wait_for_seqnum_int(bdb_handle, thedb, iq, source_host,
-                                   timeoutms, adaptive, &ss);
+    if (nowait == 0) {
+        rc = trans_wait_for_seqnum_int(bdb_handle, thedb, iq, source_host, timeoutms, adaptive, &ss);
+    }
 
     if (release_schema_lk && gbl_debug_add_replication_latency) {
         logmsg(LOGMSG_USER, "Adding 5 seconds of 'replication' latency\n");
@@ -792,32 +791,32 @@ int trans_commit_logical(struct ireq *iq, void *trans, char *source_host,
                          int timeoutms, int adaptive, void *blkseq, int blklen,
                          void *blkkey, int blkkeylen)
 {
-    return trans_commit_int(iq, trans, source_host, timeoutms, adaptive, 1,
-                            blkseq, blklen, blkkey, blkkeylen, 0);
+    return trans_commit_int(iq, trans, source_host, timeoutms, adaptive, 1, blkseq, blklen, blkkey, blkkeylen, 0, 0);
 }
 
 /* XXX i made this be the same as trans_commit_adaptive */
 int trans_commit(struct ireq *iq, void *trans, char *source_host)
 {
-    return trans_commit_int(iq, trans, source_host, -1, 1, 0, NULL, 0, NULL, 0,
-                            0);
+    return trans_commit_int(iq, trans, source_host, -1, 1, 0, NULL, 0, NULL, 0, 0, 0);
 }
 
 int trans_commit_timeout(struct ireq *iq, void *trans, char *source_host,
                          int timeoutms)
 {
-    return trans_commit_int(iq, trans, source_host, timeoutms, 0, 0, NULL, 0,
-                            NULL, 0, 0);
+    return trans_commit_int(iq, trans, source_host, timeoutms, 0, 0, NULL, 0, NULL, 0, 0, 0);
 }
 
 int trans_commit_adaptive(struct ireq *iq, void *trans, char *source_host)
 {
-    return trans_commit_int(iq, trans, source_host, -1, 1, 0, NULL, 0, NULL, 0,
-                            1);
+    return trans_commit_int(iq, trans, source_host, -1, 1, 0, NULL, 0, NULL, 0, 1, 0);
 }
 
-int trans_abort_logical(struct ireq *iq, void *trans, void *blkseq, int blklen,
-                        void *seqkey, int seqkeylen)
+int trans_commit_nowait(struct ireq *iq, void *trans, char *source_host)
+{
+    return trans_commit_int(iq, trans, source_host, -1, 1, 0, NULL, 0, NULL, 0, 0, 1);
+}
+
+int trans_abort_logical(struct ireq *iq, void *trans, void *blkseq, int blklen, void *seqkey, int seqkeylen)
 {
     int bdberr, rc = 0;
     bdb_state_type *bdb_handle = thedb->bdb_env;

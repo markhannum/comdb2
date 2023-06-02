@@ -1,0 +1,89 @@
+/*
+   Copyright 2023 Bloomberg Finance L.P.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ */
+
+#ifndef _DISTTXN_H_
+#define _DISTTXN_H_
+#include <comdb2.h>
+
+enum COORDINATOR_NOTIFY {
+    POSTCOMMIT = 1,
+    POSTDISTCOMMIT = 2,
+};
+
+/* This coordinator records participant information */
+int collect_participants(const char *dist_txnid, participant_list_t *participants);
+
+/* This coordinator asks participants to prepare */
+int dispatch_participants(const char *dist_txnid);
+
+/* This coordinator records that a participant has prepared successfully */
+int participant_prepared(const char *dist_txnid, const char *dbname, const char *tier, const char *master);
+
+/* This coordinator processes a participant's 'i-have-propagated' message */
+int participant_propagated(const char *dist_txnid, const char *dbname, const char *tier);
+
+/* This coordinator processes a participant's 'failed-to-prepare' message */
+int participant_failed(const char *dist_txnid, const char *dbname, const char *tier);
+
+/* This coordinator will block until participants have responded */
+int coordinator_wait(const char *dist_txnid);
+
+/* This coordinator will block until participants have propogated this txn */
+int coordinator_wait_propagate(const char *dist_txnid);
+
+/* This coordinator was unable to prepare */
+void coordinator_failed(const char *dist_txnid);
+
+/* This coordinator tells participants to commit */
+void coordinator_notify(const char *dist_txnid);
+
+/* This participant registers a dist-txn from osql stream */
+int osql_register_disttxn(const char *dist_txnid, unsigned long long rqid, uuid_t uuid, char **coordinator_dbname,
+                          char **coordinator_tier, char **coordinator_master);
+
+/* This participant has received the coordinator's sanction for this osql transaction */
+int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid,
+                          const char *coordinator_dbname, const char *coordinator_tier, const char *coordinator_master);
+
+/* This participant has been asked to cancel this osql transaction */
+int osql_cancel_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid);
+
+/* This participant sends the coordinator a 'failed-prepare' message */
+int participant_has_failed(const char *dist_txnid, const char *dbname, const char *master);
+
+/* This participant sends the coordinator an 'i-have-propagated' message */
+void participant_has_propagated(const char *dist_txnid, const char *dbname, const char *master);
+
+/* This participant tells coordinator it has prepared and waits for response */
+int participant_wait(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,
+                     const char *coordinator_master);
+
+/* This participant processes a coordinator's abort */
+int coordinator_aborted(const char *dist_txnid);
+
+/* This participant processes a cordinator's commit */
+int coordinator_committed(const char *dist_txnid);
+
+/* Initialize disttxn data structures & register recovery callback */
+void disttxn_init();
+
+/* Enum-to-string for tunables */
+const char *coordinator_notify_string(int alg);
+
+/* String-to-enum for tunables */
+int coordinator_notify_algo(const char *a);
+
+#endif

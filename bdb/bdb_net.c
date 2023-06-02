@@ -143,19 +143,20 @@ int do_ack(bdb_state_type *bdb_state, DB_LSN permlsn, uint32_t generation)
     ack_info *info;
     uint8_t *p_buf;
     uint8_t *p_buf_end;
-    static time_t lastpr = 0;
-    time_t now = 0;
+    //static time_t lastpr = 0;
+    //time_t now = 0;
     static unsigned long long cnt = 0;
     static unsigned long long lpcnt = 0;
 
     cnt++;
-    if (gbl_ack_trace && (now = time(NULL)) > lastpr) {
+    //if (gbl_ack_trace && (now = time(NULL)) > lastpr) {
+    if (gbl_ack_trace) {
         logmsg(LOGMSG_ERROR,
                "Sending ack %d:%d, generation=%u cnt=%llu diff=%llu, udp=%d\n",
                permlsn.file, permlsn.offset, generation, cnt, cnt - lpcnt,
                gbl_udp);
         lpcnt = cnt;
-        lastpr = now;
+        //lastpr = now;
     }
 
     seqnum_type seqnum = {{0}};

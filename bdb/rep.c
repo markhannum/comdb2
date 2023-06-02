@@ -3717,8 +3717,8 @@ int gbl_last_locked_seqnum = 1;
 void bdb_set_seqnum(void *in_bdb_state)
 {
     bdb_state_type *bdb_state = (bdb_state_type *)in_bdb_state;
-    static int lastpr = 0;
-    int now;
+    //static int lastpr = 0;
+    //int now;
     DB_LSN lastlsn;
     uint32_t mygen;
 
@@ -3738,11 +3738,12 @@ void bdb_set_seqnum(void *in_bdb_state)
         bdb_state->seqnum_info->seqnums[myhost_ix].lsn = lastlsn;
         bdb_state->seqnum_info->seqnums[myhost_ix].generation = mygen;
 
-        if (gbl_set_seqnum_trace && (now = time(NULL)) - lastpr) {
+        //if (gbl_set_seqnum_trace && (now = time(NULL)) - lastpr) {
+        if (gbl_set_seqnum_trace) {
             logmsg(LOGMSG_USER, "%s line %d set %s seqnum to %d:%d gen %d\n",
                    __func__, __LINE__, bdb_state->repinfo->myhost, lastlsn.file,
                    lastlsn.offset, mygen);
-            lastpr = now;
+            //lastpr = now;
         }
         Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
     }
@@ -5305,6 +5306,8 @@ extern int gbl_dump_sql_on_repwait_sec;
 extern int gbl_lock_get_list_start;
 int bdb_clean_pglogs_queues(bdb_state_type *bdb_state, DB_LSN lsn,
                             int truncate);
+extern int gbl_2pc;
+void disttxn_timer(void);
 
 int request_delaymore(void *bdb_state_in)
 {
@@ -5549,12 +5552,16 @@ void *watcher_thread(void *arg)
                 }
                 Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
             }
+
+            int backend_opened(void);
+            if (gbl_2pc && backend_opened()) {
+                disttxn_timer();
+            }
         }
 
         net_timeout_watchlist(bdb_state->repinfo->netinfo);
 
-        if ((bdb_state->passed_dbenv_open) &&
-            (bdb_state->repinfo->rep_process_message_start_time)) {
+        if ((bdb_state->passed_dbenv_open) && (bdb_state->repinfo->rep_process_message_start_time)) {
             if (comdb2_time_epoch() - bdb_state->repinfo->rep_process_message_start_time > 10) {
                 logmsg(LOGMSG_WARN, "rep_process_message running for 10 seconds, dumping thread pool to trc.c\n");
                 gbl_logmsg_ctrace = 1;
@@ -5562,7 +5569,8 @@ void *watcher_thread(void *arg)
                 gbl_logmsg_ctrace = 0;
                 bdb_state->repinfo->rep_process_message_start_time = 0;
             }
-            if ((comdb2_time_epoch() - bdb_state->repinfo->rep_process_message_start_time) > gbl_dump_sql_on_repwait_sec) {
+            if ((comdb2_time_epoch() - bdb_state->repinfo->rep_process_message_start_time) >
+                gbl_dump_sql_on_repwait_sec) {
                 comdb2_dump_blockers(bdb_state->dbenv);
             }
         }

@@ -1842,7 +1842,7 @@ inline int replicant_is_able_to_retry(struct sqlclntstate *clnt)
 
 static inline int replicant_can_retry_rc(struct sqlclntstate *clnt, int rc)
 {
-    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp)
+    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp || clnt->is_coordinator)
         return 0;
 
     /* Any isolation level can retry if nothing has been read */
@@ -1940,6 +1940,7 @@ static int do_commitrollback(struct sqlthdstate *thd, struct sqlclntstate *clnt,
         rc = SQLITE_OK;
     } else {
         clear_session_tbls(clnt);
+        clear_participants(clnt);
         sql_debug_logf(clnt, __func__, __LINE__, "starting\n");
 
         switch (clnt->dbtran.mode) {
@@ -5209,6 +5210,23 @@ void cleanup_clnt(struct sqlclntstate *clnt)
         free(clnt->saved_errstr);
         clnt->saved_errstr = NULL;
     }
+    if (clnt->dist_txnid) {
+        free(clnt->dist_txnid);
+        clnt->dist_txnid = NULL;
+    }
+    if (clnt->coordinator_dbname) {
+        free(clnt->coordinator_dbname);
+        clnt->coordinator_dbname = NULL;
+    }
+    if (clnt->coordinator_tier) {
+        free(clnt->coordinator_tier);
+        clnt->coordinator_tier = NULL;
+    }
+    if (clnt->coordinator_master) {
+        free(clnt->coordinator_master);
+        clnt->coordinator_master = NULL;
+    }
+
     clnt->sqlite_errstr = NULL;
     if (clnt->context) {
         for (int i = 0; i < clnt->ncontext; i++) {
@@ -5282,6 +5300,7 @@ void reset_clnt(struct sqlclntstate *clnt, int initial)
         Pthread_mutex_init(&clnt->sql_tick_lk, NULL);
         Pthread_mutex_init(&clnt->sql_lk, NULL);
         TAILQ_INIT(&clnt->session_tbls);
+        listc_init(&clnt->participants, offsetof(struct participant, linkv));
     } else {
        clnt->sql_since_reset = 0;
        clnt->num_resets++;
@@ -5378,6 +5397,15 @@ void reset_clnt(struct sqlclntstate *clnt, int initial)
     clnt->snapshot = 0;
     clnt->num_retry = 0;
     clnt->early_retry = 0;
+
+    clnt->use_2pc = 0;
+    clnt->is_coordinator = 0;
+    clnt->is_participant = 0;
+    clear_participants(clnt);
+    if (clnt->dist_txnid) {
+        free(clnt->dist_txnid);
+        clnt->dist_txnid = NULL;
+    }
 
     clear_session_tbls(clnt);
 
