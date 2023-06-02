@@ -94,7 +94,7 @@ static void sql_heartbeat_cb(int fd, short what, void *arg);
 
 void sql_enable_heartbeat(struct sqlwriter *writer)
 {
-    struct timeval heartbeat_time = {.tv_usec = 100000 }; // 100ms
+    struct timeval heartbeat_time = {.tv_usec = 100000}; // 100ms
     event_add(writer->heartbeat_ev, &heartbeat_time);
 }
 
@@ -125,7 +125,8 @@ static void do_sql_disable_timeout(void *arg)
 
 void sql_disable_timeout(struct sqlwriter *writer)
 {
-    if (!writer->timeout_ev) return;
+    if (!writer->timeout_ev)
+        return;
     run_on_base(writer->timer_base, do_sql_disable_timeout, writer);
 }
 
@@ -314,7 +315,8 @@ int sql_write(struct sqlwriter *writer, void *arg, int flush)
     writer->packing = orig_packing;
     outstanding = evbuffer_get_length(writer->wr_buf);
     Pthread_mutex_unlock(&writer->wr_lock);
-    if (outstanding) return sql_flush(writer);
+    if (outstanding)
+        return sql_flush(writer);
     return 0;
 }
 

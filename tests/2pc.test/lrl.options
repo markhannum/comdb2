@@ -1,0 +1,76 @@
+enable_2pc
+nowatch
+maxosqltransfer 10000000
+
+# Show epochms in log messages
+logmsg_epochms 1
+
+# Long-deletes require long timeouts
+#coordinator_timeout_ms 300000
+
+# Bugs require ridiculous timeouts
+coordinator_timeout_ms 3000000
+
+# They also require long propagate window
+coordinator_propagate_timeout_ms 120000
+
+# 2pc requires utxnid & ufid log
+utxnid_log on
+ufid_log on
+
+# These are already the default settings- they are required for consistency (& sanity)
+flush_on_prepare 1
+flush_replicant_on_prepare 1
+wait_for_prepare_seqnum 1
+coordinator_sync_on_commit 1
+
+# Ridiculous timeout to find bugs
+# coordinator_timeout_ms 20000000
+
+# This will probably default to sync-prepare, async-messages
+#disttxn_async_prepare 1
+disttxn_async_messages 1
+
+# Verbose backouts
+verbose_toblock_backouts 1
+
+# Handle cache 
+disttxn_enable_handle_cache 1
+
+# Disabling parallel rep provides more predictable behavior
+setattr REP_WORKERS 0
+setattr REP_PROCESSORS 0
+
+# Im testing large txns on slow machines
+setattr OSQL_MAX_COMMIT_WAIT_SEC 1200
+
+# Try to understand the 'lie about failure' case I'm seeing
+dump_blkseq 1
+
+# Enable early-ack trace
+early_ack_trace 1
+
+# Enable disttxn trace
+debug_disttxn_trace 1
+
+# Need this to debug 
+set_seqnum_trace 1
+
+# Need this to debug
+ack_trace 1
+
+# Also need this
+set_coherent_state_trace 1
+
+# Also wait-for-seqnum trace
+wait_for_seqnum_trace 1
+
+# 'lost-connection + restart' seems to return 'success' to the client prior to the
+# commit record being written .. wth?
+gbl_extended_sql_debug_trace 1
+
+# extended fdb trace
+fdbdebg 1
+
+# extended bdb lock trace
+bdblock_debug 1

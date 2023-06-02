@@ -655,8 +655,7 @@ cron_sched_t *cron_sched_byname(const char *name)
     Pthread_rwlock_rdlock(&crons.rwlock);
     LISTC_FOR_EACH(&crons.scheds, sched, lnk)
     {
-        if (sched->impl.name &&
-            !strncasecmp(sched->impl.name, name, strlen(name) + 1)) {
+        if (sched->impl.name && !strncasecmp(sched->impl.name, name, strlen(name) + 1)) {
             break;
         }
     }

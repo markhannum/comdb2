@@ -42,6 +42,7 @@
 #define SQLHERR_MASTER_TIMEOUT -109
 
 extern int gbl_master_sends_query_effects;
+extern int gbl_debug_disttxn_trace;
 
 typedef struct osql_checkboard {
     hash_t *rqs;     /* sql threads processing a blocksql are registered here */
@@ -293,8 +294,14 @@ int osql_chkboard_sqlsession_exists(unsigned long long rqid, uuid_t uuid)
 int osql_chkboard_sqlsession_rc(unsigned long long rqid, uuid_t uuid, int nops, void *data, struct errstat *errstat,
                                 struct query_effects *effects, const char *from)
 {
+    uuidstr_t us;
     if (!checkboard)
         return 0;
+
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN ckboard rqid %llu uuid %s errval=%d errstr=%s\n", rqid, comdb2uuidstr(uuid, us),
+               errstat ? errstat->errval : 0, errstat ? errstat->errstr : "(none)");
+    }
 
     Pthread_mutex_lock(&checkboard->mtx);
 
@@ -309,7 +316,6 @@ int osql_chkboard_sqlsession_rc(unsigned long long rqid, uuid_t uuid, int nops, 
         fprintf(stderr, "%s: received result for missing session %llu\n",
               __func__, rqid);
          */
-        uuidstr_t us;
         ctrace("%s: received result for missing session %llu %s\n", __func__,
                rqid, comdb2uuidstr(uuid, us));
         return -1;

@@ -1414,44 +1414,59 @@ int javasp_exists(const char *name)
 int gbl_debug_sleep_in_trigger_info = 0;
 int gather_triggers(struct gather_triggers_arg *arg)
 {
-    if (gbl_debug_sleep_in_trigger_info && !(rand() % 5)) poll(NULL, 0, 10);
+    if (gbl_debug_sleep_in_trigger_info && !(rand() % 5))
+        poll(NULL, 0, 10);
     int bdberr;
     struct trigger_entry e;
     struct stored_proc *sp;
-    LISTC_FOR_EACH(&stored_procs, sp, lnk) {
+    LISTC_FOR_EACH(&stored_procs, sp, lnk)
+    {
         e.name = sp->name;
-        if (strncmp(e.name, "__q", 3) == 0) e.name += 3;
+        if (strncmp(e.name, "__q", 3) == 0)
+            e.name += 3;
         struct dbtable *qdb = getqueuebyname(sp->name);
         if (!qdb) continue;
         if (qdb->consumers[0] == NULL) continue;
         switch (dbqueue_consumer_type(qdb->consumers[0])) {
-        case CONSUMER_TYPE_LUA: e.type = "trigger"; break;
-        case CONSUMER_TYPE_DYNLUA: e.type = "consumer"; break;
-        default: continue;
+        case CONSUMER_TYPE_LUA:
+            e.type = "trigger";
+            break;
+        case CONSUMER_TYPE_DYNLUA:
+            e.type = "consumer";
+            break;
+        default:
+            continue;
         }
         e.seq = bdb_queuedb_has_seq(qdb->handle) ? "Y" : "N";
         struct sp_table *tbl;
-        LISTC_FOR_EACH(&sp->tables, tbl, lnk) {
-            int rc = bdb_check_user_tbl_access_tran(thedb->bdb_env, arg->tran, arg->user, qdb->tablename, ACCESS_READ, &bdberr);
-            if (rc) continue;
+        LISTC_FOR_EACH(&sp->tables, tbl, lnk)
+        {
+            int rc = bdb_check_user_tbl_access_tran(thedb->bdb_env, arg->tran, arg->user, qdb->tablename, ACCESS_READ,
+                                                    &bdberr);
+            if (rc)
+                continue;
             e.tbl_name = tbl->name;
             struct sp_field *col;
-            LISTC_FOR_EACH(&tbl->fields, col, lnk) {
+            LISTC_FOR_EACH(&tbl->fields, col, lnk)
+            {
                 e.col = col->name;
                 if (col->flags & JAVASP_TRANS_LISTEN_AFTER_ADD) {
                     e.event = "add";
                     rc = arg->func(arg, &e);
-                    if (rc) return rc;
+                    if (rc)
+                        return rc;
                 }
                 if (col->flags & JAVASP_TRANS_LISTEN_AFTER_DEL) {
                     e.event = "del";
                     rc = arg->func(arg, &e);
-                    if (rc) return rc;
+                    if (rc)
+                        return rc;
                 }
                 if (col->flags & JAVASP_TRANS_LISTEN_AFTER_UPD) {
                     e.event = "upd";
                     rc = arg->func(arg, &e);
-                    if (rc) return rc;
+                    if (rc)
+                        return rc;
                 }
             }
         }

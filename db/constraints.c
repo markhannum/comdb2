@@ -315,8 +315,7 @@ int insert_add_op(struct ireq *iq, int optype, int rrn, int ixnum,
     fwdct->optype = optype;
     fwdct->flags = rec_flags;
 
-    rc = bdb_temp_table_insert(thedb->bdb_env, cur, &blkstate->ct_id_key,
-                               sizeof(blkstate->ct_id_key), &cte_record,
+    rc = bdb_temp_table_insert(thedb->bdb_env, cur, &blkstate->ct_id_key, sizeof(blkstate->ct_id_key), &cte_record,
                                sizeof(cte), &err);
 
     close_constraint_table_cursor(cur);
@@ -377,8 +376,7 @@ static int insert_del_op(block_state_t *blkstate, struct dbtable *srcdb,
         memcpy(bwdct->newkey, innewkey, keylen);
     }
 
-    rc = bdb_temp_table_insert(thedb->bdb_env, cur, &blkstate->ct_id_key,
-                               sizeof(blkstate->ct_id_key), &cte_record,
+    rc = bdb_temp_table_insert(thedb->bdb_env, cur, &blkstate->ct_id_key, sizeof(blkstate->ct_id_key), &cte_record,
                                sizeof(cte), &err);
     close_constraint_table_cursor(cur);
     if (rc != 0)

@@ -179,15 +179,19 @@ int add_queue_to_environment(char *table, int avgitemsz, int pagesize)
 static const char *qtype(struct dbtable *db)
 {
     switch (dbqueue_consumer_type(db->consumers[0])) {
-    case CONSUMER_TYPE_LUA: return "trigger";
-    case CONSUMER_TYPE_DYNLUA: return "consumer";
-    default: return "???";
+    case CONSUMER_TYPE_LUA:
+        return "trigger";
+    case CONSUMER_TYPE_DYNLUA:
+        return "consumer";
+    default:
+        return "???";
     }
 }
 
 static const char *pretty_qname(const char *q)
 {
-    if (strncmp(q, "__q", 3) == 0) return q + 3;
+    if (strncmp(q, "__q", 3) == 0)
+        return q + 3;
     return q;
 }
 
@@ -265,9 +269,7 @@ int perform_trigger_update_replicant(tran_type *tran, const char *queue_name, sc
 
         rc = bdb_queue_consumer(db->handle, 0, 1, &bdberr);
         if (rc) {
-            logmsg(LOGMSG_ERROR,
-                   "%s: bdb_queue_consumer returned rc %d bdberr %d\n",
-                   __func__, rc, bdberr);
+            logmsg(LOGMSG_ERROR, "%s: bdb_queue_consumer returned rc %d bdberr %d\n", __func__, rc, bdberr);
             rc = -1;
             goto done;
         }
@@ -487,8 +489,7 @@ static int perform_trigger_update_int(struct schema_change_type *sc)
         char **dests = calloc(sc->dests.count, sizeof(char *));
         if (dests == NULL) {
             sbuf2printf(sb, "!Can't allocate memory for destination list\n");
-            logmsg(LOGMSG_ERROR,
-                   "Can't allocate memory for destination list\n");
+            logmsg(LOGMSG_ERROR, "Can't allocate memory for destination list\n");
             goto done;
         }
         int i;
@@ -519,8 +520,8 @@ static int perform_trigger_update_int(struct schema_change_type *sc)
             goto done;
         }
 
-        db->handle = bdb_create_queue_tran(tran, db->tablename, thedb->basedir, 65536, 65536,
-                                           thedb->bdb_env, 1, &bdberr);
+        db->handle =
+            bdb_create_queue_tran(tran, db->tablename, thedb->basedir, 65536, 65536, thedb->bdb_env, 1, &bdberr);
         if (db->handle == NULL) {
             logmsg(LOGMSG_ERROR,
                    "bdb_open:failed to open queue %s/%s, rcode %d\n",
@@ -572,8 +573,7 @@ static int perform_trigger_update_int(struct schema_change_type *sc)
 
         rc = bdb_queue_consumer(db->handle, 0, 1, &bdberr);
         if (rc) {
-            logmsg(LOGMSG_ERROR,
-                   "%s: bdb_queue_consumer returned rc %d bdberr %d\n", __func__, rc, bdberr);
+            logmsg(LOGMSG_ERROR, "%s: bdb_queue_consumer returned rc %d bdberr %d\n", __func__, rc, bdberr);
             goto done;
         }
 

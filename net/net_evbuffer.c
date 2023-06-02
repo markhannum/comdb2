@@ -130,6 +130,7 @@ enum policy {
 static int dedicated_appsock = 1;
 static int dedicated_timer = 0;
 static int dedicated_fdb = 1;
+static int dedicated_dist = 1;
 static enum policy reader_policy = POLICY_PER_NET;
 static enum policy writer_policy = POLICY_PER_HOST;
 
@@ -147,6 +148,8 @@ static pthread_t timer_thd;
 static struct event_base *timer_base;
 static pthread_t fdb_thd;
 static struct event_base *fdb_base;
+static pthread_t dist_thd;
+static struct event_base *dist_base;
 
 #define NUM_APPSOCK_RD 4
 pthread_t appsock_thd[NUM_APPSOCK_RD];
@@ -187,6 +190,7 @@ struct event_base *appsock_base[NUM_APPSOCK_RD];
 #define check_base_thd() check_thd(base_thd)
 #define check_timer_thd() check_thd(timer_thd)
 #define check_fdb_thd() check_thd(fdb_thd)
+#define check_dist_thd() check_thd(dist_thd);
 #define check_rd_thd() check_thd(rd_thd)
 #define check_wr_thd() check_thd(wr_thd)
 
@@ -718,6 +722,7 @@ static int max_pending_connections = 1024;
 static TAILQ_HEAD(, accept_info) accept_list = TAILQ_HEAD_INITIALIZER(accept_list);
 static void do_read(int, short, void *);
 static void accept_info_free(struct accept_info *);
+extern int gbl_debug_disttxn_trace;
 
 static int close_oldest_pending_connection(void)
 {
@@ -725,13 +730,19 @@ static int close_oldest_pending_connection(void)
     if (!a) {
         return -1;
     }
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s closing oldest pending connection [outstanding:%d] fd=%d\n", __func__,
+               pending_connections, a->fd);
+    }
     accept_info_free(a);
-    logmsg(LOGMSG_USER, "%s closed oldest pending connection [outstanding:%d]\n", __func__, pending_connections);
     return 0;
 }
 
 static struct accept_info *accept_info_new(netinfo_type *netinfo_ptr, struct sockaddr_in *addr, int fd)
 {
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s fd %d\n", __func__, fd);
+    }
     check_base_thd();
     if (pending_connections > max_pending_connections) {
         close_oldest_pending_connection();
@@ -1124,6 +1135,9 @@ static void exit_once_func(void)
     }
     if (dedicated_fdb) {
         stop_base(fdb_base);
+    }
+    if (dedicated_dist) {
+        stop_base(dist_base);
     }
     if (gbl_libevent_appsock && dedicated_appsock) {
         for (int i = 0; i < NUM_APPSOCK_RD; ++i) {
@@ -1819,6 +1833,56 @@ static void enable_heartbeats(int dummyfd, short what, void *data)
     event_add(e->hb_check_ev, &one_sec);
     event_add(e->hb_send_ev, &one_sec);
     evtimer_once(base, finish_host_setup, e);
+}
+
+extern int dist_heartbeats(dist_hbeats_type *dt);
+static void dist_heartbeat(int dummyfd, short what, void *data)
+{
+    check_dist_thd();
+    dist_hbeats_type *dt = data;
+    dist_heartbeats(dt);
+}
+
+static void do_enable_dist_heartbeats(int dummyfd, short what, void *data)
+{
+    dist_hbeats_type *dt = data;
+
+    check_dist_thd();
+    if (dt->ev_hbeats)
+        abort();
+
+    dt->ev_hbeats = event_new(dist_base, -1, EV_PERSIST, dist_heartbeat, dt);
+    if (!dt->ev_hbeats) {
+        logmsg(LOGMSG_ERROR, "Failed to create new event for dist_heartbeat\n");
+        return;
+    }
+    dt->tv.tv_sec = 5;
+    dt->tv.tv_usec = 0;
+
+    event_add(dt->ev_hbeats, &dt->tv);
+}
+
+int enable_dist_heartbeats(dist_hbeats_type *dt)
+{
+    return event_base_once(dist_base, -1, EV_TIMEOUT, do_enable_dist_heartbeats, dt, NULL);
+}
+
+extern void dist_heartbeat_free_tran(dist_hbeats_type *dt);
+static void do_disable_dist_heartbeats_and_free(int dummyfd, short what, void *data)
+{
+    dist_hbeats_type *dt = data;
+    check_dist_thd();
+    if (dt->ev_hbeats) {
+        event_del(dt->ev_hbeats);
+        event_free(dt->ev_hbeats);
+        dt->ev_hbeats = NULL;
+    }
+    dist_heartbeat_free_tran(dt);
+}
+
+int disable_dist_heartbeats_and_free(dist_hbeats_type *dt)
+{
+    return event_base_once(dist_base, -1, EV_TIMEOUT, do_disable_dist_heartbeats_and_free, dt, NULL);
 }
 
 extern int fdb_heartbeats(fdb_hbeats_type *hb);
@@ -2549,6 +2613,9 @@ static void read_len(int fd, short what, void *data)
     if (need > 0) {
         n = evbuffer_read(a->buf, fd, need);
         if (n <= 0 && (what & EV_READ)) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s net-case need-case closing fd %d\n", __func__, a->fd);
+            }
             accept_info_free(a);
             return;
         }
@@ -2570,6 +2637,9 @@ static void read_len(int fd, short what, void *data)
         }
         read_connect(fd, 0, a);
     } else if (event_base_once(base, fd, EV_READ, read_len, a, NULL)) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s net-case failed-event base closing fd %d\n", __func__, a->fd);
+        }
         accept_info_free(a);
     }
 }
@@ -2589,7 +2659,9 @@ int do_appsock_evbuffer(struct evbuffer *buf, struct sockaddr_in *ss, int fd, in
         info = get_appsock_info(key);
     }
 
-    if (info == NULL) return 1;
+    if (info == NULL) {
+        return 1;
+    }
 
     evbuffer_drain(buf, b.pos + 1);
     struct appsock_handler_arg *arg = malloc(sizeof(*arg));
@@ -2605,13 +2677,23 @@ int do_appsock_evbuffer(struct evbuffer *buf, struct sockaddr_in *ss, int fd, in
     return 0;
 }
 
+#include <fsnapf.h>
 static void do_read(int fd, short what, void *data)
 {
     check_base_thd();
     struct accept_info *a = data;
     struct evbuffer *buf = evbuffer_new();
+    EVUTIL_SET_SOCKET_ERROR(0);
     ssize_t n = evbuffer_read(buf, fd, SBUF2UNGETC_BUF_MAX);
     if (n <= 0) {
+        /* This has gotta be the 'dropped-packet' error I keep seeing- guessing the
+         * error is EAGAIN.. but instead of re-reading we just discard ..
+         * an alternative is that somehow the control info ('reset' caused by the socket closing)
+         * beat the packet */
+        int e = EVUTIL_SOCKET_ERROR();
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s evbuffer_read returns %ld errno=%d fd %d, closing\n", __func__, n, e, fd);
+        }
         accept_info_free(a);
         return;
     }
@@ -2633,14 +2715,26 @@ static void do_read(int fd, short what, void *data)
         return;
     }
     if (should_reject_request()) {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s should-reject fd %d, closing\n", __func__, fd);
+        }
         evbuffer_free(buf);
         shutdown_close(fd);
         return;
     }
 
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s fd=%d calling do appsock evbuffer\n", __func__, fd);
+    }
     if ((do_appsock_evbuffer(buf, &ss, fd, 0)) == 0)
         return;
 
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s didn't read appsock key fd=%d bytes-read=%ld\n", __func__, fd, n);
+    }
+    char snap[n];
+    evbuffer_copyout(buf, snap, n);
+    fsnapf(stderr, snap, n);
     handle_appsock(netinfo_ptr, &ss, first_byte, buf, fd);
 }
 
@@ -2757,6 +2851,9 @@ static void do_recvfd(int pmux_fd, short what, void *data)
     check_base_thd();
     struct net_info *n = data;
     int newfd = recvfd(pmux_fd);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s recvfd returns %d\n", __func__, newfd);
+    }
     switch (newfd) {
     case 0: return;
     case -1: reopen_unix(pmux_fd, n); return;
@@ -2773,6 +2870,9 @@ static void do_recvfd(int pmux_fd, short what, void *data)
     struct sockaddr *addr = (struct sockaddr *)&saddr;
     socklen_t addrlen = sizeof(saddr);
     getpeername(newfd, addr, &addrlen);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s accepted newfd %d\n", __func__, newfd);
+    }
     accept_cb(NULL, newfd, addr, addrlen, n);
 }
 
@@ -3092,6 +3192,12 @@ static void setup_bases(void)
     } else {
         fdb_thd = base_thd;
         fdb_base = base;
+    }
+    if (dedicated_dist) {
+        init_base(&dist_thd, &dist_base, "dist");
+    } else {
+        dist_thd = base_thd;
+        dist_base = base;
     }
     if (gbl_libevent_appsock) {
         if (dedicated_appsock) {

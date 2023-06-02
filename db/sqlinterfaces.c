@@ -540,7 +540,8 @@ int has_parallel_sql(struct sqlclntstate *clnt)
 
     if (!clnt) {
         struct sql_thread *thd = pthread_getspecific(query_info_key);
-        if (thd) clnt = thd->clnt;
+        if (thd)
+            clnt = thd->clnt;
     }
     /* disable anything involving shared shadows;
        recom requires a read-only share;
@@ -1825,7 +1826,7 @@ int gbl_snapshot_serial_verify_retry = 1;
 
 inline int replicant_is_able_to_retry(struct sqlclntstate *clnt)
 {
-    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp)
+    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp || clnt->is_participant)
         return 0;
 
     if ((clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
@@ -1839,7 +1840,7 @@ inline int replicant_is_able_to_retry(struct sqlclntstate *clnt)
 
 static inline int replicant_can_retry_rc(struct sqlclntstate *clnt, int rc)
 {
-    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp)
+    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp || clnt->is_participant)
         return 0;
 
     /* Any isolation level can retry if nothing has been read */
@@ -1937,6 +1938,7 @@ static int do_commitrollback(struct sqlthdstate *thd, struct sqlclntstate *clnt,
         rc = SQLITE_OK;
     } else {
         clear_session_tbls(clnt);
+        clear_participants(clnt);
         sql_debug_logf(clnt, __func__, __LINE__, "starting\n");
 
         switch (clnt->dbtran.mode) {
@@ -5206,6 +5208,23 @@ void cleanup_clnt(struct sqlclntstate *clnt)
         free(clnt->saved_errstr);
         clnt->saved_errstr = NULL;
     }
+    if (clnt->dist_txnid) {
+        free(clnt->dist_txnid);
+        clnt->dist_txnid = NULL;
+    }
+    if (clnt->coordinator_dbname) {
+        free(clnt->coordinator_dbname);
+        clnt->coordinator_dbname = NULL;
+    }
+    if (clnt->coordinator_tier) {
+        free(clnt->coordinator_tier);
+        clnt->coordinator_tier = NULL;
+    }
+    if (clnt->coordinator_master) {
+        free(clnt->coordinator_master);
+        clnt->coordinator_master = NULL;
+    }
+
     clnt->sqlite_errstr = NULL;
     if (clnt->context) {
         for (int i = 0; i < clnt->ncontext; i++) {
@@ -5279,19 +5298,20 @@ void reset_clnt(struct sqlclntstate *clnt, int initial)
         Pthread_mutex_init(&clnt->sql_tick_lk, NULL);
         Pthread_mutex_init(&clnt->sql_lk, NULL);
         TAILQ_INIT(&clnt->session_tbls);
+        listc_init(&clnt->participants, offsetof(struct participant, linkv));
     } else {
-       clnt->sql_since_reset = 0;
-       clnt->num_resets++;
-       clnt->last_reset_time = comdb2_time_epoch();
-       clnt_change_state(clnt, CONNECTION_RESET);
-       clnt->plugin.set_timeout(clnt, gbl_sqlwrtimeoutms);
-       if (clnt->lastresptype != RESPONSE_TYPE__LAST_ROW && clnt->lastresptype != 0) {
-           if (gbl_unexpected_last_type_warn)
-               logmsg(LOGMSG_ERROR, "Unexpected previous response type %d origin %s task %s\n",
-                      clnt->lastresptype, clnt->origin, clnt->argv0);
-           if (gbl_unexpected_last_type_abort)
-               abort();
-       }
+        clnt->sql_since_reset = 0;
+        clnt->num_resets++;
+        clnt->last_reset_time = comdb2_time_epoch();
+        clnt_change_state(clnt, CONNECTION_RESET);
+        clnt->plugin.set_timeout(clnt, gbl_sqlwrtimeoutms);
+        if (clnt->lastresptype != RESPONSE_TYPE__LAST_ROW && clnt->lastresptype != 0) {
+            if (gbl_unexpected_last_type_warn)
+                logmsg(LOGMSG_ERROR, "Unexpected previous response type %d origin %s task %s\n", clnt->lastresptype,
+                       clnt->origin, clnt->argv0);
+            if (gbl_unexpected_last_type_abort)
+                abort();
+        }
     }
 
     clnt->pPool = NULL; /* REDUNDANT? */
@@ -5375,6 +5395,15 @@ void reset_clnt(struct sqlclntstate *clnt, int initial)
     clnt->snapshot = 0;
     clnt->num_retry = 0;
     clnt->early_retry = 0;
+
+    clnt->use_2pc = 0;
+    clnt->is_coordinator = 0;
+    clnt->is_participant = 0;
+    clear_participants(clnt);
+    if (clnt->dist_txnid) {
+        free(clnt->dist_txnid);
+        clnt->dist_txnid = NULL;
+    }
 
     clear_session_tbls(clnt);
 
