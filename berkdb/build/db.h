@@ -2611,7 +2611,10 @@ struct __db_env {
 	int  (*txn_discard_recovered) __P((DB_ENV *, const char *));
 	int  (*txn_discard_all_recovered) __P((DB_ENV *));
 	int  (*txn_upgrade_all_prepared) __P((DB_ENV *));
+	int  (*txn_recover_all_prepared) __P((DB_ENV *));
 	int  (*txn_abort_prepared_waiters) __P((DB_ENV *));
+	int  (*set_recover_prepared_callback) __P((DB_ENV *, void (*)(const char *, const char *, const char *)));
+	void  (*recover_prepared_callback)(const char *, const char *, const char *);
 	int  (*get_timeout) __P((DB_ENV *, db_timeout_t *, u_int32_t));
 	int  (*set_timeout) __P((DB_ENV *, db_timeout_t, u_int32_t));
 	int  (*set_bulk_stops_on_page) __P((DB_ENV*, int));

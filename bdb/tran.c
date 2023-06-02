@@ -65,6 +65,7 @@
 
 static unsigned int curtran_counter = 0;
 extern int gbl_debug_txn_sleep;
+extern int gbl_flush_on_prepare;
 extern int __txn_getpriority(DB_TXN *txnp, int *priority);
 
 #if 0
@@ -138,6 +139,7 @@ extern int gbl_update_startlsn_printstep;
 int maxstep = 0;
 
 void comdb2_cheapstack(FILE *f);
+void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
 
 /* Update the startlsn of an outstanding logical transaction - you are holding
  * the lock*/
@@ -1499,6 +1501,10 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
     }
     tran->is_prepared = 1;
 
+    if (gbl_flush_on_prepare) {
+        bdb_state->dbenv->log_flush(bdb_state->dbenv, NULL);
+    }
+
     return prepare_rc;
 }
 
@@ -1643,6 +1649,7 @@ int bdb_tran_commit_with_seqnum_int(bdb_state_type *bdb_state, tran_type *tran,
         flags = DB_TXN_DONT_GET_REPO_MTX;
         flags |= (tran->request_ack) ? DB_TXN_REP_ACK : 0;
         rc = tran->tid->commit_getlsn(tran->tid, flags, out_txnsize, &lsn, tran);
+        comdb2_cheapstack_sym(stderr, "DISTTXN commit-lsn %d:%d", lsn.file, lsn.offset);
         bdb_osql_trn_repo_unlock();
         if (rc != 0) {
             logmsg(LOGMSG_ERROR, 
@@ -2014,8 +2021,7 @@ int bdb_tran_commit_with_seqnum_int(bdb_state_type *bdb_state, tran_type *tran,
 
         else if (seqnum) {
             bzero(seqnum, sizeof(seqnum_type));
-            // TODO: NC: copy lsn instead of tran->savelsn instead?
-            memcpy(seqnum, &(tran->savelsn), sizeof(DB_LSN));
+            memcpy(seqnum, &lsn, sizeof(DB_LSN));
             seqnum->generation = generation;
         }
 

@@ -1179,10 +1179,20 @@ typedef struct bpfunc bpfunc_t;
 typedef struct bpfunc_lstnode {
     bpfunc_t *func;
     LINKC_T(struct bpfunc_lstnode) linkct;
-
 } bpfunc_lstnode_t;
 
 typedef LISTC_T(bpfunc_lstnode_t) bpfunc_list_t;
+
+struct participant {
+    char *participant_name;
+    char *participant_tier;
+    char *participant_master;
+    int status;
+    LINKC_T(struct participant) linkv;
+};
+
+typedef LISTC_T(struct participant) participant_list_t;
+
 /*******************************************************************/
 
 enum OSQL_REQ_TYPE {
@@ -1256,6 +1266,21 @@ struct osql_sess {
     int is_tranddl;
     int is_tptlock;   /* needs tpt locking */
     int is_cancelled; /* 1 if session is cancelled */
+
+    /* 2pc maintained in session */
+    unsigned is_participant : 1;
+    unsigned is_coordinator : 1;
+
+    char *dist_txnid;
+    char *coordinator_dbname;
+    char *coordinator_tier;
+    char *coordinator_master;
+    participant_list_t participants;
+
+    /* these are set asynchronously */
+    pthread_mutex_t participant_lk;
+    int is_done;
+    int is_sanctioned; /* set by fdb from coordinator-master */
 };
 typedef struct osql_sess osql_sess_t;
 
@@ -1431,6 +1456,7 @@ struct ireq {
 
     int sc_running;
     int comdbg_flags;
+
     /* REVIEW COMMENTS AT BEGINING OF STRUCT BEFORE ADDING NEW VARIABLES */
 };
 
@@ -2086,6 +2112,7 @@ tran_type *trans_start_snapisol(struct ireq *, int trak, int epoch, int file,
                                 int offset, int *error, int is_ha_retry);
 tran_type *trans_start_socksql(struct ireq *, int trak);
 int trans_commit(struct ireq *iq, void *trans, char *source_host);
+int trans_commit_nowait(struct ireq *iq, void *trans, char *source_host);
 int trans_commit_seqnum(struct ireq *iq, void *trans, db_seqnum_type *seqnum);
 int trans_commit_adaptive(struct ireq *iq, void *trans, char *source_host);
 int trans_commit_logical(struct ireq *iq, void *trans, char *source_host,
@@ -2770,15 +2797,14 @@ enum {
     RECFLAGS_DONT_SKIP_BLOBS = 1 << 7,
     RECFLAGS_ADD_FROM_SC_LOGICAL = 1 << 8,
     /* used for upgrade record */
-    RECFLAGS_UPGRADE_RECORD = RECFLAGS_DYNSCHEMA_NULLS_ONLY |
-                              RECFLAGS_KEEP_GENID | RECFLAGS_NO_TRIGGERS |
-                              RECFLAGS_NO_CONSTRAINTS | RECFLAGS_NO_BLOBS |
-                              1 << 9,
+    RECFLAGS_UPGRADE_RECORD = RECFLAGS_DYNSCHEMA_NULLS_ONLY | RECFLAGS_KEEP_GENID | RECFLAGS_NO_TRIGGERS |
+                              RECFLAGS_NO_CONSTRAINTS | RECFLAGS_NO_BLOBS | 1 << 9,
     RECFLAGS_IN_CASCADE = 1 << 10,
     RECFLAGS_DONT_LOCK_TBL = 1 << 11,
     RECFLAGS_COMDBG_FROM_LE = 1 << 12,
+    RECFLAGS_INLINE_CONSTRAINTS = 1 << 13,
 
-    RECFLAGS_MAX = 1 << 12
+    RECFLAGS_MAX = 1 << 13
 };
 
 /* flag codes */
