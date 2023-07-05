@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+. ${TESTSROOTDIR}/tools/runit_common.sh
+
+#export debug=1
+[[ $debug == "1" ]] && set -x
+
+function create_tables
+{
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t(a int, b int, c int)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create unique index t_a on t(a)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index t_b on t(b)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index t_c on t(c)"
+}
+
+function load
+{
+    typeset inst=$1
+    while [[ ! -f ${DBNAME}.stop && ! -f ${DBNAME}.failexit ]]; do
+        echo "set transaction chunk 100"
+        echo "begin"
+        for i in $(seq 1 1000); do
+            echo "insert into t values($(($RANDOM << 16 | $RANDOM)), $(($RANDOM << 16 | $RANDOM)), $(($RANDOM << 16 | $RANDOM)))"
+        done
+        echo "commit"
+    done | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - >/dev/null 2>&1
+}
+
+function failexit
+{
+    [[ $debug == "1" ]] && set -x
+    touch ${DBNAME}.failexit
+    echo "Failed: $1"
+    exit -1
+}
+
+function verify_up
+{
+    [[ $debug == "1" ]] && set -x
+    typeset node=$1
+    typeset count=0
+    typeset r=1
+    while [[ "$r" -ne "0" && "$count" -lt 2000 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+        r=$?
+        [[ $r != 0 ]] && sleep 1
+        let count=count+1
+    done
+    [[ $r != 0 ]] && failexit "node $node did not recover in time"
+}
+
+function downgrade_loop
+{
+    echo "Starting Downgrade Loop"
+    while [[ ! -f ${DBNAME}.stop && ! -f ${DBNAME}.failexit ]]; do
+        node=$(get_master)
+        while [[ "$CLUSTER" != *"$node"* ]]; do
+            sleep 1
+            node=$(get_master)
+        done
+        echo "Downgrading master $node"
+        $CDB2SQL_EXE --tabs $CDB2_OPTIONS --host $node $DBNAME "EXEC PROCEDURE sys.cmd.send('downgrade')" >/dev/null 2>&1
+        node=$(get_master)
+        echo "Downgraded master, newmaster is $node, sleeping for 30"
+        sleep 30
+    done
+    echo "Exiting Downgrade Loop"
+}
+
+function run_test
+{
+    rm ${DBNAME}.failexit >/dev/null 2>&1
+    rm ${DBNAME}.stop >/dev/null 2>&1
+
+    typeset maxtime=3600
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    create_tables
+    let j=0
+    while [[ $j -lt 5 ]]; do
+        load $j &
+        let j=j+1
+    done
+    sleep 10
+    downgrade_loop &
+
+    while [[ ! -f ${DBNAME}.failexit && "$(date +%s)" -lt $endtime ]] ; do
+        for node in $CLUSTER; do
+            verify_up $node
+        done
+        sleep 1
+    done
+
+    touch ${DBNAME}.stop
+    echo "Waiting for child processes to halt"
+    wait
+}
+
+[[ -z "$CLUSTER" ]] && failexit "This test requires a cluster"
+run_test
+
+if [[ -f ${DBNAME}.failexit ]]; then
+    echo "Testcase failed"
+    exit -1
+fi
+
+echo "Success"
