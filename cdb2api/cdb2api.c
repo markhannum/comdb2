@@ -2727,8 +2727,10 @@ retry_connect:
             return 0;
     }
 
-    if (0 == cdb2_try_connect_range(hndl, hndl->node_seq, hndl->num_hosts))
-        return 0;
+    if (!(hndl->flags & CDB2_MASTER)) {
+        if (0 == cdb2_try_connect_range(hndl, hndl->node_seq, hndl->num_hosts))
+            return 0;
+    }
 
     if (hndl->sb == NULL) {
         /* Can't connect to any of the non-master nodes, try connecting to
@@ -2740,7 +2742,7 @@ retry_connect:
     }
 
     /* Can't connect to any of the nodes, re-check information about db. */
-    if (!(hndl->flags & CDB2_DIRECT_CPU) && requery_done == 0 &&
+    if (!(hndl->flags & (CDB2_DIRECT_CPU|CDB2_MASTER)) && requery_done == 0 &&
         cdb2_get_dbhosts(hndl) == 0) {
         requery_done = 1;
         goto retry_connect;
@@ -3099,7 +3101,7 @@ static int cdb2_send_query(cdb2_hndl_tp *hndl, cdb2_hndl_tp *event_hndl,
         features[n_features++] = CDB2_CLIENT_FEATURES__FLAT_COL_VALS;
 
         features[n_features++] = CDB2_CLIENT_FEATURES__ALLOW_MASTER_DBINFO;
-        if ((hndl->flags & CDB2_DIRECT_CPU) ||
+        if ((hndl->flags & (CDB2_DIRECT_CPU|CDB2_MASTER)) ||
             (retries_done >= (hndl->num_hosts * 2 - 1) && hndl->master ==
              hndl->connected_host)) {
             features[n_features++] = CDB2_CLIENT_FEATURES__ALLOW_MASTER_EXEC;
@@ -6485,6 +6487,8 @@ int cdb2_open(cdb2_hndl_tp **handle, const char *dbname, const char *type,
         strcpy(hndl->policy, "random_room");
     } else if (hndl->flags & CDB2_ROOM) {
         strcpy(hndl->policy, "room");
+    } else if (hndl->flags & CDB2_MASTER) {
+        strcpy(hndl->policy, "master");
     } else {
         hndl->flags |= CDB2_RANDOMROOM;
         /* DIRECTCPU mode behaves like RANDOMROOM. But let's pick a shorter policy name
