@@ -1827,10 +1827,8 @@ static void fdb_heartbeat(int dummyfd, short what, void *data)
     check_fdb_thd();
 
     fdb_hbeats_type *hb = data; 
-    Pthread_mutex_lock(&hb->sb_mtx);
     logmsg(LOGMSG_INFO, "Sending fdb heartbeat for tran %p\n", hb);
     fdb_heartbeats(hb);
-    Pthread_mutex_unlock(&hb->sb_mtx);
 }
 
 static void do_enable_fdb_heartbeats(int dummyfd, short what, void *data)

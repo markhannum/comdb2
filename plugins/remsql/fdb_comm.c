@@ -1690,7 +1690,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     int rc;
     int idsz;
     int send_dk;
+    fdb_tran_t *tran = (fdb_tran_t *)sbuf2getuserptr(sb);
+    pthread_mutex_t *sb_mtx = (tran && tran->hbeats.tran) ? &tran->hbeats.sb_mtx : NULL;
 
+    if (sb_mtx) Pthread_mutex_lock(sb_mtx);
     type = htonl(msg->hd.type);
 
     rc = sbuf2fwrite((char *)&type, 1, sizeof(type), sb);
@@ -1698,6 +1701,7 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     if (rc != sizeof(type)) {
         logmsg(LOGMSG_ERROR, "%s: failed to write header rc=%d\n", __func__,
                rc);
+        if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
         return FDB_ERR_WRITE_IO;
     }
 
@@ -1712,46 +1716,62 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_TRAN_ROLLBACK:
 
         rc = sbuf2fwrite((char *)msg->tr.tid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->tr.lvl);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->tr.flags);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->tr.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         break;
 
     case FDB_MSG_TRAN_RC:
 
         rc = sbuf2fwrite((char *)msg->rc.tid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->rc.rc);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->rc.errstrlen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (msg->rc.errstrlen && msg->rc.errstr) {
             rc = sbuf2fwrite(msg->rc.errstr, 1, msg->rc.errstrlen, sb);
-            if (rc != msg->rc.errstrlen)
+            if (rc != msg->rc.errstrlen) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
@@ -1759,63 +1779,85 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_CURSOR_OPEN:
 
         rc = sbuf2fwrite((char *)msg->co.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         rc = sbuf2fwrite((char *)msg->co.tid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->co.flags);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->co.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->co.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->co.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->co.srcpid);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->co.srcnamelen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (msg->co.srcname && msg->co.srcnamelen > 0) {
             rc = sbuf2fwrite(msg->co.srcname, 1, msg->co.srcnamelen, sb);
-            if (rc != msg->co.srcnamelen)
+            if (rc != msg->co.srcnamelen) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
         if (msg->co.flags & FDB_MSG_CURSOR_OPEN_FLG_SSL) {
             /*fprintf(stderr, "Writing ssl %d size %d\n", msg->co.ssl,
              * sizeof(tmp));*/
             tmp = htonl(msg->co.ssl);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-            if (rc != sizeof(tmp))
+            if (rc != sizeof(tmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
 
     case FDB_MSG_CURSOR_CLOSE: {
         rc = sbuf2fwrite(msg->cc.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         int haveid;
 
@@ -1825,8 +1867,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         if (haveid) {
             tmp = htonl(msg->cc.seq);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-            if (rc != sizeof(tmp))
+            if (rc != sizeof(tmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
@@ -1838,26 +1882,34 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_CURSOR_PREV:
 
         rc = sbuf2fwrite(msg->cm.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         break;
 
     case FDB_MSG_DATA_ROW:
 
         rc = sbuf2fwrite(msg->dr.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->dr.rc);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         lltmp = flibc_htonll(msg->dr.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-        if (rc != sizeof(lltmp))
+        if (rc != sizeof(lltmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (unlikely(msg->dr.datacopylen != 0))
             abort();
@@ -1865,13 +1917,17 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
               (((unsigned)msg->dr.datalen) >> 16);
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (msg->dr.data && msg->dr.datalen > 0) {
             rc = sbuf2fwrite(msg->dr.data, 1, msg->dr.datalen, sb);
-            if (rc != msg->dr.datalen)
+            if (rc != msg->dr.datalen) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
         break;
 
@@ -1879,25 +1935,33 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_CURSOR_FIND_LAST:
 
         rc = sbuf2fwrite(msg->cf.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->cf.keylen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         assert(msg->cf.keylen > 0); /* TODO: 0 for match any ? */
         rc = sbuf2fwrite(msg->cf.key, 1, msg->cf.keylen, sb);
-        if (rc != msg->cf.keylen)
+        if (rc != msg->cf.keylen) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         break;
 
     case FDB_MSG_RUN_SQL:
         rc = sbuf2fwrite(msg->sq.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
         /*
         rc = sbuf2flush(sb);
         if (rc<=0)
@@ -1909,8 +1973,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         tmp = htonl(msg->sq.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -1922,8 +1988,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         tmp = htonl(msg->sq.flags);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -1935,8 +2003,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         tmp = htonl(msg->sq.sqllen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -1947,8 +2017,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
      */
 
         rc = sbuf2fwrite(msg->sq.sql, 1, msg->sq.sqllen, sb);
-        if (rc != msg->sq.sqllen)
+        if (rc != msg->sq.sqllen) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -1961,8 +2033,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         if (msg->sq.flags == FDB_RUN_SQL_TRIM) {
             tmp = htonl(msg->sq.keylen);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-            if (rc != sizeof(tmp))
+            if (rc != sizeof(tmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
             /*
          rc = sbuf2flush(sb);
          if (rc<=0)
@@ -1973,8 +2047,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
          */
 
             rc = sbuf2fwrite(msg->sq.key, 1, msg->sq.keylen, sb);
-            if (rc != msg->sq.keylen)
+            if (rc != msg->sq.keylen) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
@@ -1985,29 +2061,39 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_INSERT:
 
         rc = sbuf2fwrite(msg->in.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->in.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->in.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         lltmp = flibc_htonll(msg->in.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-        if (rc != sizeof(lltmp))
+        if (rc != sizeof(lltmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (send_dk) {
             lltmp = flibc_htonll(msg->in.ins_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-            if (rc != sizeof(lltmp))
+            if (rc != sizeof(lltmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         if (unlikely(msg->in.datalen > 0 && msg->in.data == NULL)) {
@@ -2017,31 +2103,41 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = msg->in.datalen;
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = msg->in.seq;
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (msg->in.data && msg->in.datalen > 0) {
             rc = sbuf2fwrite(msg->in.data, 1, msg->in.datalen, sb);
-            if (rc != msg->in.datalen)
+            if (rc != msg->in.datalen) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         if (msg->in.tblname) {
             tmp = strlen(msg->in.tblname) + 1;
             tmp = htonl(tmp);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-            if (rc != sizeof(tmp))
+            if (rc != sizeof(tmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
             tmp = ntohl(tmp);
             rc = sbuf2fwrite(msg->in.tblname, 1, tmp, sb);
-            if (rc != tmp)
+            if (rc != tmp) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
@@ -2052,46 +2148,62 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_DELETE:
 
         rc = sbuf2fwrite(msg->de.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->de.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->de.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         lltmp = flibc_htonll(msg->de.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-        if (rc != sizeof(lltmp))
+        if (rc != sizeof(lltmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (send_dk) {
             lltmp = flibc_htonll(msg->de.del_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-            if (rc != sizeof(lltmp))
+            if (rc != sizeof(lltmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         tmp = htonl(msg->de.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (msg->de.tblname) {
             tmp = strlen(msg->de.tblname) + 1;
             tmp = htonl(tmp);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-            if (rc != sizeof(tmp))
+            if (rc != sizeof(tmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
             tmp = ntohl(tmp);
             rc = sbuf2fwrite(msg->de.tblname, 1, tmp, sb);
-            if (rc != tmp)
+            if (rc != tmp) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
@@ -2102,39 +2214,53 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_UPDATE:
 
         rc = sbuf2fwrite(msg->up.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->up.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->up.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         lltmp = flibc_htonll(msg->up.oldgenid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-        if (rc != sizeof(lltmp))
+        if (rc != sizeof(lltmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         lltmp = flibc_htonll(msg->up.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-        if (rc != sizeof(lltmp))
+        if (rc != sizeof(lltmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (send_dk) {
             lltmp = flibc_htonll(msg->up.ins_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-            if (rc != sizeof(lltmp))
+            if (rc != sizeof(lltmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
 
             lltmp = flibc_htonll(msg->up.del_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-            if (rc != sizeof(lltmp))
+            if (rc != sizeof(lltmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         if (unlikely(msg->up.datalen > 0 && msg->up.data == NULL)) {
@@ -2144,30 +2270,40 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = msg->up.datalen;
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->up.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (msg->up.data && msg->up.datalen > 0) {
             rc = sbuf2fwrite(msg->up.data, 1, msg->up.datalen, sb);
-            if (rc != msg->up.datalen)
+            if (rc != msg->up.datalen) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         if (msg->up.tblname) {
             tmp = strlen(msg->up.tblname) + 1;
             tmp = htonl(tmp);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-            if (rc != sizeof(tmp))
+            if (rc != sizeof(tmp)) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
             tmp = ntohl(tmp);
             rc = sbuf2fwrite(msg->up.tblname, 1, tmp, sb);
-            if (rc != tmp)
+            if (rc != tmp) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
@@ -2175,33 +2311,45 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_INDEX:
 
         rc = sbuf2fwrite(msg->ix.cid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->ix.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->ix.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         lltmp = flibc_htonll(msg->ix.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-        if (rc != sizeof(lltmp))
+        if (rc != sizeof(lltmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->ix.is_delete);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->ix.ixnum);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (unlikely(msg->ix.ixlen > 0 && msg->ix.ix == NULL)) {
             abort();
@@ -2210,40 +2358,53 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = msg->ix.ixlen;
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = msg->ix.seq;
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         if (msg->ix.ix && msg->ix.ixlen > 0) {
             rc = sbuf2fwrite(msg->ix.ix, 1, msg->ix.ixlen, sb);
-            if (rc != msg->ix.ixlen)
+            if (rc != msg->ix.ixlen) {
+                if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
                 return FDB_ERR_WRITE_IO;
+            }
         }
 
         break;
 
     case FDB_MSG_HBEAT: {
         rc = sbuf2fwrite(msg->hb.tid, 1, idsz, sb);
-        if (rc != idsz)
+        if (rc != idsz) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         lltmp = flibc_htonll(msg->hb.timespec.tv_sec);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
-        if (rc != sizeof(lltmp))
+        if (rc != sizeof(lltmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
 
         tmp = htonl(msg->hb.timespec.tv_nsec);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
+        if (rc != sizeof(tmp)) {
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
+        }
     } break;
 
     default:
+        if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
         logmsg(LOGMSG_ERROR, "%s: unknown msg %d\n", __func__, type);
         return FDB_ERR_UNSUPPORTED;
     }
@@ -2258,9 +2419,11 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
             /*
                fprintf(stderr, "Ugh?\n");
             */
+            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
             return FDB_ERR_WRITE_IO;
         }
     }
+    if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
 
     /*
      t = osql_log_time();
