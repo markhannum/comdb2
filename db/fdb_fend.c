@@ -3795,6 +3795,7 @@ static fdb_tran_t *fdb_trans_dtran_get_subtran(struct sqlclntstate *clnt,
 
         /* need hbeats */
         Pthread_mutex_init(&tran->hbeats.sb_mtx, NULL);
+        sbuf2setuserptr(tran->sb, tran);
         tran->hbeats.tran = tran;
         enable_fdb_heartbeats(&tran->hbeats);
 
