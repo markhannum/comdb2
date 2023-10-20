@@ -3,7 +3,7 @@ nowatch
 maxosqltransfer 10000000
 
 # Long-deletes require long timeouts
-coordinator_timeout_ms 60000
+coordinator_timeout_ms 120000
 
 # 2pc requires utxnid & ufid log
 utxnid_log on
