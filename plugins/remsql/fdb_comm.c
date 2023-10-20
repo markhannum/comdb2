@@ -1772,7 +1772,10 @@ void fdb_msg_print_message(SBUF2 *sb, fdb_msg_t *msg, char *prefix)
 
 static int fdb_msg_write_error_message(pthread_mutex_t *sb_mtx, int line)
 {
-    if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
+    if (sb_mtx) {
+        logmsg(LOGMSG_USER, "DISTTXN errmsg unlocking mutex %p line %d\n", sb_mtx, line);
+        Pthread_mutex_unlock(sb_mtx);
+    }
     logmsg(LOGMSG_USER, "DISTTXN write-message error line %d\n", line);
     return FDB_ERR_WRITE_IO;
 }
@@ -1787,12 +1790,16 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     int idsz;
     int send_dk;
     fdb_tran_t *tran = (fdb_tran_t *)sbuf2getuserptr(sb);
-    pthread_mutex_t *sb_mtx = (tran && tran->hbeats.tran) ? &tran->hbeats.sb_mtx : NULL;
+    pthread_mutex_t *sb_mtx = (tran && !memcmp(tran->magic, "FDBT", 4) && tran->hbeats.tran) ?
+        &tran->hbeats.sb_mtx : NULL;
 
     assert (msg->hd.type & FD_MSG_FLAGS_ISUUID);
     //comdb2_cheapstack_sym(stderr, "%s writing message %d", __func__, msg->hd.type & FD_MSG_TYPE);
     logmsg(LOGMSG_USER, "DISTTXN %s writing message type %d\n", __func__, (msg->hd.type & FD_MSG_TYPE));
-    if (sb_mtx) Pthread_mutex_lock(sb_mtx);
+    if (sb_mtx)  {
+        logmsg(LOGMSG_USER, "DISTTXN %s locking mutex %p\n", __func__, sb_mtx);
+        Pthread_mutex_lock(sb_mtx);
+    }
 
     type = htonl(msg->hd.type);
 
@@ -2401,7 +2408,10 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
     } break;
 
     default:
-        if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
+        if (sb_mtx) {
+            logmsg(LOGMSG_USER, "DISTTXN unlocking mutex %p line %d\n", sb_mtx, __LINE__);
+            Pthread_mutex_unlock(sb_mtx);
+        }
         logmsg(LOGMSG_ERROR, "%s: unknown msg %d\n", __func__, type);
         return FDB_ERR_UNSUPPORTED;
     }
@@ -2416,11 +2426,18 @@ static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush)
             /*
                fprintf(stderr, "Ugh?\n");
             */
-            if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
+            if (sb_mtx) {
+                logmsg(LOGMSG_USER, "DISTTXN unlocking mutex %p line %d\n", sb_mtx, __LINE__);
+                Pthread_mutex_unlock(sb_mtx);
+            }
+
             return FDB_ERR_WRITE_IO;
         }
     }
-    if (sb_mtx) Pthread_mutex_unlock(sb_mtx);
+    if (sb_mtx) {
+        logmsg(LOGMSG_USER, "DISTTXN unlocking mutex %p line %d\n", sb_mtx, __LINE__);
+        Pthread_mutex_unlock(sb_mtx);
+    }
 
     /*
      t = osql_log_time();

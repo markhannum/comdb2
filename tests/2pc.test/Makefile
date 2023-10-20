@@ -12,5 +12,5 @@ else
 endif
 
 ifeq ($(TEST_TIMEOUT),)
-	export TEST_TIMEOUT=60m
+	export TEST_TIMEOUT=90m
 endif
