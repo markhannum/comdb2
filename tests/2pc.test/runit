@@ -271,6 +271,23 @@ commit
         [[ "$r" == "0" ]] || fail_exit "failed inserting iteration $j"
         let j=j+1
     done
+
+    # Verify that there are 10 records in each database
+    x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+    [[ "$x" != "10" ]] && fail_exit "$DBNAME has only $x records"
+
+    x=$($CDB2SQL_EXE -tabs $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "select count(*) from t1")
+    [[ "$x" != "10" ]] && fail_exit "$SECONDARY_DBNAME has only $x records"
+
+    x=$($CDB2SQL_EXE -tabs $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "select count(*) from t1")
+    [[ "$x" != "10" ]] && fail_exit "$TERTIARY_DBNAME has only $x records"
+
+    x=$($CDB2SQL_EXE -tabs $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "select count(*) from t1")
+    [[ "$x" != "10" ]] && fail_exit "$QUATERNARY_DBNAME has only $x records"
+
+    x=$($CDB2SQL_EXE -tabs $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "select count(*) from t1")
+    [[ "$x" != "10" ]] && fail_exit "$QUINARY_DBNAME has only $x records"
+
     delete_records
 }
 
