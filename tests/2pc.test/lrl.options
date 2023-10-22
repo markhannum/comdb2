@@ -57,3 +57,6 @@ gbl_extended_sql_debug_trace 1
 
 # extended fdb trace
 fdbdebg 1
+
+# extended bdb lock trace
+bdblock_debug 1
