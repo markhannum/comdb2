@@ -5,6 +5,9 @@ maxosqltransfer 10000000
 # Long-deletes require long timeouts
 coordinator_timeout_ms 240000
 
+# They also require long propagate window
+coordinator_propagate_timeout_ms 120000
+
 # 2pc requires utxnid & ufid log
 utxnid_log on
 ufid_log on
