@@ -5553,8 +5553,8 @@ void *watcher_thread(void *arg)
                 Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
             }
 
-            int backend_opened(void);
-            if (gbl_2pc && backend_opened()) {
+            extern int gbl_ready;
+            if (gbl_2pc && gbl_ready) {
                 disttxn_timer();
             }
         }

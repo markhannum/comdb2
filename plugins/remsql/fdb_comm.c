@@ -534,8 +534,7 @@ int fdb_recv_row_int(fdb_msg_t *msg, char *cid, SBUF2 *sb, const char *func, int
         logmsg(LOGMSG_ERROR, "%s: failed to receive remote row rc=%d (%s:%d)\n",
                __func__, rc, func, line);
         /* synthetic row containing the error */
-        //msg->hd.type = FDB_MSG_DATA_ROW;
-        msg->hd.type = (FDB_MSG_DATA_ROW | FD_MSG_FLAGS_ISUUID);
+        msg->hd.type = FDB_MSG_DATA_ROW;
         msg->dr.rc = FDB_ERR_READ_IO;
         msg->dr.data = strdup("failed to read row from socket");
         msg->dr.datalen = strlen(msg->rc.errstr) + 1;
@@ -550,9 +549,9 @@ int fdb_recv_row_int(fdb_msg_t *msg, char *cid, SBUF2 *sb, const char *func, int
         fdb_msg_print_message(sb, msg, "received message");
     }
 
-    //msg->hd.type &= FD_MSG_TYPE;
+    msg->hd.type &= FD_MSG_TYPE;
 
-    if ((msg->hd.type & FD_MSG_TYPE)!= FDB_MSG_DATA_ROW)
+    if (msg->hd.type != FDB_MSG_DATA_ROW)
         abort();
 
     return msg->dr.rc;
@@ -576,9 +575,9 @@ int fdb_recv_rc(fdb_msg_t *msg, fdb_tran_t *trans)
         fdb_msg_print_message(trans->sb, msg, "received message");
     }
 
-    //msg->hd.type &= FD_MSG_TYPE;
+    msg->hd.type &= FD_MSG_TYPE;
 
-    if ((msg->hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_RC)
+    if (msg->hd.type != FDB_MSG_TRAN_RC)
         abort();
 
     trans->rc = msg->rc.rc;
@@ -871,15 +870,12 @@ int fdb_msg_read_message_int(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags,
 
     msg->hd.type = ntohl(msg->hd.type);
 
-    assert (msg->hd.type & FD_MSG_FLAGS_ISUUID);
-
     fdb_msg_prepare_message(msg);
 
     /*fprintf(stderr, "XYXY returned from sbuf2fread %llu\n",
      * osql_log_time());*/
 
     assert (msg->hd.type & FD_MSG_FLAGS_ISUUID);
-
     idsz = sizeof(uuid_t);
 
     recv_dk = 0;
@@ -1770,12 +1766,6 @@ void fdb_msg_print_message(SBUF2 *sb, fdb_msg_t *msg, char *prefix)
     }
 }
 
-static int fdb_msg_write_error_message(int line)
-{
-    logmsg(LOGMSG_USER, "DISTTXN write-message error line %d\n", line);
-    return FDB_ERR_WRITE_IO;
-}
-
 /* stuff goes as network endian */
 static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 {
@@ -1787,7 +1777,6 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
     int send_dk;
 
     assert (msg->hd.type & FD_MSG_FLAGS_ISUUID);
-    //comdb2_cheapstack_sym(stderr, "%s writing message %d", __func__, msg->hd.type & FD_MSG_TYPE);
     logmsg(LOGMSG_USER, "DISTTXN %s writing message type %d\n", __func__, (msg->hd.type & FD_MSG_TYPE));
     type = htonl(msg->hd.type);
 
@@ -1796,8 +1785,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
     if (rc != sizeof(type)) {
         logmsg(LOGMSG_ERROR, "%s: failed to write header rc=%d\n", __func__,
                rc);
-        return fdb_msg_write_error_message(__LINE__);
-        //return FDB_ERR_WRITE_IO;
+        return FDB_ERR_WRITE_IO;
     }
 
     idsz = sizeof(uuid_t);
@@ -1808,55 +1796,55 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_TRAN_PREPARE:
         rc = sbuf2fwrite((char *)msg->tr.tid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->fp.lvl);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->fp.flags);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->fp.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         /* dist-txnid */
         tmp = htonl(strlen(msg->fp.dist_txnid) + 1);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = ntohl(tmp);
         rc = sbuf2fwrite((char *)msg->fp.dist_txnid, 1, tmp, sb);
         if (rc != tmp)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         /* coordinator-dbname */
         tmp = htonl(strlen(msg->fp.coordinator_dbname) + 1);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = ntohl(tmp);
         rc = sbuf2fwrite((char *)msg->fp.coordinator_dbname, 1, tmp, sb);
         if (rc != tmp)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         /* coordinator-tier */
         tmp = htonl(strlen(msg->fp.coordinator_tier) + 1);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = ntohl(tmp);
         rc = sbuf2fwrite((char *)msg->fp.coordinator_tier, 1, tmp, sb);
         if (rc != tmp)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         break;
 
@@ -1866,22 +1854,22 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite((char *)msg->tr.tid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->tr.lvl);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->tr.flags);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->tr.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         break;
 
@@ -1889,22 +1877,22 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite((char *)msg->rc.tid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->rc.rc);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->rc.errstrlen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (msg->rc.errstrlen && msg->rc.errstr) {
             rc = sbuf2fwrite(msg->rc.errstr, 1, msg->rc.errstrlen, sb);
             if (rc != msg->rc.errstrlen)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -1913,46 +1901,46 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite((char *)msg->co.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         rc = sbuf2fwrite((char *)msg->co.tid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->co.flags);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->co.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->co.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->co.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->co.srcpid);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->co.srcnamelen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (msg->co.srcname && msg->co.srcnamelen > 0) {
             rc = sbuf2fwrite(msg->co.srcname, 1, msg->co.srcnamelen, sb);
             if (rc != msg->co.srcnamelen)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
         if (msg->co.flags & FDB_MSG_CURSOR_OPEN_FLG_SSL) {
             /*fprintf(stderr, "Writing ssl %d size %d\n", msg->co.ssl,
@@ -1960,7 +1948,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
             tmp = htonl(msg->co.ssl);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
             if (rc != sizeof(tmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -1968,7 +1956,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_CURSOR_CLOSE: {
         rc = sbuf2fwrite(msg->cc.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         int haveid;
 
@@ -1979,7 +1967,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
             tmp = htonl(msg->cc.seq);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
             if (rc != sizeof(tmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -1992,7 +1980,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->cm.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         break;
 
@@ -2000,17 +1988,17 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->dr.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->dr.rc);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         lltmp = flibc_htonll(msg->dr.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (unlikely(msg->dr.datacopylen != 0))
             abort();
@@ -2019,12 +2007,12 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (msg->dr.data && msg->dr.datalen > 0) {
             rc = sbuf2fwrite(msg->dr.data, 1, msg->dr.datalen, sb);
             if (rc != msg->dr.datalen)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
         break;
 
@@ -2033,24 +2021,24 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->cf.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->cf.keylen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         assert(msg->cf.keylen > 0); /* TODO: 0 for match any ? */
         rc = sbuf2fwrite(msg->cf.key, 1, msg->cf.keylen, sb);
         if (rc != msg->cf.keylen)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         break;
 
     case FDB_MSG_RUN_SQL:
         rc = sbuf2fwrite(msg->sq.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
         /*
         rc = sbuf2flush(sb);
         if (rc<=0)
@@ -2063,7 +2051,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(msg->sq.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -2076,7 +2064,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(msg->sq.flags);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -2089,7 +2077,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(msg->sq.sqllen);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -2101,7 +2089,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->sq.sql, 1, msg->sq.sqllen, sb);
         if (rc != msg->sq.sqllen)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
         /*
      rc = sbuf2flush(sb);
      if (rc<=0)
@@ -2115,7 +2103,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
             tmp = htonl(msg->sq.keylen);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
             if (rc != sizeof(tmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
             /*
          rc = sbuf2flush(sb);
          if (rc<=0)
@@ -2127,7 +2115,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
             rc = sbuf2fwrite(msg->sq.key, 1, msg->sq.keylen, sb);
             if (rc != msg->sq.keylen)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -2139,28 +2127,28 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->in.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->in.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->in.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         lltmp = flibc_htonll(msg->in.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (send_dk) {
             lltmp = flibc_htonll(msg->in.ins_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
             if (rc != sizeof(lltmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         if (unlikely(msg->in.datalen > 0 && msg->in.data == NULL)) {
@@ -2171,18 +2159,18 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = msg->in.seq;
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (msg->in.data && msg->in.datalen > 0) {
             rc = sbuf2fwrite(msg->in.data, 1, msg->in.datalen, sb);
             if (rc != msg->in.datalen)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         if (msg->in.tblname) {
@@ -2190,11 +2178,11 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
             tmp = htonl(tmp);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
             if (rc != sizeof(tmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
             tmp = ntohl(tmp);
             rc = sbuf2fwrite(msg->in.tblname, 1, tmp, sb);
             if (rc != tmp)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -2206,45 +2194,45 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->de.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->de.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->de.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         lltmp = flibc_htonll(msg->de.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (send_dk) {
             lltmp = flibc_htonll(msg->de.del_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
             if (rc != sizeof(lltmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         tmp = htonl(msg->de.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (msg->de.tblname) {
             tmp = strlen(msg->de.tblname) + 1;
             tmp = htonl(tmp);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
             if (rc != sizeof(tmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
             tmp = ntohl(tmp);
             rc = sbuf2fwrite(msg->de.tblname, 1, tmp, sb);
             if (rc != tmp)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -2256,38 +2244,38 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->up.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->up.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->up.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         lltmp = flibc_htonll(msg->up.oldgenid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         lltmp = flibc_htonll(msg->up.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (send_dk) {
             lltmp = flibc_htonll(msg->up.ins_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
             if (rc != sizeof(lltmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
 
             lltmp = flibc_htonll(msg->up.del_keys);
             rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
             if (rc != sizeof(lltmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         if (unlikely(msg->up.datalen > 0 && msg->up.data == NULL)) {
@@ -2298,17 +2286,17 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->up.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (msg->up.data && msg->up.datalen > 0) {
             rc = sbuf2fwrite(msg->up.data, 1, msg->up.datalen, sb);
             if (rc != msg->up.datalen)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         if (msg->up.tblname) {
@@ -2316,11 +2304,11 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
             tmp = htonl(tmp);
             rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
             if (rc != sizeof(tmp))
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
             tmp = ntohl(tmp);
             rc = sbuf2fwrite(msg->up.tblname, 1, tmp, sb);
             if (rc != tmp)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -2329,32 +2317,32 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
         rc = sbuf2fwrite(msg->ix.cid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->ix.version);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->ix.rootpage);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         lltmp = flibc_htonll(msg->ix.genid);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->ix.is_delete);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->ix.ixnum);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (unlikely(msg->ix.ixlen > 0 && msg->ix.ix == NULL)) {
             abort();
@@ -2364,18 +2352,18 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = msg->ix.seq;
         tmp = htonl(tmp);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         if (msg->ix.ix && msg->ix.ixlen > 0) {
             rc = sbuf2fwrite(msg->ix.ix, 1, msg->ix.ixlen, sb);
             if (rc != msg->ix.ixlen)
-                return fdb_msg_write_error_message(__LINE__);
+                return FDB_ERR_WRITE_IO;
         }
 
         break;
@@ -2383,17 +2371,17 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
     case FDB_MSG_HBEAT: {
         rc = sbuf2fwrite(msg->hb.tid, 1, idsz, sb);
         if (rc != idsz)
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         lltmp = flibc_htonll(msg->hb.timespec.tv_sec);
         rc = sbuf2fwrite((char *)&lltmp, 1, sizeof(lltmp), sb);
         if (rc != sizeof(lltmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
 
         tmp = htonl(msg->hb.timespec.tv_nsec);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
-            return fdb_msg_write_error_message(__LINE__);
+            return FDB_ERR_WRITE_IO;
     } break;
 
     default:
@@ -3299,12 +3287,12 @@ static int handle_remsql_session(SBUF2 *sb, struct dbenv *dbenv)
     }
 
     flags = msg.hd.type & ~FD_MSG_TYPE;
-    //msg.hd.type &= FD_MSG_TYPE;
+    msg.hd.type &= FD_MSG_TYPE;
 
-    if ((msg.hd.type & FD_MSG_TYPE) != FDB_MSG_CURSOR_OPEN) {
+    if (msg.hd.type != FDB_MSG_CURSOR_OPEN) {
         logmsg(LOGMSG_ERROR,
                "%s: received wrong packet type=%d, expecting cursor open\n",
-               __func__, (msg.hd.type & FD_MSG_TYPE));
+               __func__, msg.hd.type);
         return -1;
     }
 
@@ -3339,9 +3327,9 @@ static int handle_remsql_session(SBUF2 *sb, struct dbenv *dbenv)
             fdb_msg_print_message(sb, &msg, "received msg");
         }
 
-        rc = callbacks[(msg.hd.type & FD_MSG_TYPE)](sb, &msg, &arg);
+        rc = callbacks[msg.hd.type](sb, &msg, &arg);
 
-        if ((msg.hd.type & FD_MSG_TYPE) == FDB_MSG_CURSOR_CLOSE) {
+        if (msg.hd.type == FDB_MSG_CURSOR_CLOSE) {
             break;
         }
         if (rc != 0) {
@@ -3366,7 +3354,7 @@ static int handle_remsql_session(SBUF2 *sb, struct dbenv *dbenv)
         }
 
         flags = msg.hd.type & ~FD_MSG_TYPE;
-        //msg.hd.type &= FD_MSG_TYPE;
+        msg.hd.type &= FD_MSG_TYPE;
     }
 
     fdb_msg_clean_message(&msg);
