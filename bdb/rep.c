@@ -5554,7 +5554,7 @@ void *watcher_thread(void *arg)
             }
 
             int backend_opened(void);
-            if (gbl_2pc && backend_opened()) {
+            if (gbl_2pc && gbl_ready) {
                 disttxn_timer();
             }
         }
