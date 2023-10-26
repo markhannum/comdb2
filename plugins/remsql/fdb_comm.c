@@ -407,35 +407,6 @@ char *fdb_msg_type(int type)
     }
 }
 
-int fdb_send_tran_2pc_rc(fdb_msg_t *msg, int version, char *tid, int rcode, char *errstr, SBUF2 *sb)
-{
-    int rc;
-    fdb_msg_clean_message(msg);
-
-    msg->hd.type = FDB_MSG_TRAN_2PC_RC;
-
-    msg->rv.version = version;
-    msg->rv.tid = tid;
-    msg->rv.rc = rcode;
-    msg->rv.errstrlen = (errstr ? strlen(errstr) + 1 : 0);
-    msg->rv.errstr = errstr;
-    msg->hd.type |= FD_MSG_FLAGS_ISUUID;
-
-    rc = fdb_msg_write_message(sb, msg, 1);
-    if (rc) {
-        logmsg(LOGMSG_ERROR,
-               "%s: failed sending fdb 2pc-rc message rc=%d\n", __func__, rc);
-        return rc;
-    }
-
-    if (gbl_fdb_track) {
-        fdb_msg_print_message(sb, msg, "sending 2pc rc");
-    }
-
-    return 0;
-
-}
-
 int fdb_send_open(fdb_msg_t *msg, char *cid, fdb_tran_t *trans, int rootp,
                   int flags, int version, SBUF2 *sb)
 {
@@ -2717,6 +2688,36 @@ static enum svc_move_types move_type(int type)
     return -1;
 }
 
+int fdb_send_tran_2pc_rc(int version, char *tid, int rcode, char *errstr, SBUF2 *sb)
+{
+    int rc;
+    fdb_msg_t lcl_msg = {0}, *msg = &lcl_msg;;
+
+    msg->hd.type = FDB_MSG_TRAN_2PC_RC | FD_MSG_FLAGS_ISUUID;
+    fdb_msg_prepare_message(msg);
+
+    memcpy(msg->rv.tid, tid, sizeof(uuid_t));
+
+    msg->rv.version = version;
+    msg->rv.rc = rcode;
+    msg->rv.errstrlen = (errstr ? strlen(errstr) + 1 : 0);
+    msg->rv.errstr = errstr;
+    msg->hd.type |= FD_MSG_FLAGS_ISUUID;
+
+    rc = fdb_msg_write_message(sb, msg, 1);
+    if (rc) {
+        logmsg(LOGMSG_ERROR,
+               "%s: failed sending fdb 2pc-rc message rc=%d\n", __func__, rc);
+        return rc;
+    }
+
+    if (gbl_fdb_track) {
+        fdb_msg_print_message(sb, msg, "sending 2pc rc");
+    }
+
+    return 0;
+}
+
 int fdb_bend_send_row(SBUF2 *sb, fdb_msg_t *msg, char *cid, unsigned long long genid, char *data, int datalen,
                       char *datacopy, int datacopylen, int ret)
 {
@@ -3361,7 +3362,8 @@ int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     enum transaction_level lvl = msg->tv.lvl;
     int flags = msg->tv.flags;
     int seq = msg->tv.seq;
-    // TODO
+
+    // TODO .. theres only one version right now
     //int version = msg->tv.version;
     int rc = 0;
     struct sqlclntstate *clnt;
@@ -3408,6 +3410,7 @@ int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
         }
     }
     /* Send response with my version */
+    fdb_send_tran_2pc_rc(FDB_2PC_VER, tid, rc, NULL, sb);
 
     return rc;
 }
@@ -3715,7 +3718,7 @@ int handle_rem2pc_request(comdb2_appsock_arg_t *arg)
         return rc;
     }
 
-    if ((msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_BEGIN) {
+    if ((msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_2PC_BEGIN) {
         logmsg(LOGMSG_ERROR,
                "%s: received wrong packet type=%d, expecting tran begin\n",
                __func__, (msg.hd.type & FD_MSG_TYPE));
