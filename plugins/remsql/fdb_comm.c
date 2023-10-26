@@ -73,6 +73,7 @@ enum {
 
     FDB_MSG_INDEX = 23,
 
+    FDB_MSG_TRAN_2PC_BEGIN = 24,
     FDB_MSG_MAX_OP
 };
 
@@ -105,6 +106,16 @@ typedef struct {
     int seq; /* sequencing tran begin/commit/rollback, writes, cursor open/close
               */
 } fdb_msg_tran_t;
+
+typedef struct {
+    fdb_msg_header_t type;      /* FDB_MSG_TRAN_BEGIN, ... */
+    int version;                /* protocol version */
+    char *tid;                  /* transaction id */
+    enum transaction_level lvl; /* TRANLEVEL_SOSQL & co. */
+    int flags;                  /* extensions */
+    uuid_t tiduuid;
+    int seq; 
+} fdb_msg_2pc_tran_t;
 
 typedef struct {
     fdb_msg_header_t type; /* FDB_MS_TRAN_RC */
@@ -259,6 +270,7 @@ union fdb_msg {
     fdb_msg_index_t ix;
     fdb_msg_hbeat_t hb;
     fdb_msg_prep_t fp;
+    fdb_msg_2pc_tran_t tv;
 };
 
 enum { FD_MSG_TYPE = 0x0fff, FD_MSG_FLAGS_ISUUID = 0x1000 };
@@ -934,6 +946,35 @@ int fdb_msg_read_message_int(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags,
             return -1;
 
         break;
+
+    case FDB_MSG_TRAN_2PC_BEGIN:
+
+        rc = sbuf2fread((char *)&msg->tv.version, 1, sizeof(msg->tv.version), sb);
+        if (rc != sizeof(msg->tv.version))
+            return -1;
+        msg->tv.version = ntohl(msg->tv.version);
+
+        rc = sbuf2fread(msg->tv.tid, 1, idsz, sb);
+        if (rc != idsz)
+            return -1;
+
+        rc = sbuf2fread((char *)&msg->tv.lvl, 1, sizeof(msg->tv.lvl), sb);
+        if (rc != sizeof(msg->tv.lvl))
+            return -1;
+        msg->tv.lvl = ntohl(msg->tv.lvl);
+
+        rc = sbuf2fread((char *)&msg->tv.flags, 1, sizeof(msg->tv.flags), sb);
+        if (rc != sizeof(msg->tv.flags))
+            return -1;
+        msg->tv.flags = ntohl(msg->tv.flags);
+
+        rc = sbuf2fread((char *)&msg->tv.seq, 1, sizeof(msg->tv.seq), sb);
+        if (rc != sizeof(msg->tv.seq))
+            return -1;
+        msg->tv.seq = ntohl(msg->tv.seq);
+
+        break;
+
     case FDB_MSG_TRAN_BEGIN:
     case FDB_MSG_TRAN_COMMIT:
     case FDB_MSG_TRAN_ROLLBACK:
@@ -1844,6 +1885,34 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = ntohl(tmp);
         rc = sbuf2fwrite((char *)msg->fp.coordinator_tier, 1, tmp, sb);
         if (rc != tmp)
+            return FDB_ERR_WRITE_IO;
+
+        break;
+
+    case FDB_MSG_TRAN_2PC_BEGIN:
+
+        tmp = htonl(msg->tv.version);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        rc = sbuf2fwrite((char *)msg->tv.tid, 1, idsz, sb);
+        if (rc != idsz)
+            return FDB_ERR_WRITE_IO;
+
+        tmp = htonl(msg->tv.lvl);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        tmp = htonl(msg->tv.flags);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        tmp = htonl(msg->tv.seq);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
             return FDB_ERR_WRITE_IO;
 
         break;
@@ -3428,6 +3497,118 @@ int handle_remsql_request(comdb2_appsock_arg_t *arg)
     }
     if (gbl_fdb_track)
         logmsg(LOGMSG_USER, "%p: %s: done processing\n", (void *)pthread_self(), __func__);
+
+    return rc;
+}
+
+int handle_rem2pc_request(comdb2_appsock_arg_t *arg)
+{
+    struct sbuf2 *sb;
+    fdb_msg_tran_t open_msg;
+    fdb_msg_t msg;
+    int rc = 0;
+    svc_callback_arg_t svc_cb_arg = {0};
+
+    sb = arg->sb;
+
+    bzero(&msg, sizeof(msg));
+
+    /* This does insert on behalf of an sql transaction */
+    svc_cb_arg.thd = start_sql_thread();
+
+    extern int gbl_fdb_socket_timeout_ms;
+    sbuf2settimeout(sb, gbl_fdb_socket_timeout_ms, gbl_fdb_socket_timeout_ms);
+
+    rc = fdb_msg_read_message(sb, &msg, 0);
+    if (rc) {
+        logmsg(LOGMSG_ERROR, "%s: failed to handle remote cursor request rc=%d\n", __func__, rc);
+        return rc;
+    }
+
+    if ((msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_BEGIN) {
+        logmsg(LOGMSG_ERROR,
+               "%s: received wrong packet type=%d, expecting tran begin\n",
+               __func__, (msg.hd.type & FD_MSG_TYPE));
+        return -1;
+    }
+
+    memcpy(&open_msg, &msg, sizeof open_msg);
+    open_msg.tid = (char *)open_msg.tiduuid;
+    uuidstr_t us;
+    comdb2uuidstr((unsigned char *)open_msg.tid, us);
+
+    /* TODO: review the no-timeout transaction later on */
+    if (gbl_notimeouts) {
+        sbuf2settimeout(sb, 0, 0);
+        /*   net_add_watch(sb, 0, 0); */
+    }
+
+    while (1) {
+        int msg_type;
+
+        if (gbl_fdb_track) {
+            fdb_msg_print_message(sb, &msg, "received msg");
+        }
+
+        msg_type = (msg.hd.type & FD_MSG_TYPE);
+
+        rc = callbacks[msg_type](sb, &msg, &svc_cb_arg);
+
+        if (msg_type == FDB_MSG_TRAN_COMMIT || msg_type == FDB_MSG_TRAN_PREPARE || msg_type == FDB_MSG_TRAN_ROLLBACK) {
+            /* Sanity check:
+             * The msg buffer is reused for response, thus in some cases,
+             * the type it initially stored, could change.
+             * This check ensures that the change adheres with the design.
+             */
+            if (msg_type == FDB_MSG_TRAN_COMMIT &&
+                (msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_RC) {
+                abort();
+            }
+            break;
+        }
+
+        if (rc != 0) {
+            int rc2;
+        clear:
+            /* Bail-out if we failed early. */
+            if (svc_cb_arg.clnt == 0) {
+                goto done;
+            }
+
+            rc2 = fdb_svc_trans_rollback(
+                open_msg.tid, open_msg.lvl, svc_cb_arg.clnt,
+                svc_cb_arg.clnt->dbtran.dtran->fdb_trans.top->seq);
+            if (rc2) {
+                logmsg(LOGMSG_ERROR,
+                       "%s: fdb_svc_trans_rollback failed rc=%d\n", __func__,
+                       rc2);
+            }
+            break;
+        }
+
+        /*fprintf(stderr, "XYXY %llu calling recv message\n",
+         * osql_log_time());*/
+        rc = fdb_msg_read_message(sb, &msg, svc_cb_arg.flags);
+        if (rc) {
+            logmsg(LOGMSG_ERROR,
+                   "%s: failed to handle remote cursor request rc=%d\n",
+                   __func__, rc);
+            goto clear;
+        }
+    }
+
+    if (gbl_expressions_indexes) {
+        free(svc_cb_arg.clnt->idxInsert);
+        free(svc_cb_arg.clnt->idxDelete);
+        svc_cb_arg.clnt->idxInsert = svc_cb_arg.clnt->idxDelete = NULL;
+    }
+
+    cleanup_clnt(svc_cb_arg.clnt);
+    free(svc_cb_arg.clnt);
+    svc_cb_arg.clnt = NULL;
+
+done:
+    done_sql_thread();
 
     return rc;
 }
