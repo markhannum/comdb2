@@ -74,6 +74,7 @@ enum {
     FDB_MSG_INDEX = 23,
 
     FDB_MSG_TRAN_2PC_BEGIN = 24,
+    FDB_MSG_TRAN_2PC_RC = 25,
     FDB_MSG_MAX_OP
 };
 
@@ -114,7 +115,7 @@ typedef struct {
     enum transaction_level lvl; /* TRANLEVEL_SOSQL & co. */
     int flags;                  /* extensions */
     uuid_t tiduuid;
-    int seq; 
+    int seq;
 } fdb_msg_2pc_tran_t;
 
 typedef struct {
@@ -125,6 +126,16 @@ typedef struct {
     uuid_t tiduuid;
     char *errstr; /* error string, if any */
 } fdb_msg_tran_rc_t;
+
+typedef struct {
+    fdb_msg_header_t type; /* FDB_MS_TRAN_RC */
+    int version;           /* protocol version */
+    char *tid;             /* transaction id */
+    int rc;                /* result code */
+    int errstrlen;         /* error string length */
+    uuid_t tiduuid;
+    char *errstr; /* error string, if any */
+} fdb_msg_tran_2pc_rc_t;
 
 typedef struct {
     fdb_msg_header_t type;    /* FDB_MSG_DATA_ROW */
@@ -261,6 +272,7 @@ union fdb_msg {
     fdb_msg_cursor_move_t cm;
     fdb_msg_tran_t tr;
     fdb_msg_tran_rc_t rc;
+    fdb_msg_tran_2pc_rc_t rv;
     fdb_msg_data_row_t dr;
     fdb_msg_cursor_find_t cf;
     fdb_msg_run_sql_t sq;
@@ -288,10 +300,12 @@ void free_cached_idx(uint8_t **cached_idx);
 static int fdb_msg_write_message(SBUF2 *sb, fdb_msg_t *msg, int flush);
 
 int fdb_bend_trans_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
+int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_trans_prepare(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_trans_commit(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_trans_rollback(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_trans_rc(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
+int fdb_bend_trans_2pc_rc(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_cursor_open(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_cursor_close(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_cursor_find(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
@@ -327,7 +341,10 @@ fdb_svc_callback_t callbacks[] = {
     fdb_bend_insert,       fdb_bend_delete,
     fdb_bend_update,
 
-    fdb_bend_index};
+    fdb_bend_index,
+
+    fdb_bend_trans_2pc_begin
+};
 
 char *fdb_msg_type(int type)
 {
@@ -340,6 +357,10 @@ char *fdb_msg_type(int type)
         return "FDB_MSG_TRAN_COMMIT";
     case FDB_MSG_TRAN_ROLLBACK:
         return "FDB_MSG_TRAN_ROLLBACK";
+    case FDB_MSG_TRAN_2PC_BEGIN:
+        return "FDB_MSG_TRAN_2PC_BEGIN";
+    case FDB_MSG_TRAN_2PC_RC:
+        return "FDB_MSG_TRAN_2PC_RC";
     case FDB_MSG_TRAN_RC:
         return "FDB_MSG_TRAN_RC";
     case FDB_MSG_CURSOR_OPEN:
@@ -384,6 +405,35 @@ char *fdb_msg_type(int type)
     default:
         return "???";
     }
+}
+
+int fdb_send_tran_2pc_rc(fdb_msg_t *msg, int version, char *tid, int rcode, char *errstr, SBUF2 *sb)
+{
+    int rc;
+    fdb_msg_clean_message(msg);
+
+    msg->hd.type = FDB_MSG_TRAN_2PC_RC;
+
+    msg->rv.version = version;
+    msg->rv.tid = tid;
+    msg->rv.rc = rcode;
+    msg->rv.errstrlen = (errstr ? strlen(errstr) + 1 : 0);
+    msg->rv.errstr = errstr;
+    msg->hd.type |= FD_MSG_FLAGS_ISUUID;
+
+    rc = fdb_msg_write_message(sb, msg, 1);
+    if (rc) {
+        logmsg(LOGMSG_ERROR,
+               "%s: failed sending fdb 2pc-rc message rc=%d\n", __func__, rc);
+        return rc;
+    }
+
+    if (gbl_fdb_track) {
+        fdb_msg_print_message(sb, msg, "sending 2pc rc");
+    }
+
+    return 0;
+
 }
 
 int fdb_send_open(fdb_msg_t *msg, char *cid, fdb_tran_t *trans, int rootp,
@@ -656,9 +706,19 @@ void fdb_msg_clean_message(fdb_msg_t *msg)
             msg->fp.coordinator_tier = NULL;
         }
         break;
+
     case FDB_MSG_TRAN_BEGIN:
     case FDB_MSG_TRAN_COMMIT:
     case FDB_MSG_TRAN_ROLLBACK:
+    case FDB_MSG_TRAN_2PC_BEGIN:
+        break;
+
+    case FDB_MSG_TRAN_2PC_RC:
+        if (msg->rv.errstrlen && msg->rv.errstr) {
+            free(msg->rv.errstr);
+            msg->rv.errstr = NULL;
+            msg->rv.errstrlen = 0;
+        }
         break;
 
     case FDB_MSG_TRAN_RC:
@@ -777,6 +837,14 @@ static void fdb_msg_prepare_message(fdb_msg_t *msg)
     switch (msg->hd.type & FD_MSG_TYPE) {
     case FDB_MSG_TRAN_PREPARE:
         msg->fp.tid = (char *)msg->fp.tiduuid;
+        break;
+
+    case FDB_MSG_TRAN_2PC_BEGIN:
+        msg->tv.tid = (char *)msg->tv.tiduuid;
+        break;
+
+    case FDB_MSG_TRAN_2PC_RC:
+        msg->rv.tid = (char *)msg->rv.tiduuid;
         break;
 
     case FDB_MSG_TRAN_BEGIN:
@@ -997,6 +1065,42 @@ int fdb_msg_read_message_int(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags,
         if (rc != sizeof(msg->tr.seq))
             return -1;
         msg->tr.seq = ntohl(msg->tr.seq);
+
+        break;
+
+    case FDB_MSG_TRAN_2PC_RC:
+
+        rc = sbuf2fread((char *)&msg->rv.version, 1, sizeof(msg->rv.version), sb);
+        if (rc != sizeof(msg->rv.version))
+            return -1;
+        msg->rv.version = ntohl(msg->rv.version);
+
+        rc = sbuf2fread((char *)msg->rv.tid, 1, idsz, sb);
+        if (rc != idsz)
+            return -1;
+
+        rc = sbuf2fread((char *)&msg->rv.rc, 1, sizeof(msg->rv.rc), sb);
+        if (rc != sizeof(msg->rv.rc))
+            return -1;
+        msg->rv.rc = ntohl(msg->rv.rc);
+
+        rc = sbuf2fread((char *)&msg->rv.errstrlen, 1,
+                        sizeof(msg->rv.errstrlen), sb);
+        if (rc != sizeof(msg->rv.errstrlen))
+            return -1;
+        msg->rv.errstrlen = ntohl(msg->rv.errstrlen);
+
+        if (msg->rv.errstrlen) {
+            msg->rv.errstr = (char *)malloc(msg->rv.errstrlen);
+            if (!msg->rv.errstr)
+                return -1;
+
+            rc = sbuf2fread(msg->rv.errstr, 1, msg->rv.errstrlen, sb);
+            if (rc != msg->rv.errstrlen)
+                return -1;
+        } else {
+            msg->rv.errstr = NULL;
+        }
 
         break;
 
@@ -1941,6 +2045,36 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
             return FDB_ERR_WRITE_IO;
 
         break;
+
+    case FDB_MSG_TRAN_2PC_RC:
+
+        tmp = htonl(msg->rv.version);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        rc = sbuf2fwrite((char *)msg->rv.tid, 1, idsz, sb);
+        if (rc != idsz)
+            return FDB_ERR_WRITE_IO;
+
+        tmp = htonl(msg->rv.rc);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        tmp = htonl(msg->rv.errstrlen);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        if (msg->rv.errstrlen && msg->rv.errstr) {
+            rc = sbuf2fwrite(msg->rv.errstr, 1, msg->rv.errstrlen, sb);
+            if (rc != msg->rv.errstrlen)
+                return FDB_ERR_WRITE_IO;
+        }
+
+        break;
+
 
     case FDB_MSG_TRAN_RC:
 
@@ -3221,6 +3355,63 @@ int fdb_bend_trans_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     return rc;
 }
 
+int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
+{
+    char *tid = msg->tv.tid;
+    enum transaction_level lvl = msg->tv.lvl;
+    int flags = msg->tv.flags;
+    int seq = msg->tv.seq;
+    // TODO
+    //int version = msg->tv.version;
+    int rc = 0;
+    struct sqlclntstate *clnt;
+
+    //fdb_msg_tran_2pc_rc_t tv;
+
+    /* TODO: return -1 or a message ? */
+    if (gbl_fdb_incoherence_percentage) {
+        if (gbl_fdb_incoherence_percentage <= (rand() % 100)) {
+            logmsg(LOGMSG_ERROR, "Test incoherent rejection\n");
+            return -1;
+        }
+    }
+
+    if (!bdb_am_i_coherent(thedb->bdb_env)) {
+        if (comdb2uuid_is_zero((unsigned char *)msg->tv.tid)) {
+            logmsg(LOGMSG_ERROR, "Rejecting 2pc transaction, node incoherent\n");
+            return -1;
+        }
+    }
+
+    rc = fdb_svc_trans_begin(tid, lvl, flags, seq, arg->thd, &clnt);
+
+    /* clnt gets set to NULL on error. */
+    arg->clnt = clnt;
+
+    if (!rc) {
+        arg->flags = flags;
+        if (gbl_expressions_indexes) {
+            if (clnt->idxInsert || clnt->idxDelete) {
+                free_cached_idx(clnt->idxInsert);
+                free_cached_idx(clnt->idxDelete);
+                free(clnt->idxInsert);
+                free(clnt->idxDelete);
+                clnt->idxInsert = clnt->idxDelete = NULL;
+            }
+            clnt->idxInsert = calloc(MAXINDEX, sizeof(uint8_t *));
+            clnt->idxDelete = calloc(MAXINDEX, sizeof(uint8_t *));
+            if (!clnt->idxInsert || !clnt->idxDelete) {
+                logmsg(LOGMSG_ERROR, "%s:%d malloc failed\n", __func__,
+                       __LINE__);
+                return -1;
+            }
+        }
+    }
+    /* Send response with my version */
+
+    return rc;
+}
+
 int fdb_bend_trans_commit(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
 {
     char *tid = msg->tr.tid;
@@ -3381,7 +3572,6 @@ static int handle_remsql_session(SBUF2 *sb, struct dbenv *dbenv)
             return -1;
         }
     }
-
 
     /* check and protect against newer versions */
     if (_check_code_release(sb, open_msg.cid, open_msg.rootpage)) {

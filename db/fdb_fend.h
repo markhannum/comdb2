@@ -71,8 +71,9 @@
 #define FDB_VER_SSL 4
 #define FDB_VER_PROXY 5
 
-
 #define FDB_VER FDB_VER_PROXY
+
+#define FDB_2PC_VER 1
 
 /* cc2 ftw */
 #define fdb_ver_encoded(ver) (-(ver + 1))
