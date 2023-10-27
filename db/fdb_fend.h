@@ -71,6 +71,7 @@
 #define FDB_VER_SSL 4
 #define FDB_VER_PROXY 5
 
+
 #define FDB_VER FDB_VER_PROXY
 
 #define FDB_2PC_VER 1
@@ -197,6 +198,7 @@ struct fdb_tran {
      * libevent heartbeats
      */
     fdb_hbeats_type hbeats;
+    int rmt2pcvers;
 };
 typedef struct fdb_tran fdb_tran_t;
 
