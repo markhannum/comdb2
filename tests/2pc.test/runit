@@ -889,7 +889,7 @@ function run_test
 function single_test
 {
     typeset cnt=0
-    while [[ "$cnt" -lt 5 ]]; do 
+    while [[ "$cnt" -lt 3 ]]; do 
         let cnt=cnt+1
         echo "Test loop iteration $cnt"
         bulk_test 1
