@@ -3479,10 +3479,8 @@ int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     }
 
     if (!bdb_am_i_coherent(thedb->bdb_env)) {
-        if (comdb2uuid_is_zero((unsigned char *)msg->tv.tid)) {
-            logmsg(LOGMSG_ERROR, "Rejecting 2pc transaction, node incoherent\n");
-            return -1;
-        }
+        logmsg(LOGMSG_ERROR, "Rejecting 2pc transaction, node incoherent\n");
+        return -1;
     }
 
     rc = fdb_svc_trans_begin(tid, lvl, flags, seq, arg->thd, &clnt);
