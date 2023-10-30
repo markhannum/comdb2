@@ -33,6 +33,9 @@ disttxn_enable_handle_cache 1
 setattr REP_WORKERS 0
 setattr REP_PROCESSORS 0
 
+# Im testing large txns on slow machines
+setattr OSQL_MAX_COMMIT_WAIT_SEC 1200
+
 # Try to understand the 'lie about failure' case I'm seeing
 dump_blkseq 1
 
