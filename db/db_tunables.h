@@ -238,6 +238,10 @@ REGISTER_TUNABLE("coordinator_timeout_ms", "Coordinator timeout for 2pc.  (Defau
                  &gbl_coordinator_timeout_ms, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("coordinator_propagate_timeout_ms", "Coordinator max wait for propagating txns.  (Default: 5000ms)",
                  TUNABLE_INTEGER, &gbl_coordinator_propagate_timeout_ms, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("coordinator_notify", "Coordinator notify algorithm.  (Default: postcommit)", TUNABLE_ENUM,
+                 &gbl_coordinator_notify, 0, coordinator_notify_value, NULL, coordinator_notify_update, NULL);
+REGISTER_TUNABLE("coordinator_verify_retry", "Coordinator can retry on verify errors.  (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_coordinator_verify_retry, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug_exit_participant_after_prepare", "Participant exits after successful prepare.  (Default: off)",
                  TUNABLE_BOOLEAN, &gbl_debug_exit_participant_after_prepare, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL,
                  NULL);
@@ -261,8 +265,6 @@ REGISTER_TUNABLE("disttxn_async_prepare", "Send prepare asynchronously.  (Defaul
                  &gbl_disttxn_async_prepare, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("disttxn_async_messages", "Send disttxn messages asynchronously.  (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_disttxn_async_messages, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("coordinator_notify", "Coordinator notify algorithm.  (Default: postcommit)", TUNABLE_ENUM,
-                 &gbl_coordinator_notify, 0, coordinator_notify_value, NULL, coordinator_notify_update, NULL);
 REGISTER_TUNABLE("disable_prefault_udp", "Disables 'enable_prefault_udp'", TUNABLE_BOOLEAN, &gbl_prefault_udp,
                  INVERSE_VALUE | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("disable_replicant_latches", "Disables 'replicant_latches'", TUNABLE_BOOLEAN, &gbl_replicant_latches,
@@ -1333,18 +1335,12 @@ REGISTER_TUNABLE("debug.random_sql_work_rejected",
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug.osql_random_restart", "randomly restart osql operations",
                  TUNABLE_BOOLEAN, &gbl_osql_random_restart, NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("debug.toblock_random_deadlock_trans",
-                 "return deadlock for a fraction of txns", TUNABLE_BOOLEAN,
-                 &gbl_toblock_random_deadlock_trans, NOARG, NULL, NULL, NULL,
-                 NULL);
-REGISTER_TUNABLE("debug.toblock_random_verify_error",
-                 "return verify error for a fraction of txns", TUNABLE_BOOLEAN,
-                 &gbl_toblock_random_verify_error, NOARG, NULL, NULL, NULL,
-                 NULL);
-REGISTER_TUNABLE("debug.tmptbl_corrupt_mem",
-                 "Deliberately corrupt memory before freeing", TUNABLE_BOOLEAN,
-                 &gbl_debug_tmptbl_corrupt_mem, INTERNAL, NULL, NULL, NULL,
-                 NULL);
+REGISTER_TUNABLE("debug.toblock_random_deadlock_trans", "return deadlock for a fraction of txns", TUNABLE_BOOLEAN,
+                 &gbl_toblock_random_deadlock_trans, NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug.toblock_random_verify_error", "return verify error for a fraction of txns", TUNABLE_BOOLEAN,
+                 &gbl_toblock_random_verify_error, NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug.tmptbl_corrupt_mem", "Deliberately corrupt memory before freeing", TUNABLE_BOOLEAN,
+                 &gbl_debug_tmptbl_corrupt_mem, INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug.omit_dta_write",
                  "Deliberately corrupt insertion randomly to debug db_verify", TUNABLE_BOOLEAN,
                  &gbl_debug_omit_dta_write, INTERNAL, NULL, NULL, NULL,
@@ -1436,13 +1432,10 @@ REGISTER_TUNABLE("write_dummy_trace", "Print trace when doing a dummy write. (De
                  &gbl_write_dummy_trace, INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("seed_genid", "Set genid-seed in hex for genid48 test.", TUNABLE_STRING, NULL, EXPERIMENTAL | INTERNAL,
                  next_genid_value, NULL, genid_seed_update, NULL);
-REGISTER_TUNABLE("abort_on_bad_upgrade",
-                 "Abort in upgrade current-generation exceeds ctrl-gen.",
-                 TUNABLE_BOOLEAN, &gbl_abort_on_incorrect_upgrade,
-                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("poll_in_pgfree_recover", "Poll pgfree recovery handler.",
-                 TUNABLE_BOOLEAN, &gbl_poll_in_pg_free_recover,
-                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("abort_on_bad_upgrade", "Abort in upgrade current-generation exceeds ctrl-gen.", TUNABLE_BOOLEAN,
+                 &gbl_abort_on_incorrect_upgrade, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("poll_in_pgfree_recover", "Poll pgfree recovery handler.", TUNABLE_BOOLEAN,
+                 &gbl_poll_in_pg_free_recover, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("rep_badgen_trace", "Trace on rep mismatched generations.",
                  TUNABLE_BOOLEAN, &gbl_rep_badgen_trace,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);

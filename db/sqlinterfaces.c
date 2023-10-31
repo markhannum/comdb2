@@ -1825,10 +1825,11 @@ static char *sqlenginestate_tostr(int state)
 }
 
 int gbl_snapshot_serial_verify_retry = 1;
+int gbl_coordinator_verify_retry = 0;
 
 inline int replicant_is_able_to_retry(struct sqlclntstate *clnt)
 {
-    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp)
+    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp || (clnt->is_coordinator && !gbl_coordinator_verify_retry))
         return 0;
 
     if ((clnt->dbtran.mode == TRANLEVEL_SNAPISOL ||
@@ -1842,7 +1843,7 @@ inline int replicant_is_able_to_retry(struct sqlclntstate *clnt)
 
 static inline int replicant_can_retry_rc(struct sqlclntstate *clnt, int rc)
 {
-    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp || clnt->is_coordinator)
+    if (clnt->verifyretry_off || clnt->dbtran.trans_has_sp || (clnt->is_coordinator && !gbl_coordinator_verify_retry))
         return 0;
 
     /* Any isolation level can retry if nothing has been read */

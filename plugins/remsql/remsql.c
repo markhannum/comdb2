@@ -40,11 +40,11 @@ comdb2_appsock_t remtran_plugin = {
 };
 
 comdb2_appsock_t rem2pc_plugin = {
-    "rem2pc",              /* Name */
-    "",                    /* Usage info */
-    0,                     /* Execution count */
-    0,                     /* Flags */
-    handle_rem2pc_request  /* Handler function */
+    "rem2pc",             /* Name */
+    "",                   /* Usage info */
+    0,                    /* Execution count */
+    0,                    /* Flags */
+    handle_rem2pc_request /* Handler function */
 };
 
 comdb2_appsock_t alias_plugin = {

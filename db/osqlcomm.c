@@ -7111,9 +7111,8 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
 
         if (rc != 0) {
             if (rc != RC_INTERNAL_RETRY) {
-                errstat_cat_strf(&iq->errstat,
-                                 " unable to delete genid =%llx %llx rc=%d",
-                                 dt.genid, bdb_genid_to_host_order(dt.genid), rc);
+                errstat_cat_strf(&iq->errstat, " unable to delete genid =%llx %llx rc=%d", dt.genid,
+                                 bdb_genid_to_host_order(dt.genid), rc);
             }
 
             return rc; /*this is blkproc rc */

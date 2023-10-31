@@ -319,6 +319,7 @@ int fdb_bend_index(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 int fdb_bend_trans_hbeat(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg);
 
 /* matches FDB_MSG... enums */
+// clang-format off
 fdb_svc_callback_t callbacks[] = {
     fdb_bend_trans_begin,  fdb_bend_trans_prepare,
     fdb_bend_trans_commit, fdb_bend_trans_rollback,
@@ -345,6 +346,7 @@ fdb_svc_callback_t callbacks[] = {
 
     fdb_bend_trans_2pc_begin
 };
+// clang-format on
 
 char *fdb_msg_type(int type)
 {
@@ -596,8 +598,7 @@ int fdb_recv_2pc_rc(fdb_msg_t *msg, fdb_tran_t *trans)
 
     rc = fdb_msg_read_message(trans->sb, msg, 0);
     if (rc != FDB_NOERR) {
-        logmsg(LOGMSG_ERROR, "%s: failed to receive remote row rc=%d\n",
-               __func__, rc);
+        logmsg(LOGMSG_ERROR, "%s: failed to receive remote row rc=%d\n", __func__, rc);
         trans->rc = FDB_ERR_READ_IO;
         trans->errstr = strdup("failed to read rc from socket");
         trans->errstrlen = strlen(trans->errstr) + 1;
@@ -616,9 +617,7 @@ int fdb_recv_2pc_rc(fdb_msg_t *msg, fdb_tran_t *trans)
     trans->rc = msg->rv.rc;
     trans->rmt2pcvers = msg->rv.version;
 
-    if ((trans->rc == 0) &&
-        (comdb2uuidcmp((unsigned char *)msg->rv.tid,
-                       (unsigned char *)trans->tid) != 0)) {
+    if ((trans->rc == 0) && (comdb2uuidcmp((unsigned char *)msg->rv.tid, (unsigned char *)trans->tid) != 0)) {
         abort();
     }
 
@@ -627,8 +626,7 @@ int fdb_recv_2pc_rc(fdb_msg_t *msg, fdb_tran_t *trans)
         trans->errstrlen = msg->rv.errstrlen;
     } else {
         if (msg->rv.errstr) {
-            logmsg(LOGMSG_ERROR, "%s: rc=%d but errror string present?\n",
-                   __func__, msg->rv.rc);
+            logmsg(LOGMSG_ERROR, "%s: rc=%d but errror string present?\n", __func__, msg->rv.rc);
             free(msg->rv.errstr);
         }
         trans->errstr = NULL;
@@ -1108,8 +1106,7 @@ int fdb_msg_read_message_int(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags,
             return -1;
         msg->rv.rc = ntohl(msg->rv.rc);
 
-        rc = sbuf2fread((char *)&msg->rv.errstrlen, 1,
-                        sizeof(msg->rv.errstrlen), sb);
+        rc = sbuf2fread((char *)&msg->rv.errstrlen, 1, sizeof(msg->rv.errstrlen), sb);
         if (rc != sizeof(msg->rv.errstrlen))
             return -1;
         msg->rv.errstrlen = ntohl(msg->rv.errstrlen);
@@ -1789,7 +1786,7 @@ void fdb_msg_print_message(SBUF2 *sb, fdb_msg_t *msg, char *prefix)
     prefix = prf;
 
     // This assert is broken - header might have already been cleaned
-    //assert(msg->hd.type & FD_MSG_FLAGS_ISUUID);
+    // assert(msg->hd.type & FD_MSG_FLAGS_ISUUID);
 
     switch (msg->hd.type & FD_MSG_TYPE) {
     case FDB_MSG_TRAN_BEGIN:
@@ -1804,8 +1801,7 @@ void fdb_msg_print_message(SBUF2 *sb, fdb_msg_t *msg, char *prefix)
         break;
 
     case FDB_MSG_TRAN_2PC_BEGIN:
-        logmsg(LOGMSG_USER, "XXXX: %s %s tid=%s version=%d fl=%x lvl=%s\n", prefix,
-               __req_2_str(msg->hd.type),
+        logmsg(LOGMSG_USER, "XXXX: %s %s tid=%s version=%d fl=%x lvl=%s\n", prefix, __req_2_str(msg->hd.type),
                comdb2uuidstr((unsigned char *)msg->tv.tid, tus), msg->tv.version, msg->tv.flags,
                __tran_2_str(msg->tv.lvl));
         break;
@@ -1818,8 +1814,8 @@ void fdb_msg_print_message(SBUF2 *sb, fdb_msg_t *msg, char *prefix)
 
     case FDB_MSG_TRAN_2PC_RC:
         logmsg(LOGMSG_USER, "XXXX: %s TRAN_RC tid=%s rc=%d version=%d %s\n", prefix,
-               comdb2uuidstr((unsigned char *)msg->rv.tid, tus), msg->rv.rc,
-               msg->rv.version, (msg->rv.errstrlen > 0 && msg->rv.errstr) ? msg->rv.errstr : "");
+               comdb2uuidstr((unsigned char *)msg->rv.tid, tus), msg->rv.rc, msg->rv.version,
+               (msg->rv.errstrlen > 0 && msg->rv.errstr) ? msg->rv.errstr : "");
         break;
 
     case FDB_MSG_CURSOR_OPEN:
@@ -1828,9 +1824,8 @@ void fdb_msg_print_message(SBUF2 *sb, fdb_msg_t *msg, char *prefix)
                "XXXX: %llu %s sb=%p CURSOR_OPEN cid=%s tid=%s fl=%x "
                "rootpage=%d version=%d seq=%d SRC[%d, %s]\n",
                t, prefix, sb, comdb2uuidstr((unsigned char *)msg->co.cid, cus),
-               comdb2uuidstr((unsigned char *)msg->co.tid, tus), msg->co.flags,
-               msg->co.rootpage, msg->co.version, msg->co.seq, msg->co.srcpid,
-               (msg->co.srcname) ? msg->co.srcname : "(unknown)");
+               comdb2uuidstr((unsigned char *)msg->co.tid, tus), msg->co.flags, msg->co.rootpage, msg->co.version,
+               msg->co.seq, msg->co.srcpid, (msg->co.srcname) ? msg->co.srcname : "(unknown)");
 
         break;
 
@@ -1957,15 +1952,14 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
     int idsz;
     int send_dk;
 
-    assert (msg->hd.type & FD_MSG_FLAGS_ISUUID);
+    assert(msg->hd.type & FD_MSG_FLAGS_ISUUID);
     logmsg(LOGMSG_USER, "DISTTXN %s writing message type %d\n", __func__, (msg->hd.type & FD_MSG_TYPE));
     type = htonl(msg->hd.type);
 
     rc = sbuf2fwrite((char *)&type, 1, sizeof(type), sb);
 
     if (rc != sizeof(type)) {
-        logmsg(LOGMSG_ERROR, "%s: failed to write header rc=%d\n", __func__,
-               rc);
+        logmsg(LOGMSG_ERROR, "%s: failed to write header rc=%d\n", __func__, rc);
         return FDB_ERR_WRITE_IO;
     }
 
@@ -2110,7 +2104,6 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         }
 
         break;
-
 
     case FDB_MSG_TRAN_RC:
 
@@ -2756,7 +2749,8 @@ static enum svc_move_types move_type(int type)
 int fdb_send_tran_2pc_rc(int version, char *tid, int rcode, char *errstr, SBUF2 *sb)
 {
     int rc;
-    fdb_msg_t lcl_msg = {0}, *msg = &lcl_msg;;
+    fdb_msg_t lcl_msg = {0}, *msg = &lcl_msg;
+    ;
 
     msg->hd.type = FDB_MSG_TRAN_2PC_RC | FD_MSG_FLAGS_ISUUID;
     fdb_msg_prepare_message(msg);
@@ -2771,8 +2765,7 @@ int fdb_send_tran_2pc_rc(int version, char *tid, int rcode, char *errstr, SBUF2 
 
     rc = fdb_msg_write_message(sb, msg, 1);
     if (rc) {
-        logmsg(LOGMSG_ERROR,
-               "%s: failed sending fdb 2pc-rc message rc=%d\n", __func__, rc);
+        logmsg(LOGMSG_ERROR, "%s: failed sending fdb 2pc-rc message rc=%d\n", __func__, rc);
         return rc;
     }
 
@@ -3201,8 +3194,7 @@ int fdb_bend_index(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     return 0;
 }
 
-int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans,
-                   enum transaction_level lvl, int flags, SBUF2 *sb)
+int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, int flags, SBUF2 *sb)
 {
     int rc;
 
@@ -3224,9 +3216,7 @@ int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans,
 
     rc = fdb_msg_write_message(sb, msg, 1);
     if (rc) {
-        logmsg(LOGMSG_ERROR,
-               "%s: failed sending begin transaction message rc=%d\n", __func__,
-               rc);
+        logmsg(LOGMSG_ERROR, "%s: failed sending begin transaction message rc=%d\n", __func__, rc);
         return rc;
     }
 
@@ -3239,8 +3229,7 @@ int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans,
     return rc;
 }
 
-int fdb_send_begin(fdb_msg_t *msg, fdb_tran_t *trans,
-                   enum transaction_level lvl, int flags, SBUF2 *sb)
+int fdb_send_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, int flags, SBUF2 *sb)
 {
     int rc;
 
@@ -3409,9 +3398,7 @@ int fdb_send_heartbeat(fdb_msg_t *msg, char *tid, SBUF2 *sb)
 
     rc = fdb_msg_write_message(sb, msg, 1);
     if (rc) {
-        logmsg(LOGMSG_ERROR,
-               "%s: failed sending heartbeat transaction message rc=%d\n",
-               __func__, rc);
+        logmsg(LOGMSG_ERROR, "%s: failed sending heartbeat transaction message rc=%d\n", __func__, rc);
         return rc;
     }
 
@@ -3501,8 +3488,7 @@ int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
             clnt->idxInsert = calloc(MAXINDEX, sizeof(uint8_t *));
             clnt->idxDelete = calloc(MAXINDEX, sizeof(uint8_t *));
             if (!clnt->idxInsert || !clnt->idxDelete) {
-                logmsg(LOGMSG_ERROR, "%s:%d malloc failed\n", __func__,
-                       __LINE__);
+                logmsg(LOGMSG_ERROR, "%s:%d malloc failed\n", __func__, __LINE__);
                 return -1;
             }
         }
@@ -3817,9 +3803,8 @@ int handle_rem2pc_request(comdb2_appsock_arg_t *arg)
     }
 
     if ((msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_2PC_BEGIN) {
-        logmsg(LOGMSG_ERROR,
-               "%s: received wrong packet type=%d, expecting tran begin\n",
-               __func__, (msg.hd.type & FD_MSG_TYPE));
+        logmsg(LOGMSG_ERROR, "%s: received wrong packet type=%d, expecting tran begin\n", __func__,
+               (msg.hd.type & FD_MSG_TYPE));
         abort();
         return -1;
     }
@@ -3852,8 +3837,7 @@ int handle_rem2pc_request(comdb2_appsock_arg_t *arg)
              * the type it initially stored, could change.
              * This check ensures that the change adheres with the design.
              */
-            if (msg_type == FDB_MSG_TRAN_COMMIT &&
-                (msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_RC) {
+            if (msg_type == FDB_MSG_TRAN_COMMIT && (msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_RC) {
                 abort();
             }
             break;
@@ -3867,13 +3851,10 @@ int handle_rem2pc_request(comdb2_appsock_arg_t *arg)
                 goto done;
             }
 
-            rc2 = fdb_svc_trans_rollback(
-                open_msg.tid, open_msg.lvl, svc_cb_arg.clnt,
-                svc_cb_arg.clnt->dbtran.dtran->fdb_trans.top->seq);
+            rc2 = fdb_svc_trans_rollback(open_msg.tid, open_msg.lvl, svc_cb_arg.clnt,
+                                         svc_cb_arg.clnt->dbtran.dtran->fdb_trans.top->seq);
             if (rc2) {
-                logmsg(LOGMSG_ERROR,
-                       "%s: fdb_svc_trans_rollback failed rc=%d\n", __func__,
-                       rc2);
+                logmsg(LOGMSG_ERROR, "%s: fdb_svc_trans_rollback failed rc=%d\n", __func__, rc2);
             }
             break;
         }
@@ -3882,9 +3863,7 @@ int handle_rem2pc_request(comdb2_appsock_arg_t *arg)
          * osql_log_time());*/
         rc = fdb_msg_read_message(sb, &msg, svc_cb_arg.flags);
         if (rc) {
-            logmsg(LOGMSG_ERROR,
-                   "%s: failed to handle remote cursor request rc=%d\n",
-                   __func__, rc);
+            logmsg(LOGMSG_ERROR, "%s: failed to handle remote cursor request rc=%d\n", __func__, rc);
             goto clear;
         }
     }
@@ -3930,9 +3909,8 @@ int handle_remtran_request(comdb2_appsock_arg_t *arg)
     }
 
     if ((msg.hd.type & FD_MSG_TYPE) != FDB_MSG_TRAN_BEGIN) {
-        logmsg(LOGMSG_ERROR,
-               "%s: received wrong packet type=%d, expecting tran begin\n",
-               __func__, (msg.hd.type & FD_MSG_TYPE));
+        logmsg(LOGMSG_ERROR, "%s: received wrong packet type=%d, expecting tran begin\n", __func__,
+               (msg.hd.type & FD_MSG_TYPE));
         return -1;
     }
 
@@ -3979,9 +3957,8 @@ int handle_remtran_request(comdb2_appsock_arg_t *arg)
                 goto done;
             }
 
-            rc2 = fdb_svc_trans_rollback(
-                open_msg.tid, open_msg.lvl, svc_cb_arg.clnt,
-                svc_cb_arg.clnt->dbtran.dtran->fdb_trans.top->seq);
+            rc2 = fdb_svc_trans_rollback(open_msg.tid, open_msg.lvl, svc_cb_arg.clnt,
+                                         svc_cb_arg.clnt->dbtran.dtran->fdb_trans.top->seq);
             if (rc2) {
                 logmsg(LOGMSG_ERROR,
                        "%s: fdb_svc_trans_rollback failed rc=%d\n", __func__,

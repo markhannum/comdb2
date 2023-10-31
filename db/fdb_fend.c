@@ -2250,11 +2250,9 @@ static int _fdb_send_open_retries(struct sqlclntstate *clnt, fdb_t *fdb,
                     tran_flags = 0;
 
                 if (clnt->use_2pc) {
-                    rc = fdb_send_2pc_begin(msg, trans, clnt->dbtran.mode, tran_flags,
-                                    trans->sb);
+                    rc = fdb_send_2pc_begin(msg, trans, clnt->dbtran.mode, tran_flags, trans->sb);
                 } else {
-                    rc = fdb_send_begin(msg, trans, clnt->dbtran.mode, tran_flags,
-                                    trans->sb);
+                    rc = fdb_send_begin(msg, trans, clnt->dbtran.mode, tran_flags, trans->sb);
                 }
                 if (rc == FDB_NOERR) {
                     trans->host = host;
