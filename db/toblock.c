@@ -5673,7 +5673,8 @@ add_blkseq:
                                 rc = ERR_DIST_ABORT;
                             }
                         } else {
-                            if (inserted_blkseq) {
+                            /* Fail coordinator on coordinator verify-error */
+                            if (inserted_blkseq || iq->sorese->is_coordinator) {
                                 if (iq->sorese->is_coordinator) {
                                     if (gbl_debug_disttxn_trace) {
                                         logmsg(LOGMSG_USER, "%s DISTTXN %s coord failing disttxn outrc=%d\n", __func__,
