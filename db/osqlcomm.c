@@ -72,6 +72,7 @@ extern int gbl_partial_indexes;
 
 int gbl_master_sends_query_effects = 1;
 int gbl_toblock_random_deadlock_trans;
+int gbl_toblock_random_verify_error;
 int gbl_selectv_writelock = 0;
 
 extern int db_is_exiting();
@@ -6990,7 +6991,8 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         }
 #endif
 
-        if (gbl_toblock_random_deadlock_trans && (rand() % 100) == 0) {
+        if (!rc && gbl_toblock_random_deadlock_trans && (rand() % 100) == 0) {
+            logmsg(LOGMSG_USER, "%s throwing random deadlock\n", __func__);
             rc = RC_INTERNAL_RETRY;
         }
 

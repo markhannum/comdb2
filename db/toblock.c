@@ -4885,6 +4885,21 @@ static int toblock_main_int(struct javasp_trans_state *javasp_trans_handle, stru
             GOTOBACKOUT;
         }
 
+        /* Fake a verify error */
+        extern int gbl_toblock_random_verify_error;
+        if (!rc && gbl_toblock_random_verify_error && (rand() % 100) == 0) {
+            logmsg(LOGMSG_USER, "%s throwing random verify error\n", __func__);
+            outrc = ERR_BLOCK_FAILED;
+            rc = ERR_VERIFY;
+            check_serializability = 1;
+            opnum = blkpos; /* so we report the failed blockop accurately */
+            err.blockop_num = blkpos;
+            err.errcode = ERR_VERIFY;
+            err.ixnum = ixout;
+            numerrs = 1;
+            reqlog_set_error(iq->reqlogger, "Debug random verify error", rc);
+            GOTOBACKOUT;
+        }
     } /* end delayed */
     else {
         ++gbl_delayed_skip;

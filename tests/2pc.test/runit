@@ -403,6 +403,64 @@ function bulk_test
     done
 }
 
+function toggle_tunable
+{
+    typeset tunable=$1
+    typeset onoff=$2
+    typeset skip_coordinator=$3
+
+    if [[ -z ${CLUSTER} ]]; then
+        if [[ "$skip_coordinator" == "0" ]]; then
+            $CDB2SQL_EXE -admin $CDB2_OPTIONS $DBNAME default "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+        fi
+        $CDB2SQL_EXE -admin $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+        $CDB2SQL_EXE -admin $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+        $CDB2SQL_EXE -admin $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+        $CDB2SQL_EXE -admin $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+    else
+        for mach in ${CLUSTER}; do
+            if [[ "$skip_coordinator" == "0" ]]; then
+                $CDB2SQL_EXE -admin $CDB2_OPTIONS $DBNAME --host $mach "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+            fi
+            $CDB2SQL_EXE -admin $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME --host $mach "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+            $CDB2SQL_EXE -admin $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME --host $mach "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+            $CDB2SQL_EXE -admin $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME --host $mach "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+            $CDB2SQL_EXE -admin $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME --host $mach "put tunable ${tunable} '${onoff}'" >/dev/null 2>&1
+        done
+    fi
+}
+
+function toggle_random_deadlocks
+{
+    typeset onoff=$1
+    toggle_tunable debug.toblock_random_deadlock_trans $onoff 0
+}
+
+function toggle_random_verify_errors
+{
+    typeset onoff=$1
+    # Skip coordinator at first to see if it works
+    toggle_tunable debug.toblock_random_verify_error $onoff 1
+}
+
+# This works
+function random_deadlocks
+{
+    toggle_random_deadlocks 1
+    insert_records_basic
+    delete_records
+    toggle_random_deadlocks 0
+}
+
+# This does not work yet
+function random_verify_errors
+{
+    toggle_random_verify_errors 1
+    insert_records_basic
+    delete_records
+    toggle_random_verify_errors 0
+}
+
 function participant_constraint_violation
 {
     typeset j=0
@@ -861,6 +919,26 @@ commit
     delete_records_ignore_error
 }
 
+function test_deadlocks
+{
+    typeset cnt=0
+    while [[ "$cnt" -lt 10 ]]; do 
+        let cnt=cnt+1
+        echo "Test deadlocks iteration $cnt"
+        random_deadlocks
+    done
+}
+
+function test_verify_retry
+{
+    typeset cnt=0
+    while [[ "$cnt" -lt 10 ]]; do 
+        let cnt=cnt+1
+        echo "Test verify-errors iteration $cnt"
+        random_verify_errors
+    done
+}
+
 function run_test
 {
     # bulk-test
@@ -872,6 +950,12 @@ function run_test
 
     # Single-record transactions
     basic_test
+
+    # Deadlock test
+    test_deadlocks
+
+    # Verify-retry test (does not work)
+    #test_verify_retry
 
     # constraint-violations
     coordinator_constraint_violation
@@ -886,7 +970,8 @@ function run_test
     exit_coordinator_after_commit
 }
 
-function single_test
+# This breaks if machine is overloaded- but its not a 2pc error
+function simple_test
 {
     typeset cnt=0
     while [[ "$cnt" -lt 3 ]]; do 
@@ -902,8 +987,10 @@ rm ${DBNAME}.failexit >/dev/null 2>&1
 [[ -z "$CLUSTER" ]] && failexit "This test requires a 3-node cluster"
 
 setup
-single_test
-#run_test
+#simple_test
+#test_deadlocks
+#test_verify_retry
+run_test
 stop_all_databases
 
 if [[ -f ${DBNAME}.failexit ]]; then
