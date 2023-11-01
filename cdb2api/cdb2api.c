@@ -2971,12 +2971,12 @@ static void clear_responses(cdb2_hndl_tp *hndl)
 }
 
 int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, char *cmaster, unsigned int op,
-                  char *dist_txnid, int async)
+                  char *dist_txnid, int rcode, int outrc, char *errmsg, int async)
 {
     if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr, "DISTTXN %s dbname=%s pname=%s ptier=%s cmaster=%s op=%d async=%d\n", __func__,
+        fprintf(stderr, "DISTTXN %s dbname=%s pname=%s ptier=%s cmaster=%s op=%d async=%d rcode=%d outrc=%d errmsg=%s\n", __func__,
                 dbname ? dbname : "(null)", pname ? pname : "(null)", ptier ? ptier : "(null)",
-                cmaster ? cmaster : "(null)", op, async);
+                cmaster ? cmaster : "(null)", op, async, rcode, outrc, errmsg);
     }
     if (!hndl->sb) {
         cdb2_connect_sqlhost(hndl);
@@ -3013,6 +3013,11 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
     disttxn.name = pname;
     disttxn.tier = ptier;
     disttxn.master = cmaster;
+    disttxn.has_rcode = 1;
+    disttxn.rcode = rcode;
+    disttxn.has_outrc = 1;
+    disttxn.outrc = outrc;
+    disttxn.errmsg = errmsg;
 
     distquery.dbname = dbname;
     distquery.disttxn = &disttxn;

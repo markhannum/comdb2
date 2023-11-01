@@ -1191,7 +1191,7 @@ done:
        also don't retry distributed transactions
      */
     if (clnt->osql.xerr.errval == (ERR_BLOCK_FAILED + ERR_VERIFY) &&
-            clnt->dbtran.mode == TRANLEVEL_SOSQL && !clnt->dbtran.dtran) {
+            clnt->dbtran.mode == TRANLEVEL_SOSQL && (!clnt->dbtran.dtran || clnt->use_2pc)) {
         int bdberr = 0;
         int iirc = 0;
         iirc = osql_shadtbl_has_selectv(clnt, &bdberr);

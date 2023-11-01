@@ -257,7 +257,7 @@ int cdb2_is_ssl_encrypted(cdb2_hndl_tp *hndl);
 int cdb2_clear_ack(cdb2_hndl_tp *hndl);
 
 int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, char *source, unsigned int op,
-                  char *dist_txnid, int async);
+                  char *dist_txnid, int rcode, int outrc, char *errmsg, int async);
 
 typedef enum cdb2_event_ctrl {
     CDB2_OVERWRITE_RETURN_VALUE = 1,

@@ -36,10 +36,10 @@ int participant_prepared(const char *dist_txnid, const char *dbname, const char 
 int participant_propagated(const char *dist_txnid, const char *dbname, const char *tier);
 
 /* This coordinator processes a participant's 'failed-to-prepare' message */
-int participant_failed(const char *dist_txnid, const char *dbname, const char *tier);
+int participant_failed(const char *dist_txnid, const char *dbname, const char *tier, int rcode, int outrc, const char *errmsg);
 
 /* This coordinator will block until participants have responded */
-int coordinator_wait(const char *dist_txnid);
+int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen);
 
 /* This coordinator will block until participants have propogated this txn */
 int coordinator_wait_propagate(const char *dist_txnid);
@@ -62,7 +62,7 @@ int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid
 int osql_cancel_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid);
 
 /* This participant sends the coordinator a 'failed-prepare' message */
-int participant_has_failed(const char *dist_txnid, const char *dbname, const char *master);
+int participant_has_failed(const char *dist_txnid, const char *dbname, const char *master, int rcode, int outrc, const char *errmsg);
 
 /* This participant sends the coordinator an 'i-have-propagated' message */
 void participant_has_propagated(const char *dist_txnid, const char *dbname, const char *master);

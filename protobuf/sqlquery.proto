@@ -126,6 +126,9 @@ message CDB2_DISTTXN {
     optional string name = 4;
     optional string tier = 5;
     optional string master = 6;
+    optional int32 rcode = 7;
+    optional int32 outrc = 8;
+    optional string errmsg = 9;
   }
   optional Disttxn disttxn = 2;
 }

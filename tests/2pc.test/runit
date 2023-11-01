@@ -329,7 +329,7 @@ commit
         for node in $CLUSTER ; do
             echo "Node $node"
             x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME --host $node "select count(*) from t1")
-            x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME --host $node "select * from t1")
+            x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME --host $node "select * from t1 order by a")
         done
         fail_exit "$DBNAME has only $x records"
     fi 
@@ -339,7 +339,7 @@ commit
         for node in $CLUSTER ; do
             echo "Node $node"
             x=$($CDB2SQL_EXE -tabs $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME --host $node "select count(*) from t1")
-            x=$($CDB2SQL_EXE -tabs $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME --host $node "select * from t1")
+            x=$($CDB2SQL_EXE -tabs $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME --host $node "select * from t1 order by a")
         done
         fail_exit "$SECONDARY_DBNAME has only $x records"
     fi
@@ -349,7 +349,7 @@ commit
         for node in $CLUSTER ; do
             echo "Node $node"
             x=$($CDB2SQL_EXE -tabs $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME --host $node "select count(*) from t1")
-            x=$($CDB2SQL_EXE -tabs $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME --host $node "select * from t1")
+            x=$($CDB2SQL_EXE -tabs $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME --host $node "select * from t1 order by a")
         done
         fail_exit "$TERTIARY_DBNAME has only $x records"
     fi
@@ -359,7 +359,7 @@ commit
         for node in $CLUSTER ; do
             echo "Node $node"
             x=$($CDB2SQL_EXE -tabs $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME --host $node "select count(*) from t1")
-            x=$($CDB2SQL_EXE -tabs $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME --host $node "select * from t1")
+            x=$($CDB2SQL_EXE -tabs $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME --host $node "select * from t1 order by a")
         done
         fail_exit "$QUATERNARY_DBNAME has only $x records"
     fi
@@ -369,7 +369,7 @@ commit
         for node in $CLUSTER ; do
             echo "Node $node"
             x=$($CDB2SQL_EXE -tabs $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME --host $node "select count(*) from t1")
-            x=$($CDB2SQL_EXE -tabs $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME --host $node "select * from t1")
+            x=$($CDB2SQL_EXE -tabs $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME --host $node "select * from t1 order by a")
         done
         fail_exit "$QUINARY_DBNAME has only $x records"
     fi
@@ -989,8 +989,8 @@ rm ${DBNAME}.failexit >/dev/null 2>&1
 setup
 #simple_test
 #test_deadlocks
-#test_verify_retry
-run_test
+test_verify_retry
+#run_test
 stop_all_databases
 
 if [[ -f ${DBNAME}.failexit ]]; then
