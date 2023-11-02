@@ -1005,6 +1005,17 @@ function run_test
     exit_coordinator_after_commit
 }
 
+function verify_retry_loop
+{
+    typeset cnt=0
+    while [[ "$cnt" -lt 10 ]]; do 
+        let cnt=cnt+1
+        echo "Test loop iteration $cnt"
+        test_verify_participant_constraint_violation
+        test_verify_coordinator_constraint_violation
+    done
+}
+
 # This breaks if machine is overloaded- but its not a 2pc error
 function simple_test
 {
@@ -1026,8 +1037,8 @@ setup
 #test_deadlocks
 #test_verify_retry
 #test_verify_participant_constraint_violation
-test_verify_coordinator_constraint_violation
-
+#test_verify_coordinator_constraint_violation
+verify_retry_loop
 
 #run_test
 stop_all_databases
