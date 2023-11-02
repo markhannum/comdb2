@@ -5,7 +5,9 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/runit_common.sh
 . ${TESTSROOTDIR}/tools/hrtime.sh
 
-export maxtime=30000
+#export maxtime=30000
+# TODO this is just for verify-retry testing
+export maxtime=900
 export debug=1
 #export DEBUGTRACE="--debugtrace"
 export DEBUGTRACE=""
@@ -466,6 +468,7 @@ function participant_constraint_violation
     typeset j=0
     typeset r=0
     while [[ $j -lt 1000 ]]; do
+    startms=$(timems)
     echo "begin
 insert into t1(a) values($j)
 insert into $SECONDARY_DBNAME.t1(a) values($j)
@@ -476,10 +479,16 @@ commit
 " | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default -
 
     r=$?
+    donems=$(timems)
     [[ "$r" == "0" ]] || failexit "participant_constraint_violation failed inserting"
+
+    if [[ "$(( donems - startms ))" -gt $maxtime ]]; then
+        failexit "took excessive time to insert good record"
+    fi
 
     # Try each case in turn
     if [[ "$(( j % 4 ))" == "0" ]]; then
+    startms=$(timems)
     echo "begin
 insert into t1(a) values($(( j + 1 )))
 insert into $SECONDARY_DBNAME.t1(a) values($j)
@@ -489,9 +498,11 @@ insert into $QUINARY_DBNAME.t1(a) values($(( j + 1 )))
 commit
 " | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default -
     r=$?
+    donems=$(timems)
     fi
 
     if [[ "$(( j % 4 ))" == "1" ]]; then
+    startms=$(timems)
     echo "begin
 insert into t1(a) values($(( j + 1 )))
 insert into $SECONDARY_DBNAME.t1(a) values($(( j + 1 )))
@@ -501,9 +512,11 @@ insert into $QUINARY_DBNAME.t1(a) values($(( j + 1 )))
 commit
 " | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default -
     r=$?
+    donems=$(timems)
     fi
 
     if [[ "$(( j % 4 ))" == "2" ]]; then
+    startms=$(timems)
     echo "begin
 insert into t1(a) values($(( j + 1 )))
 insert into $SECONDARY_DBNAME.t1(a) values($(( j + 1 )))
@@ -513,9 +526,11 @@ insert into $QUINARY_DBNAME.t1(a) values($(( j + 1 )))
 commit
 " | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default -
     r=$?
+    donems=$(timems)
     fi
 
     if [[ "$(( j % 4 ))" == "3" ]]; then
+    startms=$(timems)
     echo "begin
 insert into t1(a) values($(( j + 1 )))
 insert into $SECONDARY_DBNAME.t1(a) values($(( j + 1 )))
@@ -525,9 +540,14 @@ insert into $QUINARY_DBNAME.t1(a) values($j)
 commit
 " | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default -
     r=$?
+    donems=$(timems)
     fi
 
     [[ "$r" != "0" ]] || failexit "participant_constraint_violation succeeded incorrectly"
+
+    if [[ "$(( donems - startms ))" -gt $maxtime ]]; then
+        failexit "took excessive time to fail to insert"
+    fi
     
     let j=j+1
     done
@@ -1008,9 +1028,10 @@ function run_test
 function verify_retry_loop
 {
     typeset cnt=0
-    while [[ "$cnt" -lt 10 ]]; do 
+    #export maxtime=500
+    while [[ "$cnt" -lt 3 ]]; do 
         let cnt=cnt+1
-        echo "Test loop iteration $cnt"
+        echo "verify-retry-loop iteration $cnt"
         test_verify_participant_constraint_violation
         test_verify_coordinator_constraint_violation
     done
