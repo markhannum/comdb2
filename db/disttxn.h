@@ -39,7 +39,7 @@ int participant_propagated(const char *dist_txnid, const char *dbname, const cha
 int participant_failed(const char *dist_txnid, const char *dbname, const char *tier, int rcode, int outrc, const char *errmsg);
 
 /* This coordinator will block until participants have responded */
-int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen);
+int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen, int force_failure);
 
 /* This coordinator will block until participants have propogated this txn */
 int coordinator_wait_propagate(const char *dist_txnid);

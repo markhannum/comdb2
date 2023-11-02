@@ -5662,7 +5662,7 @@ add_blkseq:
                             int waitrc;
                             if (iq->sorese->is_coordinator) {
                                 waitrc = coordinator_wait(iq->sorese->dist_txnid, can_retry,
-                                    &err.errcode, &outrc, iq->errstat.errstr, ERRSTAT_STR_SZ);
+                                    &err.errcode, &outrc, iq->errstat.errstr, ERRSTAT_STR_SZ, 0);
                             } else {
                                 assert(iq->sorese->is_participant);
                                 waitrc = participant_wait(iq->sorese->dist_txnid, iq->sorese->coordinator_dbname,
@@ -5697,14 +5697,31 @@ add_blkseq:
                                 }
                                 if ((outrc == ERR_NOTSERIAL || (outrc == ERR_BLOCK_FAILED && 
                                     err.errcode == ERR_VERIFY)) && can_retry) {
-                                    /* TODO erase this blkseq .. this is making my head hurt */
                                 } else {
                                     dist_txn_abort_write_blkseq(thedb->bdb_env, bskey, bskeylen);
                                 }
                                 trans_abort(iq, parent_trans);
                             }
                         } else {
+                            /* XXX TODO: need to wait if the error is retryable as a participant could
+                             * have a non-retryable rcode */
+
                             if (iq->sorese->is_coordinator) {
+                                if ((outrc == ERR_NOTSERIAL || (outrc == ERR_BLOCK_FAILED && 
+                                    err.errcode == ERR_VERIFY)) && can_retry) {
+                                    char errstr[ERRSTAT_STR_SZ] = {0};
+                                    int prc=0, poutrc=0, waitrc;
+                                    waitrc = coordinator_wait(iq->sorese->dist_txnid, can_retry,
+                                        &prc, &poutrc, errstr, ERRSTAT_STR_SZ, 1);
+                                    if (waitrc) {
+                                        if (!should_rewrite_rcode(poutrc)) {
+                                            iq->sorese->rcout = poutrc;
+                                        } else {
+                                            iq->sorese->rcout = poutrc + prc;
+                                        }
+                                    }
+                                }
+
                                 if (gbl_debug_disttxn_trace) {
                                     logmsg(LOGMSG_USER, "%s DISTTXN %s coord failing disttxn outrc=%d\n", __func__,
                                            iq->sorese->dist_txnid, outrc);
@@ -5762,6 +5779,35 @@ add_blkseq:
                     }
                     backout_and_abort_tranddl(iq, parent_trans, 0);
                 } else {
+                    if (iq->sorese && iq->sorese->dist_txnid) {
+                        if (iq->sorese->is_coordinator) {
+                            if ((outrc == ERR_NOTSERIAL || (outrc == ERR_BLOCK_FAILED && 
+                                            err.errcode == ERR_VERIFY)) && can_retry) {
+                                char errstr[ERRSTAT_STR_SZ] = {0};
+                                int prc=0, poutrc=0, waitrc;
+                                waitrc = coordinator_wait(iq->sorese->dist_txnid, can_retry,
+                                        &prc, &poutrc, errstr, ERRSTAT_STR_SZ, 1);
+                                if (waitrc) {
+                                    if (!should_rewrite_rcode(poutrc)) {
+                                        iq->sorese->rcout = poutrc;
+                                    } else {
+                                        iq->sorese->rcout = poutrc + prc;
+                                    }
+                                }
+                            }
+
+                            if (gbl_debug_disttxn_trace) {
+                                logmsg(LOGMSG_USER, "%s DISTTXN %s coord failing disttxn outrc=%d\n", __func__,
+                                        iq->sorese->dist_txnid, outrc);
+                            }
+                            coordinator_failed(iq->sorese->dist_txnid);
+                        }
+                        if (iq->sorese->is_participant) {
+                            participant_has_failed(iq->sorese->dist_txnid, iq->sorese->coordinator_dbname,
+                                    iq->sorese->coordinator_master, err.errcode, outrc, iq->errstat.errstr);
+                        }
+                    }
+
                     trans_abort(iq, parent_trans);
                 }
                 parent_trans = NULL;

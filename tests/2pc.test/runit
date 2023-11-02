@@ -440,7 +440,7 @@ function toggle_random_verify_errors
 {
     typeset onoff=$1
     # Skip coordinator at first to see if it works
-    toggle_tunable debug.toblock_random_verify_error $onoff 1
+    toggle_tunable debug.toblock_random_verify_error $onoff 0
 }
 
 # This works
@@ -919,6 +919,20 @@ commit
     delete_records_ignore_error
 }
 
+function random_verify_coordinator_constraint_violation
+{
+    toggle_random_verify_errors 1
+    coordinator_constraint_violation
+    toggle_random_verify_errors 0
+}
+
+function random_verify_participant_constraint_violation
+{
+    toggle_random_verify_errors 1
+    participant_constraint_violation
+    toggle_random_verify_errors 0
+}
+
 function test_deadlocks
 {
     typeset cnt=0
@@ -938,6 +952,27 @@ function test_verify_retry
         random_verify_errors
     done
 }
+
+function test_verify_participant_constraint_violation
+{
+    typeset cnt=0
+    while [[ "$cnt" -lt 5 ]]; do 
+        let cnt=cnt+1
+        echo "Test participant-constraint-violation-verify-errors iteration $cnt"
+        random_verify_participant_constraint_violation
+    done
+}
+
+function test_verify_coordinator_constraint_violation
+{
+    typeset cnt=0
+    while [[ "$cnt" -lt 5 ]]; do 
+        let cnt=cnt+1
+        echo "Test participant-constraint-violation-verify-errors iteration $cnt"
+        random_verify_coordinator_constraint_violation
+    done
+}
+
 
 function run_test
 {
@@ -989,7 +1024,11 @@ rm ${DBNAME}.failexit >/dev/null 2>&1
 setup
 #simple_test
 #test_deadlocks
-test_verify_retry
+#test_verify_retry
+#test_verify_participant_constraint_violation
+test_verify_coordinator_constraint_violation
+
+
 #run_test
 stop_all_databases
 

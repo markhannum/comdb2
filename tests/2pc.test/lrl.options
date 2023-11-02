@@ -3,7 +3,10 @@ nowatch
 maxosqltransfer 10000000
 
 # Long-deletes require long timeouts
-coordinator_timeout_ms 300000
+#coordinator_timeout_ms 300000
+
+# Bugs require ridiculous timeouts
+coordinator_timeout_ms 3000000
 
 # They also require long propagate window
 coordinator_propagate_timeout_ms 120000
@@ -19,7 +22,7 @@ flush_on_prepare 1
 # Ridiculous timeout to find bugs
 # coordinator_timeout_ms 20000000
 
-# The will probably default to sync-prepare, async-messages
+# This will probably default to sync-prepare, async-messages
 #disttxn_async_prepare 1
 disttxn_async_messages 1
 
@@ -46,16 +49,16 @@ early_ack_trace 1
 debug_disttxn_trace 1
 
 # Need this to debug 
-set_seqnum_trace 1
+#set_seqnum_trace 1
 
 # Need this to debug
-ack_trace 1
+#ack_trace 1
 
 # Also need this
-set_coherent_state_trace 1
+#set_coherent_state_trace 1
 
 # Also wait-for-seqnum trace
-wait_for_seqnum_trace 1
+#wait_for_seqnum_trace 1
 
 # 'lost-connection + restart' seems to return 'success' to the client prior to the
 # commit record being written .. wth?

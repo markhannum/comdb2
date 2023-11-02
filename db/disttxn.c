@@ -947,19 +947,22 @@ int retryable_rcode(int rcode, int outrc)
 static int coordinator_should_wait_lk(transaction_t *dtran, int can_retry)
 {
     if (dtran->state == DISTTXN_COLLECTED || dtran->state == DISTTXN_PREPARING) {
+        logmsg(LOGMSG_USER, "DISTTXN %s returning true because state=%s\n",
+            __func__, dtran->state == DISTTXN_COLLECTED ? "collected" : "preparing");
         return 1;
     }
     if (dtran->state == DISTTXN_ABORTED && can_retry && retryable_rcode(dtran->failrc, dtran->outrc) &&
         (dtran->prepared_count + dtran->failed_count) < listc_size(&dtran->participants)) {
-        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s should wait because prepared=%d failed=%d sz=%d\n", __func__, dtran->dist_txnid, dtran->prepared_count, dtran->failed_count, listc_size(&dtran->participants));
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s returning true because prepared=%d failed=%d sz=%d\n", __func__, dtran->dist_txnid, dtran->prepared_count, dtran->failed_count, listc_size(&dtran->participants));
         return 1;
     }
     return 0;
 }
 
 /* This blocks the coordinator's bp until we know whether this can commit, or until a timeout */
-int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen)
+int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen, int force_failure)
 {
+    int returnzero = 0;
     if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
     }
@@ -1019,6 +1022,18 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
         logmsg(LOGMSG_USER, "DISTTXN %s setting rc=%d outrc=%d errmsg=%s\n", __func__, *rcode, *outrc, errmsg);
         dtran->state = DISTTXN_ABORT_RESOLVED;
     }
+
+    /* force-failure: this is a replayable rcode and all other participants succeeded
+     * returning 0 asks toblock to use it's original rcode */
+    if (dtran->state == DISTTXN_COMMITTING && force_failure)
+    {
+        *rcode = ERR_DIST_ABORT;
+        *outrc = ERR_BLOCK_FAILED;
+        abort_transaction_lk(dtran, 0);
+        returnzero = 1;
+    }
+
+    /* Timeout case */
     if (dtran->state == DISTTXN_PREPARING) {
         *rcode = ERR_DIST_ABORT;
         *outrc = ERR_BLOCK_FAILED;
@@ -1033,7 +1048,7 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
     Pthread_mutex_unlock(&dtran->lk);
 
     /* Everything prepared successfully, write disttxn record */
-    if (state == DISTTXN_COMMITTING) {
+    if (state == DISTTXN_COMMITTING && !force_failure) {
         if (gbl_debug_disttxn_trace) {
             logmsg(LOGMSG_USER, "%s DISTTXN coordinator committing %s\n", __func__, dtran->dist_txnid);
         }
@@ -1067,11 +1082,13 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
             state = dtran->state;
             Pthread_mutex_unlock(&dtran->lk);
         }
-    } else if (gbl_debug_disttxn_trace) {
-        logmsg(LOGMSG_USER, "%s DISTTXN coordinator aborting %s state=%d\n", __func__, dtran->dist_txnid, state);
+    } else {
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "%s DISTTXN coordinator aborting %s state=%d force-failure=%d\n", __func__, dtran->dist_txnid, state, force_failure);
+        }
     }
     dtran->coordinator_waiting = 0;
-    return !(state == DISTTXN_COMMITTED);
+    return !(state == DISTTXN_COMMITTED || (returnzero));
 }
 
 struct disttxn_collect {
