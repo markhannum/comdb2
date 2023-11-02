@@ -408,7 +408,14 @@ static int osql_wait(struct sqlclntstate *clnt)
         if (!clnt->wait(clnt, timeout, err))
             return 0;
 
-    return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
+    //return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
+    int startms = comdb2_time_epochms();
+    int rc = osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
+    int endms = comdb2_time_epochms();
+    uuidstr_t us;
+    logmsg(LOGMSG_USER, "%s took %d ms to commit rqid=%llu uuid=%s\n", __func__,
+            (endms - startms), osql->rqid, comdb2uuidstr(osql->uuid, us));
+    return rc;
 }
 
 /**

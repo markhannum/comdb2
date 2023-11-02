@@ -960,7 +960,7 @@ static int coordinator_should_wait_lk(transaction_t *dtran, int can_retry)
 }
 
 /* This blocks the coordinator's bp until we know whether this can commit, or until a timeout */
-int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen, int force_failure)
+static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen, int force_failure)
 {
     int returnzero = 0;
     if (gbl_debug_disttxn_trace) {
@@ -994,6 +994,7 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
     /* Measured from beginning of txn */
     /* TODO .. dorin says use heartbeats instead of timeouts */
     int elapsed = (comdb2_time_epochms() - dtran->start_time), remaining;
+    int start_timer = comdb2_time_epochms();
     while (coordinator_should_wait_lk(dtran, can_retry) && (elapsed < gbl_coordinator_timeout_ms)) {
         if ((elapsed / 1000 > 3)) {
             logmsg(LOGMSG_ERROR, "%s: dist-txnid %s waiting for participants for %d seconds\n", __func__, dist_txnid,
@@ -1014,6 +1015,8 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
         pthread_cond_timedwait(&dtran->cd, &dtran->lk, &ts);
         elapsed = (comdb2_time_epochms() - dtran->start_time);
     }
+    int stop_timer = comdb2_time_epochms();
+    logmsg(LOGMSG_USER, "DISTTXN %s wait took %d ms\n", __func__, stop_timer - start_timer);
     /* Aborted or timeout -> RESOLVED */
     if (dtran->state == DISTTXN_ABORTED) {
         *rcode = dtran->failrc;
@@ -1058,7 +1061,10 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
             sleep(3);
             exit(1);
         }
+        start_timer = comdb2_time_epochms();
         int rc = commit_distributed_transaction(dtran);
+        stop_timer = comdb2_time_epochms();
+        logmsg(LOGMSG_USER, "DISTTXN %s commit took %d ms\n", __func__, stop_timer - start_timer);
 
         if (gbl_debug_exit_coordinator_after_commit) {
             flush_log();
@@ -1074,9 +1080,15 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
                 *rcode = ERR_DIST_ABORT;
                 *outrc = ERR_BLOCK_FAILED;
                 snprintf(errmsg, errmsglen, "failed writing to disttxn table");
+                start_timer = comdb2_time_epochms();
                 abort_transaction_lk(dtran, 0);
+                stop_timer = comdb2_time_epochms();
+                logmsg(LOGMSG_USER, "DISTTXN %s abort txn took %d ms\n", __func__, stop_timer - start_timer);
             } else {
+                start_timer = comdb2_time_epochms();
                 commit_participants_lk(dtran);
+                stop_timer = comdb2_time_epochms();
+                logmsg(LOGMSG_USER, "DISTTXN %s commit participants took %d ms\n", __func__, stop_timer - start_timer);
             }
             dtran->resolved_time = comdb2_time_epochms();
             state = dtran->state;
@@ -1088,8 +1100,19 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
         }
     }
     dtran->coordinator_waiting = 0;
-    return !(state == DISTTXN_COMMITTED || (returnzero));
+    return !(state == DISTTXN_COMMITTED || returnzero);
 }
+
+
+int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *outrc, char *errmsg, int errmsglen, int force_failure)
+{
+    int startms = comdb2_time_epochms();
+    int rc = coordinator_wait_int(dist_txnid, can_retry, rcode, outrc, errmsg, errmsglen, force_failure);
+    int endms = comdb2_time_epochms();
+    logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    return rc;
+}
+
 
 struct disttxn_collect {
     char **disttxns;
@@ -1309,6 +1332,13 @@ static int is_aborted(transaction_t *dtran)
     return 0;
 }
 
+static void signal_coordinator_wakeup_lk(transaction_t *dtran)
+{
+    if ((dtran->prepared_count + dtran->failed_count) == listc_size(&dtran->participants)) {
+        Pthread_cond_signal(&dtran->cd);
+    }
+}
+
 /* Core coordinator state machine */
 static int participant_result(const char *dist_txnid, const char *dbname, const char *tier, const char *master,
                               int prepare_success, int partrc, int outrc, const char *errstr)
@@ -1331,6 +1361,7 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
             struct participant *part = find_participant_lk(dtran, dbname);
             participant_prepared_lk(dtran, part);
             disttxn_check_commitable_lk(dtran);
+            signal_coordinator_wakeup_lk(dtran);
             Pthread_mutex_unlock(&dtran->lk);
             return 0;
         }
@@ -1339,6 +1370,7 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         if (prepare_success && is_aborted(dtran)) {
             struct participant *part = find_participant_lk(dtran, dbname);
             participant_failed_lk(dtran, part);
+            signal_coordinator_wakeup_lk(dtran);
             Pthread_mutex_unlock(&dtran->lk);
             send_participant_abort(dist_txnid, dbname, master);
             return 0;
@@ -1367,6 +1399,7 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
             /* If this can be retried, only cancel participants we have gotten results from.
              * This is because a different participant may have a non-retryable rcode */
             abort_transaction_lk(dtran, retryable_rcode(partrc, outrc));
+            signal_coordinator_wakeup_lk(dtran);
             Pthread_mutex_unlock(&dtran->lk);
             return 0;
         }
@@ -1374,7 +1407,7 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         /* Don't need to abort already failed txn */
         if (!prepare_success) {
             struct participant *part = find_participant_lk(dtran, dbname);
-            if (part) participant_failed_lk(dtran, part);
+            participant_failed_lk(dtran, part);
 
             /* Switch from retryable to non-retryable rcode */
             if (retryable_rcode(dtran->failrc, dtran->outrc) && !retryable_rcode(partrc, outrc)) {
@@ -1391,11 +1424,10 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
                 dtran->failrc = partrc;
                 dtran->outrc = outrc;
 
-                /* Signal coordinator */
-                if ((dtran->prepared_count + dtran->failed_count) == listc_size(&dtran->participants)) {
-                    Pthread_cond_signal(&dtran->cd);
-                }
             }
+
+            /* Signal coordinator */
+            signal_coordinator_wakeup_lk(dtran);
             assert(is_aborted(dtran));
             Pthread_mutex_unlock(&dtran->lk);
             return 0;
@@ -1533,7 +1565,7 @@ void participant_has_propagated(const char *dist_txnid, const char *coordinator_
 }
 
 /* Participant block-processor blocks on coordinator */
-int participant_wait(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,
+static int participant_wait_int(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,
                      const char *coordinator_master)
 {
     if (gbl_debug_disttxn_trace) {
@@ -1627,6 +1659,16 @@ int participant_wait(const char *dist_txnid, const char *coordinator_name, const
     Pthread_mutex_unlock(&part_lk);
 
     return rtn == I_AM_COMMITTED ? 0 : -1;
+}
+
+int participant_wait(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,
+                     const char *coordinator_master)
+{
+    int startms = comdb2_time_epochms();
+    int rc = participant_wait_int(dist_txnid, coordinator_name, coordinator_tier, coordinator_master);
+    int endms = comdb2_time_epochms();
+    logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    return rc;
 }
 
 /* Coordinator master tells me (participant master) to abort */

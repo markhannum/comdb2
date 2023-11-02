@@ -7,7 +7,7 @@ bash -n "$0" | exit 1
 
 #export maxtime=30000
 # TODO this is just for verify-retry testing
-export maxtime=900
+export maxtime=1000
 export debug=1
 #export DEBUGTRACE="--debugtrace"
 export DEBUGTRACE=""

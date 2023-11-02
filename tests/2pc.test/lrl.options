@@ -4,6 +4,8 @@ maxosqltransfer 10000000
 
 # Long-deletes require long timeouts
 #coordinator_timeout_ms 300000
+# I think this is the latest bug
+disttxn_linger 99999
 
 # Bugs require ridiculous timeouts
 coordinator_timeout_ms 3000000
@@ -24,7 +26,8 @@ flush_on_prepare 1
 
 # This will probably default to sync-prepare, async-messages
 #disttxn_async_prepare 1
-disttxn_async_messages 1
+#disttxn_async_messages 1
+disttxn_async_messages 0
 
 # Verbose backouts
 verbose_toblock_backouts 1
