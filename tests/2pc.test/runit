@@ -5,9 +5,9 @@ bash -n "$0" | exit 1
 . ${TESTSROOTDIR}/tools/runit_common.sh
 . ${TESTSROOTDIR}/tools/hrtime.sh
 
-#export maxtime=30000
-# TODO this is just for verify-retry testing
-export maxtime=1000
+export maxtime=30000
+# tight maxtime for verify-retry testing
+#export maxtime=1000
 export debug=1
 #export DEBUGTRACE="--debugtrace"
 export DEBUGTRACE=""
@@ -1000,21 +1000,22 @@ function run_test
     bulk_test
 
     # Last delete was expensive & early-acked, so the first insert will take longer 
-    # Write a few records without bound latency (this slowness isn't 2pc related)
+    # Write a few records without bound latency- this slowness isn't 2pc related
     insert_records_to_normalize
 
     # Single-record transactions
     basic_test
 
+    # constraint-violations
+    coordinator_constraint_violation
+    participant_constraint_violation
+
     # Deadlock test
     test_deadlocks
 
     # Verify-retry test (does not work)
-    #test_verify_retry
-
-    # constraint-violations
-    coordinator_constraint_violation
-    participant_constraint_violation
+    test_verify_participant_constraint_violation
+    test_verify_coordinator_constraint_violation
 
     # participant recovery-tests
     exit_participant_after_prepare
@@ -1028,7 +1029,6 @@ function run_test
 function verify_retry_loop
 {
     typeset cnt=0
-    #export maxtime=500
     while [[ "$cnt" -lt 3 ]]; do 
         let cnt=cnt+1
         echo "verify-retry-loop iteration $cnt"
@@ -1059,9 +1059,8 @@ setup
 #test_verify_retry
 #test_verify_participant_constraint_violation
 #test_verify_coordinator_constraint_violation
-verify_retry_loop
-
-#run_test
+#verify_retry_loop
+run_test
 stop_all_databases
 
 if [[ -f ${DBNAME}.failexit ]]; then

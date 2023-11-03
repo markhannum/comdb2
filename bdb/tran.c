@@ -1502,6 +1502,7 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
     tran->is_prepared = 1;
 
     if (gbl_flush_on_prepare) {
+        /* Once in a while this is slow- up to 500ms on my machine */
         bdb_state->dbenv->log_flush(bdb_state->dbenv, NULL);
     }
 

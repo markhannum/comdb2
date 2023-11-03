@@ -230,6 +230,8 @@ REGISTER_TUNABLE("disable_page_latches", "Disables 'page_latches'",
 REGISTER_TUNABLE("disable_partial_indexes", "Disables 'enable_partial_indexes'",
                  TUNABLE_BOOLEAN, &gbl_partial_indexes,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("logmsg_epochms", "Show epochms in log-messages.  (Default: off)", TUNABLE_BOOLEAN, &gbl_logmsg_epochms,
+                 READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("enable_2pc", "Enable 2pc fdb transactions.  (Default: off)", TUNABLE_BOOLEAN, &gbl_2pc,
                  READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("coordinator_sync_on_commit", "Coordinator syncs log and waits on commit.  (Default: on)",

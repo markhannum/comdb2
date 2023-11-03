@@ -1571,36 +1571,17 @@ static int participant_wait_int(const char *dist_txnid, const char *coordinator_
     if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
     }
-    if (coordinator_master == NULL) {
-        abort();
-    }
+    int rtn = 0, first = 1;
 
-    flush_log();
+    /* Because this isn't sent under lock, a coordinator commit can arrive before we get the lock */
+    send_coordinator_prepared(dist_txnid, coordinator_name, coordinator_master);
 
     if (gbl_debug_exit_participant_after_prepare) {
-        send_coordinator_prepared(dist_txnid, coordinator_name, coordinator_master);
         logmsg(LOGMSG_FATAL, "%s exiting participant on debug tunable\n", __func__);
-
-        /*
-         * Sleep to make sure all replicants have gotten the prepare
-         *
-         * sleep(1) wasn't enough in my testing to ensure that this made it to other machines,
-         * and the test showed that exiting a participant master right after writing a prepare
-         * (and responding to the coordinator master) is pretty flaky.
-         *
-         * Brainstorming
-         * .. use "durable lsn" method?
-         * .. meaning only respond with good rcode if a quorum of machines have written prepare?
-         *
-         */
+        /* Sleep to make sure all replicants have gotten the prepare */
         sleep(3);
         exit(1);
     }
-    int rtn = 0, first = 1;
-
-    /* Always send at least one message .. 
-     * coordinator will wait even for failed txns if the failure can be retried */
-    send_coordinator_prepared(dist_txnid, coordinator_name, coordinator_master);
 
     Pthread_mutex_lock(&part_lk);
 
@@ -1611,15 +1592,7 @@ static int participant_wait_int(const char *dist_txnid, const char *coordinator_
         }
         p = add_participant_lk(dist_txnid, I_AM_PREPARED);
         p->start_wait = comdb2_time_epochms();
-    } else {
-        assert(p->state == I_AM_ABORTED);
-        if (gbl_debug_disttxn_trace) {
-            logmsg(LOGMSG_USER, "DISTTXN %s line %d found aborted participant %s\n", __func__, __LINE__, dist_txnid);
-        }
-        rem_participant_lk(p);
-        Pthread_mutex_unlock(&part_lk);
-        return -1;
-    }
+    } 
 
     Pthread_mutex_lock(&p->lk);
     Pthread_mutex_unlock(&part_lk);
@@ -1634,22 +1607,23 @@ static int participant_wait_int(const char *dist_txnid, const char *coordinator_
             first = 0;
         } else {
             send_coordinator_prepared_find_master(dist_txnid, coordinator_name, coordinator_tier);
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s line %d finish sending prepared %s first=%d\n", __func__, __LINE__,
+                        dist_txnid, first);
+            }
         }
         Pthread_mutex_lock(&p->lk);
-        if (gbl_debug_disttxn_trace) {
-            logmsg(LOGMSG_USER, "DISTTXN %s line %d finish sending prepared %s first=%d\n", __func__, __LINE__,
-                   dist_txnid, first);
+        if (p->state == I_AM_PREPARED) {
+            int elapsed = comdb2_time_epochms() - p->start_wait;
+            if ((elapsed / 1000 > 3)) {
+                logmsg(LOGMSG_ERROR, "%s: dist-txnid %s blocked on coordinator for %d seconds\n", __func__, dist_txnid,
+                        elapsed / 1000);
+            }
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += 1;
+            pthread_cond_timedwait(&p->cd, &p->lk, &ts);
         }
-
-        int elapsed = comdb2_time_epochms() - p->start_wait;
-        if ((elapsed / 1000 > 3)) {
-            logmsg(LOGMSG_ERROR, "%s: dist-txnid %s blocked on coordinator for %d seconds\n", __func__, dist_txnid,
-                   elapsed / 1000);
-        }
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec += 1;
-        pthread_cond_timedwait(&p->cd, &p->lk, &ts);
     }
     rtn = p->state;
     Pthread_mutex_unlock(&p->lk);
@@ -1732,13 +1706,17 @@ int coordinator_committed(const char *dist_txnid)
     Pthread_mutex_lock(&part_lk);
     participant_t *p = hash_find(participant_hash, &dist_txnid);
     if (!p) {
+        p = add_participant_lk(dist_txnid, I_AM_COMMITTED);
+        if (gbl_debug_disttxn_trace)
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s commit occurred prior to wait\n", __func__, dist_txnid);
         Pthread_mutex_unlock(&part_lk);
-        /* Maybe this is a recovered prepare */
+        /* Possibly a recovered prepare */
         int rc = thedb->bdb_env->dbenv->txn_commit_recovered(thedb->bdb_env->dbenv, dist_txnid);
-        if (rc != 0) {
-            logmsg(LOGMSG_ERROR, "%s coordinator-commit for missing transaction %s\n", __func__, dist_txnid);
-        } else {
+        if (rc == 0) {
             logmsg(LOGMSG_INFO, "%s coordinator-commit for recovered transaction %s\n", __func__, dist_txnid);
+            Pthread_mutex_lock(&part_lk);
+            rem_participant_lk(p);
+            Pthread_mutex_unlock(&part_lk);
         }
         return rc;
     }
