@@ -632,7 +632,7 @@ struct session_tbl;
 void clear_session_tbls(struct sqlclntstate *);
 
 void clear_participants(struct sqlclntstate *);
-void add_participant(struct sqlclntstate *, const char *dbname, const char *tier);
+int add_participant(struct sqlclntstate *, const char *dbname, const char *tier);
 
 /* Client specific sql state */
 struct sqlclntstate {

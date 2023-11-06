@@ -38,7 +38,7 @@ enum transaction_states {
     DISTTXN_COLLECTED = 0,
     DISTTXN_PREPARING = 1,
     DISTTXN_ABORTED = 2,
-    DISTTXN_COMMITTING = 3,
+    DISTTXN_PREPARED = 3,
     DISTTXN_COMMITTED = 4,
     DISTTXN_PROPAGATED = 5,
     DISTTXN_PROPAGATE_TIMEOUT = 6,
@@ -141,7 +141,6 @@ static pthread_mutex_t hndl_lk = PTHREAD_MUTEX_INITIALIZER;
 
 /* Tunables */
 int gbl_2pc = 0;
-int gbl_coordinator_timeout_ms = 5000;
 int gbl_coordinator_propagate_timeout_ms = 5000;
 int gbl_disttxn_linger_time = 10;
 int gbl_disttxn_sanctioned_linger_time = 600;
@@ -150,6 +149,7 @@ int gbl_coordinator_notify = POSTCOMMIT;
 int gbl_disttxn_handle_cache = 1;
 int gbl_disttxn_async_prepare = 0;
 int gbl_disttxn_async_messages = 0;
+int gbl_2pc_heartbeat_timeout = 3000;
 int gbl_coordinator_sync_on_commit = 1;
 
 /* Debug tunables */
@@ -246,7 +246,7 @@ static int donate_handle(cdb2_hndl_tp *hndl, const char *dbname, const char *mac
 }
 
 /* Create and send a disttxn message */
-static void send_2pc_message(const char *dist_txnid, const char *dbname, const char *pname, const char *ptier,
+static int send_2pc_message(const char *dist_txnid, const char *dbname, const char *pname, const char *ptier,
                              const char *master, int op, int rcode, int outrc, const char *errmsg, int async)
 {
     cdb2_hndl_tp *hndl = NULL;
@@ -260,7 +260,7 @@ static void send_2pc_message(const char *dist_txnid, const char *dbname, const c
 
     if ((rc = retrieve_handle(&hndl, dbname, master, flags)) != 0) {
         logmsg(LOGMSG_INFO, "%s error opening handle to %s %s, rc=%d\n", __func__, dbname, master, rc);
-        return;
+        return -1;
     }
 
     if ((rc = cdb2_send_2pc(hndl, (char *)dbname, (char *)pname, (char *)ptier, gbl_myhostname, op, (char *)dist_txnid,
@@ -268,9 +268,10 @@ static void send_2pc_message(const char *dist_txnid, const char *dbname, const c
         logmsg(LOGMSG_INFO, "%s dist-txn %s error sending to %s mach %s, rc=%d\n", __func__, dist_txnid, dbname, master,
                rc);
         cdb2_close(hndl);
-        return;
+        return -1;
     }
     donate_handle(hndl, dbname, master);
+    return 0;
 }
 
 /* This coordinator is telling this participant to commit */
@@ -443,7 +444,7 @@ static void commit_participants_lk(transaction_t *dtran)
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dtran->dist_txnid);
     }
     struct participant *part = NULL, *tmp = NULL;
-    if (dtran->state == DISTTXN_COMMITTING) {
+    if (dtran->state == DISTTXN_PREPARED) {
         dtran->state = DISTTXN_COMMITTED;
         LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
         {
@@ -575,6 +576,7 @@ int collect_participants(const char *dist_txnid, participant_list_t *participant
 
     /* Coordinator local */
     dtran->coordinator_local = calloc(sizeof(struct participant), 1);
+    dtran->coordinator_local->last_heartbeat = comdb2_time_epochms();
     dtran->coordinator_local->participant_name = strdup(gbl_dbname);
     dtran->coordinator_local->participant_tier = strdup(COORDINATOR_LOCAL);
     dtran->coordinator_local->status = PARTICIPANT_PREPARING;
@@ -774,7 +776,7 @@ static int disttxn_check_commitable_lk(transaction_t *dtran)
         }
         /* Signal coordinator_local */
         rtn = 1;
-        dtran->state = DISTTXN_COMMITTING;
+        dtran->state = DISTTXN_PREPARED;
         Pthread_cond_signal(&dtran->cd);
     } else if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s not-yet commitable\n", __func__, dtran->dist_txnid);
@@ -861,7 +863,7 @@ void coordinator_failed(const char *dist_txnid)
 
     dtran->coordinator_local->status = PARTICIPANT_FAILED;
 
-    assert(dtran->state != DISTTXN_COMMITTING && dtran->state != DISTTXN_COMMITTED &&
+    assert(dtran->state != DISTTXN_PREPARED && dtran->state != DISTTXN_COMMITTED &&
            dtran->state != DISTTXN_PROPAGATED);
 
     if (dtran->state == DISTTXN_PREPARING) {
@@ -907,7 +909,7 @@ int coordinator_wait_propagate(const char *dist_txnid)
                    dist_txnid, elapsed / 1000);
         }
         struct timespec ts;
-        remaining = (gbl_coordinator_timeout_ms - elapsed);
+        remaining = (gbl_coordinator_propagate_timeout_ms - elapsed);
         clock_gettime(CLOCK_REALTIME, &ts);
 
         if (remaining < 1000) {
@@ -944,8 +946,39 @@ int retryable_rcode(int rcode, int outrc)
     return (outrc == ERR_NOTSERIAL || (outrc == ERR_BLOCK_FAILED && rcode == ERR_VERIFY));
 }
 
+static int check_coordinator_timeout_lk(transaction_t *dtran)
+{
+    int nowms = comdb2_time_epochms();
+    if ((nowms - dtran->coordinator_local->last_heartbeat) > gbl_2pc_heartbeat_timeout) {
+        logmsg(LOGMSG_USER, "%s disttxn %s no coordinator hbeat timing out\n", __func__, dtran->dist_txnid);
+        return 1;
+    }
+    return 0;
+}
+
+static int check_participant_timeout_lk(transaction_t *dtran)
+{
+    struct participant *part = NULL, *tmp = NULL;
+    int nowms = comdb2_time_epochms();
+    /* XXX only count heartbeats from preparing transactions */
+    LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
+    {
+        if (part->status == PARTICIPANT_PREPARING && (part->heartbeat_count > 0) && ((nowms - part->last_heartbeat) > gbl_2pc_heartbeat_timeout)) {
+            logmsg(LOGMSG_USER, "%s disttxn %s no hbeat from %s %s timing out\n", __func__, dtran->dist_txnid,
+                part->participant_name, part->participant_tier);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int coordinator_should_wait_lk(transaction_t *dtran, int can_retry)
 {
+    if (check_participant_timeout_lk(dtran)) {
+        logmsg(LOGMSG_USER, "DISTTXN %s disttxn %s participant timeout\n", __func__, dtran->dist_txnid);
+        return 0;
+    }
+
     if (dtran->state == DISTTXN_COLLECTED || dtran->state == DISTTXN_PREPARING) {
         logmsg(LOGMSG_USER, "DISTTXN %s returning true because state=%s\n",
             __func__, dtran->state == DISTTXN_COLLECTED ? "collected" : "preparing");
@@ -993,25 +1026,17 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
 
     /* Measured from beginning of txn */
     /* TODO .. dorin says use heartbeats instead of timeouts */
-    int elapsed = (comdb2_time_epochms() - dtran->start_time), remaining;
+    int elapsed = (comdb2_time_epochms() - dtran->start_time);
     int start_timer = comdb2_time_epochms();
-    while (coordinator_should_wait_lk(dtran, can_retry) && (elapsed < gbl_coordinator_timeout_ms)) {
+    while (coordinator_should_wait_lk(dtran, can_retry)) {
         if ((elapsed / 1000 > 3)) {
             logmsg(LOGMSG_ERROR, "%s: dist-txnid %s waiting for participants for %d seconds\n", __func__, dist_txnid,
                    elapsed / 1000);
         }
         struct timespec ts;
-        remaining = (gbl_coordinator_timeout_ms - elapsed);
+
         clock_gettime(CLOCK_REALTIME, &ts);
-        if (remaining < 1000) {
-            ts.tv_nsec += (1000000L * remaining);
-            if (ts.tv_nsec >= 1000000000) {
-                ts.tv_nsec -= 1000000000;
-                ts.tv_sec += 1;
-            }
-        } else {
-            ts.tv_sec += 1;
-        }
+        ts.tv_sec += 1;
         pthread_cond_timedwait(&dtran->cd, &dtran->lk, &ts);
         elapsed = (comdb2_time_epochms() - dtran->start_time);
     }
@@ -1028,7 +1053,7 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
 
     /* force-failure: this is a replayable rcode and all other participants succeeded
      * returning 0 asks toblock to use it's original rcode */
-    if (dtran->state == DISTTXN_COMMITTING && force_failure)
+    if (dtran->state == DISTTXN_PREPARED && force_failure)
     {
         *rcode = ERR_DIST_ABORT;
         *outrc = ERR_BLOCK_FAILED;
@@ -1051,7 +1076,7 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
     Pthread_mutex_unlock(&dtran->lk);
 
     /* Everything prepared successfully, write disttxn record */
-    if (state == DISTTXN_COMMITTING && !force_failure) {
+    if (state == DISTTXN_PREPARED && !force_failure) {
         if (gbl_debug_disttxn_trace) {
             logmsg(LOGMSG_USER, "%s DISTTXN coordinator committing %s\n", __func__, dtran->dist_txnid);
         }
@@ -1173,9 +1198,13 @@ static void disttxn_timeout(void)
         }
         Pthread_mutex_unlock(&active_transactions_lk);
 
+        /* Coordinator can still be stuck & holding locks if we abort this way .. 
+         * still thinking on this .. */
         if (dtran && dtran->state == DISTTXN_PREPARING && !dtran->coordinator_waiting &&
-            (comdb2_time_epochms() - dtran->start_time) > gbl_coordinator_timeout_ms) {
+            (check_participant_timeout_lk(dtran) || check_coordinator_timeout_lk(dtran))) {
             abort_transaction_lk(dtran, 0);
+            dtran->failrc = ERR_DIST_ABORT;
+            dtran->outrc = ERR_BLOCK_FAILED;
             logmsg(LOGMSG_INFO, "DISTTXN %s disttxn %s aborted by timeout\n", __func__, dtran->dist_txnid);
         }
         if (dtran) {
@@ -1360,6 +1389,8 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         if (prepare_success && dtran->state == DISTTXN_PREPARING) {
             struct participant *part = find_participant_lk(dtran, dbname);
             participant_prepared_lk(dtran, part);
+            part->last_heartbeat = comdb2_time_epochms();
+            part->heartbeat_count++;
             disttxn_check_commitable_lk(dtran);
             signal_coordinator_wakeup_lk(dtran);
             Pthread_mutex_unlock(&dtran->lk);
@@ -1434,7 +1465,7 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         }
 
         /* Waiting for coordinator to write commit record */
-        assert(dtran->state == DISTTXN_COMMITTING);
+        assert(dtran->state == DISTTXN_PREPARED);
         Pthread_mutex_unlock(&dtran->lk);
         return 0;
     }
@@ -1633,6 +1664,61 @@ static int participant_wait_int(const char *dist_txnid, const char *coordinator_
     Pthread_mutex_unlock(&part_lk);
 
     return rtn == I_AM_COMMITTED ? 0 : -1;
+}
+
+void coordinator_heartbeat(const char *dist_txnid)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    transaction_t *dtran;
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran) {
+        Pthread_mutex_lock(&dtran->lk);
+    }
+    Pthread_mutex_unlock(&active_transactions_lk);
+    if (dtran) {
+        dtran->coordinator_local->last_heartbeat = comdb2_time_epochms();
+        Pthread_mutex_unlock(&dtran->lk);
+    }
+}
+
+int participant_heartbeat(const char *dist_txnid, const char *participant_name, const char *participant_tier)
+{
+    int rcode = -1;
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s from %s %s\n", __func__, dist_txnid, participant_name, participant_tier);
+    }
+    transaction_t *dtran;
+    Pthread_mutex_lock(&active_transactions_lk);
+    dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran)
+        Pthread_mutex_lock(&dtran->lk);
+    Pthread_mutex_unlock(&active_transactions_lk);
+
+    if (dtran) {
+        struct participant *part = find_participant_lk(dtran, participant_name);
+        part->last_heartbeat = comdb2_time_epochms();
+        part->heartbeat_count++;
+        Pthread_mutex_unlock(&dtran->lk);
+        rcode = 0;
+    }
+
+    return rcode;
+}
+
+int participant_send_heartbeat(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
+    }
+    char *pname = gbl_dbname, *ptier = gbl_machine_class ? gbl_machine_class : gbl_myhostname;
+    int rc = send_2pc_message(dist_txnid, coordinator_name, pname, ptier, coordinator_master, CDB2_DIST__HEARTBEAT, 0, 0, NULL, gbl_disttxn_async_messages);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s rcode %d\n", __func__, dist_txnid, rc);
+    }
+    return rc;
 }
 
 int participant_wait(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,

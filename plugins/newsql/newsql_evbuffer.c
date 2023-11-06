@@ -525,6 +525,11 @@ static void process_disttxn(struct newsql_appdata_evbuffer *appdata, CDB2DISTTXN
         rcode = osql_discard(disttxn->disttxn->txnid);
         break;
 
+    /* Participant master sends me (coordinator master) a heartbeat message */
+    case (CDB2_DIST__HEARTBEAT):
+        rcode = participant_heartbeat(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier);
+        break;
+
     /* Participant master tells me (coordinator master) it has prepared */
     case (CDB2_DIST__PREPARED):
         rcode = participant_prepared(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier,

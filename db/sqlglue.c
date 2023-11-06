@@ -2421,20 +2421,21 @@ void clear_session_tbls(struct sqlclntstate *clnt)
     }
 }
 
-void add_participant(struct sqlclntstate *clnt, const char *dbname, const char *tier)
+int add_participant(struct sqlclntstate *clnt, const char *dbname, const char *tier)
 {
     struct participant *p;
     LISTC_FOR_EACH(&clnt->participants, p, linkv)
     {
-        if (!strcmp(p->participant_name, dbname) && !strcmp(p->participant_tier, tier)) {
-            logmsg(LOGMSG_FATAL, "%s %s:%s added more than once to participants\n", __func__, dbname, tier);
-            abort();
+        if (!strcmp(p->participant_name, dbname)) {
+            logmsg(LOGMSG_ERROR, "%s %s:%s added more than once to participants\n", __func__, dbname, tier);
+            return -1;
         }
     }
     p = calloc(sizeof(struct participant), 1);
     p->participant_name = strdup(dbname);
     p->participant_tier = strdup(tier);
     listc_atl(&clnt->participants, p);
+    return 0;
 }
 
 void clear_participants(struct sqlclntstate *clnt)

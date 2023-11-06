@@ -1413,7 +1413,7 @@ int __txn_abort_recovered(dbenv, dist_txnid)
 	Pthread_mutex_lock(&dbenv->prepared_txn_lk);
 	if ((p = hash_find(dbenv->prepared_txn_hash, &dist_txnid)) != NULL) {
 		if (!F_ISSET(p, DB_DIST_HAVELOCKS) || p->txnp == NULL) {
-			logmsg(LOGMSG_INFO, "%s unable to abort unprepared dist-txn %s\n", __func__, dist_txnid);
+			logmsg(LOGMSG_DEBUG, "%s unable to abort unprepared dist-txn %s\n", __func__, dist_txnid);
 			p = NULL;
 		} else {
 			hash_del(dbenv->prepared_txn_hash, p);
@@ -1423,7 +1423,7 @@ int __txn_abort_recovered(dbenv, dist_txnid)
 	}
 	Pthread_mutex_unlock(&dbenv->prepared_txn_lk);
 	if (p == NULL) {
-		logmsg(LOGMSG_INFO, "%s unable to locate txnid %s\n", __func__, dist_txnid);
+		logmsg(LOGMSG_DEBUG, "%s unable to locate txnid %s\n", __func__, dist_txnid);
 		return -1;
 	}
 

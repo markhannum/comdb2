@@ -67,6 +67,15 @@ int participant_has_failed(const char *dist_txnid, const char *dbname, const cha
 /* This participant sends the coordinator an 'i-have-propagated' message */
 void participant_has_propagated(const char *dist_txnid, const char *dbname, const char *master);
 
+/* This participant sends a heartbeat to the coordinator */
+int participant_send_heartbeat(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master);
+
+/* This coordinator has received a heartbeat message from a participant */
+int participant_heartbeat(const char *dist_txnid, const char *participant_name, const char *participant_tier);
+
+/* Coordinator updates his own heartbeat timestamp */
+void coordinator_heartbeat(const char *dist_txnid);
+
 /* This participant tells coordinator it has prepared and waits for response */
 int participant_wait(const char *dist_txnid, const char *coordinator_name, const char *coordinator_tier,
                      const char *coordinator_master);

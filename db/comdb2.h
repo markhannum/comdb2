@@ -1187,6 +1187,8 @@ struct participant {
     char *participant_name;
     char *participant_tier;
     char *participant_master;
+    time_t last_heartbeat;
+    int heartbeat_count;
     int status;
     LINKC_T(struct participant) linkv;
 };
@@ -1275,6 +1277,7 @@ struct osql_sess {
     char *coordinator_dbname;
     char *coordinator_tier;
     char *coordinator_master;
+    int last_2pc_heartbeat;
     participant_list_t participants;
 
     /* these are set asynchronously */

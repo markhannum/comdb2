@@ -2996,7 +2996,7 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
 
     if (op != CDB2_DIST__PREPARE && op != CDB2_DIST__DISCARD && op != CDB2_DIST__PREPARED &&
         op != CDB2_DIST__FAILED_PREPARE && op != CDB2_DIST__COMMIT && op != CDB2_DIST__ABORT &&
-        op != CDB2_DIST__PROPAGATED) {
+        op != CDB2_DIST__PROPAGATED && op != CDB2_DIST__HEARTBEAT) {
 
         if (hndl->flags & CDB2_DEBUG) {
             fprintf(stderr, "DISTTXN %s line %d ignoring bad op\n", __func__, __LINE__);

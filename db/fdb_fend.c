@@ -3951,7 +3951,10 @@ int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
             rc = fdb_send_prepare(msg, tran, clnt->dist_txnid, clnt->dbtran.mode, tran->sb);
             if (!rc) {
                 const char *tier = fdb_dbname_class_routing(tran->fdb);
-                add_participant(clnt, tran->fdb->dbname, tier);
+                if ((rc = add_participant(clnt, tran->fdb->dbname, tier)) != 0) {
+                    tran->errstr = strdup("multiple participants with same dbname");
+                    break;
+                }
             }
             if (gbl_fdb_track)
                 logmsg(LOGMSG_USER, "%s Send Prepare tid=%llx db=\"%s\" rc=%d\n", __func__,
