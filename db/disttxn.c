@@ -149,7 +149,7 @@ int gbl_coordinator_notify = POSTCOMMIT;
 int gbl_disttxn_handle_cache = 1;
 int gbl_disttxn_async_prepare = 0;
 int gbl_disttxn_async_messages = 0;
-int gbl_2pc_heartbeat_timeout = 3000;
+int gbl_2pc_heartbeat_timeout = 10000;
 int gbl_coordinator_sync_on_commit = 1;
 
 /* Debug tunables */
@@ -963,6 +963,7 @@ static int check_participant_timeout_lk(transaction_t *dtran)
     /* XXX only count heartbeats from preparing transactions */
     LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
     {
+        /* heartbeat_count > 0 is a hack .. i have to revise this */
         if (part->status == PARTICIPANT_PREPARING && (part->heartbeat_count > 0) && ((nowms - part->last_heartbeat) > gbl_2pc_heartbeat_timeout)) {
             logmsg(LOGMSG_USER, "%s disttxn %s no hbeat from %s %s timing out\n", __func__, dtran->dist_txnid,
                 part->participant_name, part->participant_tier);

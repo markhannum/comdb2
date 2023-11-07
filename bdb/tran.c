@@ -1501,9 +1501,11 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
     }
     tran->is_prepared = 1;
 
-    if (gbl_flush_on_prepare) {
-        /* Once in a while this is slow- up to 500ms on my machine */
+    if (!prepare_rc && gbl_flush_on_prepare) {
+        int startms = comdb2_time_epochms();
         bdb_state->dbenv->log_flush(bdb_state->dbenv, NULL);
+        int endms = comdb2_time_epochms();
+        logmsg(LOGMSG_USER, "DISTTXN %s log-flush took %d ms\n", __func__, (endms - startms));
     }
 
     return prepare_rc;
