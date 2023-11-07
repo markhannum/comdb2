@@ -1050,6 +1050,59 @@ function simple_test
     done
 }
 
+function insert_2000
+{
+    echo "insert_2000"
+    echo "begin
+insert into t1(a) select * from generate_series(1, 2000)
+insert into $SECONDARY_DBNAME.t1(a) select * from generate_series(1, 2000)
+insert into $TERTIARY_DBNAME.t1(a) select * from generate_series(1, 2000)
+insert into $QUATERNARY_DBNAME.t1(a) select * from generate_series(1, 2000)
+insert into $QUINARY_DBNAME.t1(a) select * from generate_series(1, 2000)
+commit
+" | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default -
+    r=$?
+    [[ "$r" == "0" ]] || fail_exit "failed inserting iteration $j"
+
+
+    x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+    if [[ "$x" -ne "2000" ]]; then
+        fail_exit "$DBNAME has $x records after delete"
+    fi
+
+    x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select count(*) from $SECONDARY_DBNAME.t1")
+    if [[ "$x" -ne "2000" ]]; then
+        fail_exit "$SECONDARY_DBNAME has $x records after delete"
+    fi
+
+    x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select count(*) from $TERTIARY_DBNAME.t1")
+    if [[ "$x" -ne "2000" ]]; then
+        fail_exit "$TERTIARY_DBNAME has $x records after delete"
+    fi
+
+    x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select count(*) from $QUATERNARY_DBNAME.t1")
+    if [[ "$x" -ne "2000" ]]; then
+        fail_exit "$QUATERNARY_DBNAME has $x records after delete"
+    fi
+
+    x=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select count(*) from $QUINARY_DBNAME.t1")
+    if [[ "$x" -ne "2000" ]]; then
+        fail_exit "$QUINARY_DBNAME has $x records after delete"
+    fi
+
+    delete_records
+}
+
+function insert_2000_loop
+{
+    typeset j=0
+    while [[ $j -lt 10 ]]; do
+        let j=j+1
+        echo "insert-2000 iteration $j"
+        insert_2000
+    done
+}
+
 rm ${DBNAME}.failexit >/dev/null 2>&1 
 [[ -z "$CLUSTER" ]] && failexit "This test requires a 3-node cluster"
 
@@ -1060,6 +1113,7 @@ setup
 #test_verify_participant_constraint_violation
 #test_verify_coordinator_constraint_violation
 #verify_retry_loop
+#insert_2000_loop
 run_test
 stop_all_databases
 

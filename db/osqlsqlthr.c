@@ -237,8 +237,10 @@ static int osql_sock_start_int(struct sqlclntstate *clnt, int type,
 
     /* new id */
     if (!keep_rqid) {
+        uuidstr_t us;                                                          \
         osql->rqid = OSQL_RQID_USE_UUID;
         comdb2uuid(osql->uuid);
+        logmsg(LOGMSG_USER, "%s starting uuid %s\n", __func__, comdb2uuidstr(osql->uuid, us));
     }
 
     osql->is_reorder_on = start_flags & OSQL_START_NO_REORDER
@@ -327,6 +329,8 @@ retry:
     if (rc == 0) {
         if (clnt->client_understands_query_stats)
             osql_query_dbglog(thd, clnt->queryid);
+        if (clnt->is_participant)
+            osql_begin_participant(thd);
         osql->sock_started = 1;
     } else if (!keep_rqid) {
         int irc = osql_end(clnt);
@@ -863,6 +867,9 @@ static int osql_sock_restart(struct sqlclntstate *clnt, int maxretries,
     int retries = 0;
     int bdberr = 0;
     int sentops = 0;
+
+    logmsg(LOGMSG_USER, "%s restarting rqid=%llx uuid=%s keep-session=%d\n", __func__,
+        clnt->osql.rqid, comdb2uuidstr(clnt->osql.uuid, us), keep_session);
 
     if (!thd) {
         logmsg(LOGMSG_ERROR, "%s:%d Bug, not sql thread !\n", __func__, __LINE__);
@@ -1546,11 +1553,6 @@ static int osql_send_commit_logic(struct sqlclntstate *clnt, int is_retry,
 
         if (clnt->use_2pc && clnt->dist_txnid) {
             assert((clnt->is_coordinator + clnt->is_participant) == 1);
-            if (clnt->is_participant) {
-                osql->replicant_numops++;
-                rc = osql_send_prepare(&osql->target, osql->rqid, osql->uuid, clnt->dist_txnid,
-                                       clnt->coordinator_dbname, clnt->coordinator_tier, nettype);
-            }
             if (clnt->is_coordinator) {
                 struct participant *p;
                 assert(listc_size(&clnt->participants) > 0);
@@ -1661,6 +1663,22 @@ static int check_osql_capacity_int(struct sqlclntstate *clnt)
 static int check_osql_capacity(struct sql_thread *thd)
 {
     return check_osql_capacity_int(thd->clnt);
+}
+
+int osql_begin_participant(struct sql_thread *thd)
+{
+    struct sqlclntstate *clnt = thd->clnt;
+    osqlstate_t *osql = &clnt->osql;
+    int rc;
+    int restarted;
+
+    do {
+        rc = osql_send_prepare(&osql->target, osql->rqid, osql->uuid, clnt->dist_txnid,
+                                   clnt->coordinator_dbname, clnt->coordinator_tier, NET_OSQL_SOCK_RPL);
+        RESTART_SOCKSQL;
+    } while (restarted);
+    osql->replicant_numops++;
+    return rc;
 }
 
 int osql_query_dbglog(struct sql_thread *thd, int queryid)

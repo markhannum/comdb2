@@ -116,6 +116,9 @@ typedef struct {
     int flags;                  /* extensions */
     uuid_t tiduuid;
     int seq;
+    char *dist_txnid;
+    char *coordinator_dbname;
+    char *coordinator_tier;
 } fdb_msg_2pc_tran_t;
 
 typedef struct {
@@ -713,6 +716,7 @@ char *fdb_msg_data(fdb_msg_t *msg)
 void fdb_msg_clean_message(fdb_msg_t *msg)
 {
     switch (msg->hd.type & FD_MSG_TYPE) {
+    /* TODO : NIX THIS MESSAGE ENTIRELY */
     case FDB_MSG_TRAN_PREPARE:
         if (msg->fp.dist_txnid) {
             free(msg->fp.dist_txnid);
@@ -728,10 +732,24 @@ void fdb_msg_clean_message(fdb_msg_t *msg)
         }
         break;
 
+    case FDB_MSG_TRAN_2PC_BEGIN:
+        if (msg->tv.dist_txnid) {
+            free(msg->tv.dist_txnid);
+            msg->tv.dist_txnid = NULL;
+        }
+        if (msg->tv.coordinator_dbname) {
+            free(msg->tv.coordinator_dbname);
+            msg->tv.coordinator_dbname = NULL;
+        }
+        if (msg->tv.coordinator_tier) {
+            free(msg->tv.coordinator_tier);
+            msg->tv.coordinator_tier = NULL;
+        }
+        break;
+
     case FDB_MSG_TRAN_BEGIN:
     case FDB_MSG_TRAN_COMMIT:
     case FDB_MSG_TRAN_ROLLBACK:
-    case FDB_MSG_TRAN_2PC_BEGIN:
         break;
 
     case FDB_MSG_TRAN_2PC_RC:
@@ -1062,6 +1080,39 @@ int fdb_msg_read_message_int(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags,
         if (rc != sizeof(msg->tv.seq))
             return -1;
         msg->tv.seq = ntohl(msg->tv.seq);
+
+        /* dist-txnid */
+        rc = sbuf2fread((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return -1;
+        tmp = ntohl(tmp);
+
+        msg->tv.dist_txnid = malloc(tmp);
+        rc = sbuf2fread((char *)msg->tv.dist_txnid, 1, tmp, sb);
+        if (rc != tmp)
+            return -1;
+
+        /* coordinator-dbname */
+        rc = sbuf2fread((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return -1;
+        tmp = ntohl(tmp);
+
+        msg->tv.coordinator_dbname = malloc(tmp);
+        rc = sbuf2fread((char *)msg->tv.coordinator_dbname, 1, tmp, sb);
+        if (rc != tmp)
+            return -1;
+
+        /* coordinator-tier */
+        rc = sbuf2fread((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return -1;
+        tmp = ntohl(tmp);
+
+        msg->tv.coordinator_tier = malloc(tmp);
+        rc = sbuf2fread((char *)msg->tv.coordinator_tier, 1, tmp, sb);
+        if (rc != tmp)
+            return -1;
 
         break;
 
@@ -2047,6 +2098,39 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         tmp = htonl(msg->tv.seq);
         rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
         if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        /* dist-txnid */
+        tmp = htonl(strlen(msg->tv.dist_txnid) + 1);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        tmp = ntohl(tmp);
+        rc = sbuf2fwrite((char *)msg->tv.dist_txnid, 1, tmp, sb);
+        if (rc != tmp)
+            return FDB_ERR_WRITE_IO;
+
+        /* coordinator-dbname */
+        tmp = htonl(strlen(msg->tv.coordinator_dbname) + 1);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        tmp = ntohl(tmp);
+        rc = sbuf2fwrite((char *)msg->tv.coordinator_dbname, 1, tmp, sb);
+        if (rc != tmp)
+            return FDB_ERR_WRITE_IO;
+
+        /* coordinator-tier */
+        tmp = htonl(strlen(msg->tv.coordinator_tier) + 1);
+        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
+        if (rc != sizeof(tmp))
+            return FDB_ERR_WRITE_IO;
+
+        tmp = ntohl(tmp);
+        rc = sbuf2fwrite((char *)msg->tv.coordinator_tier, 1, tmp, sb);
+        if (rc != tmp)
             return FDB_ERR_WRITE_IO;
 
         break;
@@ -3194,7 +3278,7 @@ int fdb_bend_index(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     return 0;
 }
 
-int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, int flags, SBUF2 *sb)
+int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, int flags, char *dist_txnid, char *coordinator_dbname, char *coordinator_tier, SBUF2 *sb)
 {
     int rc;
 
@@ -3209,6 +3293,9 @@ int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level
     msg->tv.flags = flags;
     msg->tv.version = FDB_2PC_VER;
     msg->tv.seq = 0; /* the beginnings: there was a zero */
+    msg->tv.dist_txnid = dist_txnid;
+    msg->tv.coordinator_dbname = coordinator_dbname;
+    msg->tv.coordinator_tier = coordinator_tier;
 
     assert(trans->seq == 0);
 
@@ -3418,7 +3505,7 @@ int fdb_bend_trans_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     int rc = 0;
     struct sqlclntstate *clnt;
 
-    rc = fdb_svc_trans_begin(tid, lvl, flags, seq, arg->thd, &clnt);
+    rc = fdb_svc_trans_begin(tid, lvl, flags, seq, arg->thd, NULL, NULL, NULL, &clnt);
 
     /* clnt gets set to NULL on error. */
     arg->clnt = clnt;
@@ -3449,6 +3536,9 @@ int fdb_bend_trans_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
 int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
 {
     char *tid = msg->tv.tid;
+    char *dist_txnid = msg->tv.dist_txnid;
+    char *coordinator_dbname = msg->tv.coordinator_dbname;
+    char *coordinator_tier = msg->tv.coordinator_tier;
     enum transaction_level lvl = msg->tv.lvl;
     int flags = msg->tv.flags;
     int seq = msg->tv.seq;
@@ -3470,7 +3560,7 @@ int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
         return -1;
     }
 
-    rc = fdb_svc_trans_begin(tid, lvl, flags, seq, arg->thd, &clnt);
+    rc = fdb_svc_trans_begin(tid, lvl, flags, seq, arg->thd, dist_txnid, coordinator_dbname, coordinator_tier, &clnt);
 
     /* clnt gets set to NULL on error. */
     arg->clnt = clnt;
@@ -3539,6 +3629,7 @@ int fdb_bend_trans_commit(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     return rc;
 }
 
+/* XXX actually don't need this at all: the information comes in fdb_begin_2pc */
 int fdb_bend_trans_prepare(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
 {
     /* This is a participant-replicant in a 2pc transaction.  Record the coordinator

@@ -230,11 +230,13 @@ int osql_sess_addclient(osql_sess_t *psess)
         sess->clients += 1;
     Pthread_mutex_unlock(&sess->mtx);
 
+/*
     if (rc != 0) {
         uuidstr_t us;
         comdb2_cheapstack_sym(stderr, "%s rqid %llu uuid %s rc=%d\n", __func__, psess->rqid,
                               comdb2uuidstr(psess->uuid, us), rc);
     }
+*/
 
     return rc;
 }
@@ -345,8 +347,12 @@ int osql_prepare(const char *dist_txnid, const char *coordinator_dbname, const c
     sess->coordinator_tier = strdup(coordinator_tier);
     sess->coordinator_master = strdup(coordinator_master);
     if (sess->is_participant && sess->is_done) {
+        uuidstr_t us;
+        logmsg(LOGMSG_USER, "%s dispatching %s uuid %s\n", __func__, dist_txnid, comdb2uuidstr(uuid, us));
         dispatch = 1;
     } else {
+        uuidstr_t us;
+        logmsg(LOGMSG_USER, "%s sanctioning %s uuid %s\n", __func__, dist_txnid, comdb2uuidstr(uuid, us));
         sess->is_sanctioned = 1;
     }
     Pthread_mutex_unlock(&sess->participant_lk);
@@ -452,11 +458,12 @@ int osql_sess_rcvop(unsigned long long rqid, uuid_t uuid, int type, void *data,
     int cancel = 0;
     Pthread_mutex_lock(&sess->participant_lk);
     if (sess->is_participant && sess->is_sanctioned == 1) {
+        logmsg(LOGMSG_USER, "%s setting dispatch to 1 on sanctioned participant\n", __func__);
         dispatch = 1;
     } else if (sess->is_participant && sess->is_sanctioned == -1) {
         cancel = 1;
     } else {
-        sess->is_done = 1;
+        sess->is_done = is_msg_done;
     }
     Pthread_mutex_unlock(&sess->participant_lk);
 

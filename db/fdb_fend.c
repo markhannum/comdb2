@@ -2140,6 +2140,19 @@ static int _fdb_remote_reconnect(fdb_t *fdb, SBUF2 **psb, char *host, int use_ca
     return FDB_NOERR;
 }
 
+static char *fdb_generate_dist_txnid()
+{
+    uuid_t u;
+    uuidstr_t uuidstr;
+    comdb2uuid(u);
+    comdb2uuidstr(u, uuidstr);
+    int rc, sz = strlen(gbl_dbname) + 1 + sizeof(uuidstr_t) + 1;
+    char *r = calloc(sz, 1);
+    rc = snprintf(r, sz, "%s-%s", gbl_dbname, uuidstr);
+    assert(rc < sz);
+    return r;
+}
+
 /**
  * Used to either open a remote transaction or cursor (fdbc==NULL-> transaction
  *begin)
@@ -2251,7 +2264,15 @@ static int _fdb_send_open_retries(struct sqlclntstate *clnt, fdb_t *fdb,
                     tran_flags = 0;
 
                 if (clnt->use_2pc) {
-                    rc = fdb_send_2pc_begin(msg, trans, clnt->dbtran.mode, tran_flags, trans->sb);
+                    if (!clnt->dist_txnid) {
+                        clnt->dist_txnid = fdb_generate_dist_txnid();
+                    }
+                    char *coordinator_dbname = strdup(gbl_dbname);
+                    char *coordinator_tier = gbl_machine_class ? strdup(gbl_machine_class) : strdup(gbl_myhostname);
+                    char *dist_txnid = strdup(clnt->dist_txnid);
+                    /* for 'clean-message' .. rethink maybe, these mallocs are useless */
+                    rc = fdb_send_2pc_begin(msg, trans, clnt->dbtran.mode, tran_flags, dist_txnid, 
+                        coordinator_dbname, coordinator_tier, trans->sb);
                 } else {
                     rc = fdb_send_begin(msg, trans, clnt->dbtran.mode, tran_flags, trans->sb);
                 }
@@ -3888,19 +3909,6 @@ static void _free_fdb_tran(fdb_distributed_tran_t *dtran, fdb_tran_t *tran)
 
 extern char gbl_dbname[];
 
-static char *fdb_generate_dist_txnid()
-{
-    uuid_t u;
-    uuidstr_t uuidstr;
-    comdb2uuid(u);
-    comdb2uuidstr(u, uuidstr);
-    int rc, sz = strlen(gbl_dbname) + 1 + sizeof(uuidstr_t) + 1;
-    char *r = calloc(sz, 1);
-    rc = snprintf(r, sz, "%s-%s", gbl_dbname, uuidstr);
-    assert(rc < sz);
-    return r;
-}
-
 int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
 {
     fdb_distributed_tran_t *dtran = clnt->dbtran.dtran;
@@ -3943,28 +3951,22 @@ int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
             continue;
 
         if (clnt->use_2pc) {
-            assert(!clnt->is_participant);
             clnt->is_coordinator = 1;
-            if (!clnt->dist_txnid) {
-                clnt->dist_txnid = fdb_generate_dist_txnid();
-            }
-            rc = fdb_send_prepare(msg, tran, clnt->dist_txnid, clnt->dbtran.mode, tran->sb);
-            if (!rc) {
-                const char *tier = fdb_dbname_class_routing(tran->fdb);
-                if ((rc = add_participant(clnt, tran->fdb->dbname, tier)) != 0) {
-                    tran->errstr = strdup("multiple participants with same dbname");
-                    break;
-                }
-            }
-            if (gbl_fdb_track)
-                logmsg(LOGMSG_USER, "%s Send Prepare tid=%llx db=\"%s\" rc=%d\n", __func__,
-                       *(unsigned long long *)tran->tid, tran->fdb->dbname, rc);
-        } else {
-            rc = fdb_send_commit(msg, tran, clnt->dbtran.mode, tran->sb);
-            if (gbl_fdb_track)
-                logmsg(LOGMSG_USER, "%s Send Commit tid=%llx db=\"%s\" rc=%d\n", __func__,
-                       *(unsigned long long *)tran->tid, tran->fdb->dbname, rc);
         }
+        /* Handled as 'prepare' by 2pc txns */
+        rc = fdb_send_commit(msg, tran, clnt->dbtran.mode, tran->sb);
+        if (clnt->use_2pc && !rc) {
+            const char *tier = fdb_dbname_class_routing(tran->fdb);
+            if ((rc = add_participant(clnt, tran->fdb->dbname, tier)) != 0) {
+                tran->errstr = strdup("multiple participants with same dbname");
+                break;
+            }
+
+
+        }
+        if (gbl_fdb_track)
+            logmsg(LOGMSG_USER, "%s Send Commit tid=%llx db=\"%s\" rc=%d\n", __func__,
+                    *(unsigned long long *)tran->tid, tran->fdb->dbname, rc);
     }
 
     if (!clnt->dist_txnid) {
