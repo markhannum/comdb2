@@ -18,9 +18,11 @@ coordinator_propagate_timeout_ms 120000
 utxnid_log on
 ufid_log on
 
-# Most conservative maybe should become default
-flush_replicant_on_prepare 1
+# These are already the default settings- they are required for consistency (& sanity)
 flush_on_prepare 1
+flush_replicant_on_prepare 1
+wait_for_prepare_seqnum 1
+coordinator_sync_on_commit 1
 
 # Ridiculous timeout to find bugs
 # coordinator_timeout_ms 20000000

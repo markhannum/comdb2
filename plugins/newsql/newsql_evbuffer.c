@@ -495,9 +495,8 @@ static void process_disttxn(struct newsql_appdata_evbuffer *appdata, CDB2DISTTXN
         logmsg(LOGMSG_USER, "DISTTXN %s txnid %s name=%s tier=%s master=%s fd %d op %d rcode=%d errstr=%s\n", __func__,
                disttxn->disttxn->txnid, disttxn->disttxn->name ? disttxn->disttxn->name : "(null)",
                disttxn->disttxn->tier ? disttxn->disttxn->tier : "(null)",
-               disttxn->disttxn->master ? disttxn->disttxn->master : "(null)", appdata->fd,
-               disttxn->disttxn->operation, disttxn->disttxn->rcode,
-               disttxn->disttxn->errmsg ? disttxn->disttxn->errmsg : "(null)");
+               disttxn->disttxn->master ? disttxn->disttxn->master : "(null)", appdata->fd, disttxn->disttxn->operation,
+               disttxn->disttxn->rcode, disttxn->disttxn->errmsg ? disttxn->disttxn->errmsg : "(null)");
     }
 
     struct evbuffer *buf = sql_wrbuf(appdata->writer);
@@ -538,7 +537,8 @@ static void process_disttxn(struct newsql_appdata_evbuffer *appdata, CDB2DISTTXN
 
     /* Participant master tells me (coordinator master) it has failed */
     case (CDB2_DIST__FAILED_PREPARE):
-        rcode = participant_failed(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier, disttxn->disttxn->rcode, disttxn->disttxn->outrc, disttxn->disttxn->errmsg);
+        rcode = participant_failed(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier,
+                                   disttxn->disttxn->rcode, disttxn->disttxn->outrc, disttxn->disttxn->errmsg);
         break;
 
     /* Coordinator master tells me (participant master) to commit */

@@ -230,13 +230,13 @@ int osql_sess_addclient(osql_sess_t *psess)
         sess->clients += 1;
     Pthread_mutex_unlock(&sess->mtx);
 
-/*
-    if (rc != 0) {
-        uuidstr_t us;
-        comdb2_cheapstack_sym(stderr, "%s rqid %llu uuid %s rc=%d\n", __func__, psess->rqid,
-                              comdb2uuidstr(psess->uuid, us), rc);
-    }
-*/
+    /*
+        if (rc != 0) {
+            uuidstr_t us;
+            comdb2_cheapstack_sym(stderr, "%s rqid %llu uuid %s rc=%d\n", __func__, psess->rqid,
+                                  comdb2uuidstr(psess->uuid, us), rc);
+        }
+    */
 
     return rc;
 }

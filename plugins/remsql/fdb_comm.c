@@ -3278,7 +3278,8 @@ int fdb_bend_index(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     return 0;
 }
 
-int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, int flags, char *dist_txnid, char *coordinator_dbname, char *coordinator_tier, SBUF2 *sb)
+int fdb_send_2pc_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, int flags, char *dist_txnid,
+                       char *coordinator_dbname, char *coordinator_tier, SBUF2 *sb)
 {
     int rc;
 

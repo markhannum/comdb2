@@ -230,12 +230,12 @@ REGISTER_TUNABLE("disable_page_latches", "Disables 'page_latches'",
 REGISTER_TUNABLE("disable_partial_indexes", "Disables 'enable_partial_indexes'",
                  TUNABLE_BOOLEAN, &gbl_partial_indexes,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("logmsg_epochms", "Show epochms in log-messages.  (Default: off)", TUNABLE_BOOLEAN, &gbl_logmsg_epochms,
-                 READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("logmsg_epochms", "Show epochms in log-messages.  (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_logmsg_epochms, READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("enable_2pc", "Enable 2pc fdb transactions.  (Default: off)", TUNABLE_BOOLEAN, &gbl_2pc,
                  READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("coordinator_heartbeat_timeout", "Coordinator timeout for participant heartbeats (Default: 3000)", TUNABLE_INTEGER, &gbl_2pc_heartbeat_timeout,
-                 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("coordinator_heartbeat_timeout", "Coordinator timeout for participant heartbeats (Default: 3000)",
+                 TUNABLE_INTEGER, &gbl_2pc_heartbeat_timeout, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("coordinator_sync_on_commit", "Coordinator syncs log and waits on commit.  (Default: on)",
                  TUNABLE_BOOLEAN, &gbl_coordinator_sync_on_commit, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("coordinator_propagate_timeout_ms", "Coordinator max wait for propagating txns.  (Default: 5000ms)",
@@ -1419,10 +1419,12 @@ REGISTER_TUNABLE("debug_all_prepare_abort", "Prepare and abort all transactions.
                  &gbl_all_prepare_abort, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug_all_prepare_leak", "Prepare and leak all transactions. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_all_prepare_leak, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("flush_replicant_on_prepare", "Flush replicant log on prepare. (Default: off)", TUNABLE_BOOLEAN,
+REGISTER_TUNABLE("flush_replicant_on_prepare", "Flush replicant log on prepare. (Default: on)", TUNABLE_BOOLEAN,
                  &gbl_flush_replicant_on_prepare, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("flush_on_prepare", "Flush master log on prepare. (Default: off)", TUNABLE_BOOLEAN,
+REGISTER_TUNABLE("flush_on_prepare", "Flush master log on prepare. (Default: on)", TUNABLE_BOOLEAN,
                  &gbl_flush_on_prepare, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("wait_for_prepare_seqnum", "Wait-for-seqnum for prepare records. (Default: on)", TUNABLE_BOOLEAN,
+                 &gbl_wait_for_prepare_seqnum, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("abort_on_unset_ha_flag", "Abort in snap_uid_retry if ha is unset. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_abort_on_unset_ha_flag, INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("write_dummy_trace", "Print trace when doing a dummy write. (Default: off)", TUNABLE_BOOLEAN,

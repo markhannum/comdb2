@@ -181,7 +181,7 @@ static int __txn_logbytes_pp __P((DB_TXN *, u_int64_t *));
 static int __txn_commit_getlsn_pp __P((DB_TXN *, u_int32_t, u_int64_t *, DB_LSN *, void *));
 static int __txn_commit_rl_pp __P((DB_TXN *, u_int32_t, u_int64_t, u_int32_t,
 	DB_LSN *, DBT *, DB_LOCK *, u_int32_t, u_int64_t *, DB_LSN *, DB_LSN *, void *));
-static int __txn_dist_prepare_pp __P((DB_TXN *, const char *, const char *, const char*, u_int32_t, DBT *, u_int32_t));
+static int __txn_dist_prepare_pp __P((DB_TXN *, const char *, const char *, const char*, u_int32_t, DBT *, DB_LSN *, u_int32_t));
 static int __txn_discard_pp __P((DB_TXN *, u_int32_t));
 static int __txn_end __P((DB_TXN *, int));
 static int __txn_isvalid __P((const DB_TXN *, TXN_DETAIL **, txnop_t));
@@ -1986,13 +1986,14 @@ __txn_discard(txnp, flags)
 }
 
 static int
-__txn_dist_prepare_pp(txnp, dist_txnid, coordinator_name, coordinator_tier, coordinator_gen, blkseq_key, lflags)
+__txn_dist_prepare_pp(txnp, dist_txnid, coordinator_name, coordinator_tier, coordinator_gen, blkseq_key, commit_lsn, lflags)
 	DB_TXN *txnp;
 	const char *dist_txnid;
 	const char *coordinator_name;
 	const char *coordinator_tier;
 	u_int32_t coordinator_gen;
 	DBT *blkseq_key;
+	DB_LSN *commit_lsn;
 	u_int32_t lflags;
 {
 	DB_ENV *dbenv = txnp->mgrp->dbenv;
@@ -2041,7 +2042,7 @@ __txn_dist_prepare_pp(txnp, dist_txnid, coordinator_name, coordinator_tier, coor
 	lflags |= DB_TXN_DIST_PREPARE;
 
 	ret =
-		__txn_commit_int(txnp, lflags, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL);
+		__txn_commit_int(txnp, lflags, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, commit_lsn, NULL);
 	return (ret);
 }
 

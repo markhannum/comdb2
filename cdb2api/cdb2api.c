@@ -2976,8 +2976,9 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
                   char *dist_txnid, int rcode, int outrc, char *errmsg, int async)
 {
     if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr, "DISTTXN %s dbname=%s pname=%s ptier=%s cmaster=%s op=%d async=%d rcode=%d outrc=%d errmsg=%s\n", __func__,
-                dbname ? dbname : "(null)", pname ? pname : "(null)", ptier ? ptier : "(null)",
+        fprintf(stderr,
+                "DISTTXN %s dbname=%s pname=%s ptier=%s cmaster=%s op=%d async=%d rcode=%d outrc=%d errmsg=%s\n",
+                __func__, dbname ? dbname : "(null)", pname ? pname : "(null)", ptier ? ptier : "(null)",
                 cmaster ? cmaster : "(null)", op, async, rcode, outrc, errmsg);
     }
     if (!hndl->sb) {

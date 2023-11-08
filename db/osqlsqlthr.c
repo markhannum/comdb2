@@ -237,7 +237,7 @@ static int osql_sock_start_int(struct sqlclntstate *clnt, int type,
 
     /* new id */
     if (!keep_rqid) {
-        uuidstr_t us;                                                          \
+        uuidstr_t us;
         osql->rqid = OSQL_RQID_USE_UUID;
         comdb2uuid(osql->uuid);
         logmsg(LOGMSG_USER, "%s starting uuid %s\n", __func__, comdb2uuidstr(osql->uuid, us));
@@ -412,13 +412,13 @@ static int osql_wait(struct sqlclntstate *clnt)
         if (!clnt->wait(clnt, timeout, err))
             return 0;
 
-    //return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
+    // return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
     int startms = comdb2_time_epochms();
     int rc = osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
     int endms = comdb2_time_epochms();
     uuidstr_t us;
-    logmsg(LOGMSG_USER, "%s took %d ms to commit rqid=%llu uuid=%s\n", __func__,
-            (endms - startms), osql->rqid, comdb2uuidstr(osql->uuid, us));
+    logmsg(LOGMSG_USER, "%s took %d ms to commit rqid=%llu uuid=%s\n", __func__, (endms - startms), osql->rqid,
+           comdb2uuidstr(osql->uuid, us));
     return rc;
 }
 
@@ -868,8 +868,8 @@ static int osql_sock_restart(struct sqlclntstate *clnt, int maxretries,
     int bdberr = 0;
     int sentops = 0;
 
-    logmsg(LOGMSG_USER, "%s restarting rqid=%llx uuid=%s keep-session=%d\n", __func__,
-        clnt->osql.rqid, comdb2uuidstr(clnt->osql.uuid, us), keep_session);
+    logmsg(LOGMSG_USER, "%s restarting rqid=%llx uuid=%s keep-session=%d\n", __func__, clnt->osql.rqid,
+           comdb2uuidstr(clnt->osql.uuid, us), keep_session);
 
     if (!thd) {
         logmsg(LOGMSG_ERROR, "%s:%d Bug, not sql thread !\n", __func__, __LINE__);
@@ -1204,8 +1204,8 @@ done:
     /* mark socksql as non-retriable if seletv are present
        also don't retry distributed transactions
      */
-    if (clnt->osql.xerr.errval == (ERR_BLOCK_FAILED + ERR_VERIFY) &&
-            clnt->dbtran.mode == TRANLEVEL_SOSQL && (!clnt->dbtran.dtran || clnt->use_2pc)) {
+    if (clnt->osql.xerr.errval == (ERR_BLOCK_FAILED + ERR_VERIFY) && clnt->dbtran.mode == TRANLEVEL_SOSQL &&
+        (!clnt->dbtran.dtran || clnt->use_2pc)) {
         int bdberr = 0;
         int iirc = 0;
         iirc = osql_shadtbl_has_selectv(clnt, &bdberr);
@@ -1673,8 +1673,8 @@ int osql_begin_participant(struct sql_thread *thd)
     int restarted;
 
     do {
-        rc = osql_send_prepare(&osql->target, osql->rqid, osql->uuid, clnt->dist_txnid,
-                                   clnt->coordinator_dbname, clnt->coordinator_tier, NET_OSQL_SOCK_RPL);
+        rc = osql_send_prepare(&osql->target, osql->rqid, osql->uuid, clnt->dist_txnid, clnt->coordinator_dbname,
+                               clnt->coordinator_tier, NET_OSQL_SOCK_RPL);
         RESTART_SOCKSQL;
     } while (restarted);
     osql->replicant_numops++;

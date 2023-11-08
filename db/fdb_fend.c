@@ -2271,8 +2271,8 @@ static int _fdb_send_open_retries(struct sqlclntstate *clnt, fdb_t *fdb,
                     char *coordinator_tier = gbl_machine_class ? strdup(gbl_machine_class) : strdup(gbl_myhostname);
                     char *dist_txnid = strdup(clnt->dist_txnid);
                     /* for 'clean-message' .. rethink maybe, these mallocs are useless */
-                    rc = fdb_send_2pc_begin(msg, trans, clnt->dbtran.mode, tran_flags, dist_txnid, 
-                        coordinator_dbname, coordinator_tier, trans->sb);
+                    rc = fdb_send_2pc_begin(msg, trans, clnt->dbtran.mode, tran_flags, dist_txnid, coordinator_dbname,
+                                            coordinator_tier, trans->sb);
                 } else {
                     rc = fdb_send_begin(msg, trans, clnt->dbtran.mode, tran_flags, trans->sb);
                 }
@@ -3961,12 +3961,10 @@ int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
                 tran->errstr = strdup("multiple participants with same dbname");
                 break;
             }
-
-
         }
         if (gbl_fdb_track)
-            logmsg(LOGMSG_USER, "%s Send Commit tid=%llx db=\"%s\" rc=%d\n", __func__,
-                    *(unsigned long long *)tran->tid, tran->fdb->dbname, rc);
+            logmsg(LOGMSG_USER, "%s Send Commit tid=%llx db=\"%s\" rc=%d\n", __func__, *(unsigned long long *)tran->tid,
+                   tran->fdb->dbname, rc);
     }
 
     if (!clnt->dist_txnid) {

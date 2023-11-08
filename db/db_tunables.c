@@ -165,6 +165,7 @@ extern int gbl_all_prepare_commit;
 extern int gbl_all_prepare_abort;
 extern int gbl_all_prepare_leak;
 extern int gbl_flush_on_prepare;
+extern int gbl_wait_for_prepare_seqnum;
 extern int gbl_flush_replicant_on_prepare;
 extern int gbl_abort_on_unset_ha_flag;
 extern int gbl_write_dummy_trace;

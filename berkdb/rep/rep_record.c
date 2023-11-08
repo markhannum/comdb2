@@ -106,8 +106,8 @@ int gbl_req_all_time_threshold = 0;
 int gbl_req_delay_count_threshold = 5;
 int gbl_getlock_latencyms = 0;
 int gbl_flush_log_at_checkpoint = 1;
-int gbl_flush_on_prepare = 0;
-int gbl_flush_replicant_on_prepare = 0;
+int gbl_flush_replicant_on_prepare = 1;
+extern int gbl_wait_for_prepare_seqnum;
 extern int request_delaymore(void *bdb_state);
 int __rep_set_last_locked(DB_ENV *dbenv, DB_LSN *lsn);
 
@@ -3674,8 +3674,14 @@ gap_check:		max_lsn_dbtp = NULL;
 		__os_free(dbenv, dist_prepare_args);
 		dist_prepare_args = NULL;
 		if (gbl_flush_replicant_on_prepare) {
-			ret = __log_flush(dbenv, NULL);
+			__log_flush(dbenv, NULL);
 		}
+
+		if (gbl_wait_for_prepare_seqnum) {
+			comdb2_early_ack(dbenv, rp->lsn,
+					rep->committed_gen);
+		}
+
 		break;
 	case DB___txn_dist_abort:
 		if ((ret = __txn_dist_abort_read(dbenv, rec->data, &dist_abort_args)) != 0) {

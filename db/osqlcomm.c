@@ -56,7 +56,6 @@
 #include "logical_cron.h"
 #include <disttxn.h>
 
-
 #define MAX_CLUSTER REPMAX
 
 /**
@@ -6887,7 +6886,8 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
                 iq->sorese->last_2pc_heartbeat = nowms;
             }
             if (iq->sorese->is_participant) {
-                if (!participant_send_heartbeat(iq->sorese->dist_txnid, iq->sorese->coordinator_dbname, iq->sorese->coordinator_master))
+                if (!participant_send_heartbeat(iq->sorese->dist_txnid, iq->sorese->coordinator_dbname,
+                                                iq->sorese->coordinator_master))
                     iq->sorese->last_2pc_heartbeat = nowms;
             }
         }

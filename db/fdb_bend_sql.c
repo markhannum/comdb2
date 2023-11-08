@@ -299,10 +299,8 @@ void init_sqlclntstate(struct sqlclntstate *clnt, char *tid)
  * Start a transaction
  *
  */
-int fdb_svc_trans_begin(char *tid, enum transaction_level lvl, int flags,
-                        int seq, struct sql_thread *thd,
-                        char *dist_txnid, char *coordinator_dbname, char *coordinator_tier,
-                        struct sqlclntstate **pclnt)
+int fdb_svc_trans_begin(char *tid, enum transaction_level lvl, int flags, int seq, struct sql_thread *thd,
+                        char *dist_txnid, char *coordinator_dbname, char *coordinator_tier, struct sqlclntstate **pclnt)
 {
     struct sqlclntstate *clnt = NULL;
     int rc = 0;

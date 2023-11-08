@@ -509,7 +509,8 @@ retry_read:
 
             /* Participant master tells me (coordinator master) it has failed */
             case (CDB2_DIST__FAILED_PREPARE):
-                rcode = participant_failed(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier, disttxn->disttxn->rcode, disttxn->disttxn->outrc, disttxn->disttxn->errmsg);
+                rcode = participant_failed(disttxn->disttxn->txnid, disttxn->disttxn->name, disttxn->disttxn->tier,
+                                           disttxn->disttxn->rcode, disttxn->disttxn->outrc, disttxn->disttxn->errmsg);
                 break;
 
             /* Coordinator master tells me (participant master) to commit */
