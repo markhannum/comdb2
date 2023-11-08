@@ -432,7 +432,7 @@ int bdb_blkseq_insert(bdb_state_type *bdb_state, tran_type *tran, void *key, int
                       void **dtaout, int *lenout, int overwrite)
 {
     int startms = comdb2_time_epochms();
-    int rc = bdb_blkseq_insert(bdb_state, tran, key, klen, data, datalen, dtaout, lenout, overwrite);
+    int rc = bdb_blkseq_insert_int(bdb_state, tran, key, klen, data, datalen, dtaout, lenout, overwrite);
     int endms = comdb2_time_epochms();
     if (endms - startms > 1000) {
         logmsg(LOGMSG_USER, "%s took %d seconds to write\n", __func__, endms - startms);
