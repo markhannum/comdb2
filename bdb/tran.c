@@ -1507,7 +1507,7 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
         int startms = comdb2_time_epochms();
         bdb_state->dbenv->log_flush(bdb_state->dbenv, NULL);
         int endms = comdb2_time_epochms();
-        logmsg(LOGMSG_USER, "DISTTXN %s log-flush took %d ms\n", __func__, (endms - startms));
+        logmsg(LOGMSG_USER, "DISTTXN %s %s log-flush took %d ms\n", __func__, dist_txnid, (endms - startms));
     }
 
     if (!prepare_rc && gbl_wait_for_prepare_seqnum) {
@@ -1515,8 +1515,12 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
         seqnum_type seqnum = {{0}};
         memcpy(&seqnum.lsn, &commit_lsn, sizeof(commit_lsn));
         bdb_state->dbenv->get_rep_gen(bdb_state->dbenv, &seqnum.generation);
+        int startms = comdb2_time_epochms();
         bdb_wait_for_seqnum_from_all_adaptive_newcoh(bdb_state, &seqnum, 0,
                                                      &timeoutms);
+        int endms = comdb2_time_epochms();
+        logmsg(LOGMSG_USER, "DISTTXN %s %s wait-for-seqnum took %d ms\n", __func__, dist_txnid, (endms - startms));
+    }
     }
 
     return prepare_rc;
