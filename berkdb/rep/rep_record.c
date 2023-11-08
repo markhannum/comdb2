@@ -3656,6 +3656,12 @@ gap_check:		max_lsn_dbtp = NULL;
 		if ((ret = __txn_dist_prepare_read(dbenv, rec->data, &dist_prepare_args)) != 0) {
 			goto err;
 		}
+		/* Treat prepare like a commit for elections */
+		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
+		rep->committed_gen = dist_prepare_args->generation;
+		rep->committed_lsn = rp->lsn;
+		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
+
 		dist_txnid = alloca(dist_prepare_args->dist_txnid.size + 1);
 		memcpy(dist_txnid, dist_prepare_args->dist_txnid.data, dist_prepare_args->dist_txnid.size);
 		dist_txnid[dist_prepare_args->dist_txnid.size] = '\0';

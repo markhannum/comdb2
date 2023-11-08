@@ -1345,6 +1345,17 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 							&tp->begin_lsn, &txnp->blkseq_key, txnp->coordinator_gen, &coordinator, &tier))!=0) {
 							abort();
 						}
+
+						/* Treat prepares like commits in elections */
+						if (elect_highest_committed_gen) {
+							MUTEX_LOCK(dbenv,
+									db_rep->rep_mutexp);
+							rep->committed_gen = gen;
+							rep->committed_lsn = txnp->last_lsn;
+							MUTEX_UNLOCK(dbenv,
+									db_rep->rep_mutexp);
+						}
+
 					} else if (elect_highest_committed_gen) {
 
 						MUTEX_LOCK(dbenv,
