@@ -1521,7 +1521,6 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
         int endms = comdb2_time_epochms();
         logmsg(LOGMSG_USER, "DISTTXN %s %s wait-for-seqnum took %d ms\n", __func__, dist_txnid, (endms - startms));
     }
-    }
 
     return prepare_rc;
 }
