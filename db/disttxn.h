@@ -17,6 +17,7 @@
 #ifndef _DISTTXN_H_
 #define _DISTTXN_H_
 #include <comdb2.h>
+#include <net_int.h>
 
 enum COORDINATOR_NOTIFY {
     POSTCOMMIT = 1,
@@ -63,15 +64,15 @@ int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid
 /* This participant has been asked to cancel this osql transaction */
 int osql_cancel_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid);
 
+/* Participant teardown from heartbeat */
+void dist_heartbeat_free_tran(dist_hbeats_type *dt);
+
 /* This participant sends the coordinator a 'failed-prepare' message */
 int participant_has_failed(const char *dist_txnid, const char *dbname, const char *master, int rcode, int outrc,
                            const char *errmsg);
 
 /* This participant sends the coordinator an 'i-have-propagated' message */
 void participant_has_propagated(const char *dist_txnid, const char *dbname, const char *master);
-
-/* This participant sends a heartbeat to the coordinator */
-int participant_send_heartbeat(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master);
 
 /* This coordinator has received a heartbeat message from a participant */
 int participant_heartbeat(const char *dist_txnid, const char *participant_name, const char *participant_tier);

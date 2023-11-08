@@ -6877,6 +6877,7 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
     if (gbl_toblock_net_throttle && is_write_request(type))
         net_throttle_wait(thedb->handle_sibling);
 
+    /*
     if (is_2pc_transaction(iq)) {
         extern int gbl_2pc_heartbeat_timeout;
         int nowms = comdb2_time_epochms();
@@ -6892,6 +6893,7 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
             }
         }
     }
+    */
 
 #if DEBUG_REORDER
     const char *osql_reqtype_str(int type);

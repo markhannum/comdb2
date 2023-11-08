@@ -234,8 +234,6 @@ REGISTER_TUNABLE("logmsg_epochms", "Show epochms in log-messages.  (Default: off
                  &gbl_logmsg_epochms, READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("enable_2pc", "Enable 2pc fdb transactions.  (Default: off)", TUNABLE_BOOLEAN, &gbl_2pc,
                  READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("coordinator_heartbeat_timeout", "Coordinator timeout for participant heartbeats (Default: 3000)",
-                 TUNABLE_INTEGER, &gbl_2pc_heartbeat_timeout, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("coordinator_sync_on_commit", "Coordinator syncs log and waits on commit.  (Default: on)",
                  TUNABLE_BOOLEAN, &gbl_coordinator_sync_on_commit, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("coordinator_propagate_timeout_ms", "Coordinator max wait for propagating txns.  (Default: 5000ms)",

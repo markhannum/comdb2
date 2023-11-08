@@ -66,7 +66,6 @@ extern int gbl_enable_cache_internal_nodes;
 extern int gbl_partial_indexes;
 extern int gbl_logmsg_epochms;
 extern int gbl_2pc;
-extern int gbl_2pc_heartbeat_timeout;
 extern int gbl_coordinator_propagate_timeout_ms;
 extern int gbl_coordinator_sync_on_commit;
 extern int gbl_coordinator_notify;

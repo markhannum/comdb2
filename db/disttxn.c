@@ -108,6 +108,7 @@ typedef struct sanctioned {
     char *coordinator_master;
     int sanctioned;
     int time_added;
+    dist_hbeats_type hbeats;
 } sanctioned_t;
 
 /* Handle-cache might go away */
@@ -149,7 +150,6 @@ int gbl_coordinator_notify = POSTCOMMIT;
 int gbl_disttxn_handle_cache = 1;
 int gbl_disttxn_async_prepare = 0;
 int gbl_disttxn_async_messages = 0;
-int gbl_2pc_heartbeat_timeout = 10000;
 int gbl_coordinator_sync_on_commit = 1;
 
 /* Debug tunables */
@@ -509,6 +509,7 @@ static void prepare_participants_lk(transaction_t *dtran)
                    part->participant_name, part->participant_tier, rc);
             break;
         }
+        part->last_heartbeat = comdb2_time_epochms();
     }
     if (rc) {
         abort_transaction_lk(dtran, 0);
@@ -939,6 +940,7 @@ int coordinator_wait_propagate(const char *dist_txnid)
     dtran->coordinator_waiting = 0;
     dtran->resolved_time = comdb2_time_epochms();
     Pthread_mutex_unlock(&dtran->lk);
+    /* remove from hash */
     return !(state == DISTTXN_PROPAGATED);
 }
 
@@ -949,15 +951,17 @@ int retryable_rcode(int rcode, int outrc)
     return (outrc == ERR_NOTSERIAL || (outrc == ERR_BLOCK_FAILED && rcode == ERR_VERIFY));
 }
 
+/*
 static int check_coordinator_timeout_lk(transaction_t *dtran)
 {
     int nowms = comdb2_time_epochms();
-    if ((nowms - dtran->coordinator_local->last_heartbeat) > gbl_2pc_heartbeat_timeout) {
+    if ((nowms - dtran->coordinator_local->last_heartbeat) > 10000) {
         logmsg(LOGMSG_USER, "%s disttxn %s no coordinator hbeat timing out\n", __func__, dtran->dist_txnid);
         return 1;
     }
     return 0;
 }
+*/
 
 static int check_participant_timeout_lk(transaction_t *dtran)
 {
@@ -967,8 +971,7 @@ static int check_participant_timeout_lk(transaction_t *dtran)
     LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
     {
         /* heartbeat_count > 0 is a hack .. i have to revise this */
-        if (part->status == PARTICIPANT_PREPARING && (part->heartbeat_count > 0) &&
-            ((nowms - part->last_heartbeat) > gbl_2pc_heartbeat_timeout)) {
+        if (part->status == PARTICIPANT_PREPARING && ((nowms - part->last_heartbeat) > 10000)) {
             logmsg(LOGMSG_USER, "%s disttxn %s no hbeat from %s %s timing out\n", __func__, dtran->dist_txnid,
                    part->participant_name, part->participant_tier);
             return 1;
@@ -1207,7 +1210,8 @@ static void disttxn_timeout(void)
         /* Coordinator can still be stuck & holding locks if we abort this way ..
          * still thinking on this .. */
         if (dtran && dtran->state == DISTTXN_PREPARING && !dtran->coordinator_waiting &&
-            (check_participant_timeout_lk(dtran) || check_coordinator_timeout_lk(dtran))) {
+            //(check_participant_timeout_lk(dtran) || check_coordinator_timeout_lk(dtran))) {
+            (check_participant_timeout_lk(dtran))) {
             abort_transaction_lk(dtran, 0);
             dtran->failrc = ERR_DIST_ABORT;
             dtran->outrc = ERR_BLOCK_FAILED;
@@ -1238,6 +1242,7 @@ int disttxn_purgeable_lk(transaction_t *dtran)
     return 0;
 }
 
+/* TODO this is dumb nix entirely */
 static void disttxn_purge(void)
 {
     struct disttxn_collect collect = {0};
@@ -1276,6 +1281,7 @@ static void disttxn_purge(void)
     }
 
     /* Purge sanctioned hash */
+    /*
     for (int i = 0; i < deleted; i++) {
         Pthread_mutex_lock(&sanc_lk);
         sanctioned_t *sanc = hash_find(sanctioned_hash, &deleted_disttxns[i]);
@@ -1290,6 +1296,7 @@ static void disttxn_purge(void)
             destroy_sanc(sanc);
         }
     }
+    */
 
     /* Free dup'd strings */
     for (int i = 0; i < collect.count; i++) {
@@ -1299,6 +1306,7 @@ static void disttxn_purge(void)
     /* Free deleted list */
     free(deleted_disttxns);
 
+#if 0
     /* Collect old sanctioned */
     Pthread_mutex_lock(&sanc_lk);
     hash_info(sanctioned_hash, NULL, NULL, NULL, NULL, &alloc, NULL, NULL);
@@ -1327,6 +1335,7 @@ static void disttxn_purge(void)
     for (int i = 0; i < collect.count; i++) {
         free(collect.disttxns[i]);
     }
+#endif
 
     /* Free collect list */
     free(collect.disttxns);
@@ -1577,6 +1586,15 @@ static void rem_participant_lk(participant_t *p)
     free(p);
 }
 
+static void disable_sanc_heartbeats(const char *dist_txnid)
+{
+    Pthread_mutex_lock(&sanc_lk);
+    sanctioned_t *sanc = hash_find(sanctioned_hash, &dist_txnid);
+    Pthread_mutex_unlock(&sanc_lk);
+    assert(sanc);
+    disable_dist_heartbeats_and_free(&sanc->hbeats);
+}
+
 /* Participant block-processor has failed */
 int participant_has_failed(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master,
                            int rcode, int outrc, const char *errmsg)
@@ -1592,6 +1610,7 @@ int participant_has_failed(const char *dist_txnid, const char *coordinator_name,
         rem_participant_lk(p);
     }
     Pthread_mutex_unlock(&part_lk);
+    disable_sanc_heartbeats(dist_txnid);
     send_coordinator_failed_prepare(dist_txnid, coordinator_name, coordinator_master, rcode, outrc, errmsg);
     return 0;
 }
@@ -1615,6 +1634,9 @@ static int participant_wait_int(const char *dist_txnid, const char *coordinator_
 
     /* Because this isn't sent under lock, a coordinator commit can arrive before we get the lock */
     send_coordinator_prepared(dist_txnid, coordinator_name, coordinator_master);
+
+    /* The prepare messages will now act as a heartbeat: remove from sanctioned hash */
+    disable_sanc_heartbeats(dist_txnid);
 
     if (gbl_debug_exit_participant_after_prepare) {
         logmsg(LOGMSG_FATAL, "%s exiting participant on debug tunable\n", __func__);
@@ -1718,7 +1740,7 @@ int participant_heartbeat(const char *dist_txnid, const char *participant_name, 
     return rcode;
 }
 
-int participant_send_heartbeat(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master)
+static int participant_send_heartbeat(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master)
 {
     if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
@@ -1846,6 +1868,7 @@ int osql_register_disttxn(const char *dist_txnid, unsigned long long rqid, uuid_
         sanc->time_added = comdb2_time_epoch();
         sanc->rqid = rqid;
         comdb2uuidcpy(sanc->uuid, uuid);
+        sanc->hbeats.sanc = sanc;
         hash_add(sanctioned_hash, sanc);
     } else {
         rtn = sanc->sanctioned;
@@ -1862,6 +1885,7 @@ int osql_register_disttxn(const char *dist_txnid, unsigned long long rqid, uuid_
 }
 
 /* Called from osql_discard- coordinator master tells me (participant master) to discard */
+/* TODO cleanup? */
 int osql_cancel_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid)
 {
     if (gbl_debug_disttxn_trace) {
@@ -1888,6 +1912,12 @@ int osql_cancel_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t
     return rtn;
 }
 
+int dist_heartbeats(dist_hbeats_type *dt)
+{
+    return participant_send_heartbeat(dt->sanc->dist_txnid, dt->sanc->coordinator_dbname, dt->sanc->coordinator_master);
+}
+
+extern int enable_dist_heartbeats(dist_hbeats_type *dt);
 /* Called from osql_prepare- coordinator master tells me (participant master) to prepare */
 int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid,
                           const char *coordinator_dbname, const char *coordinator_tier, const char *coordinator_master)
@@ -1905,8 +1935,12 @@ int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid
         sanc->sanctioned = 1;
         if (sanc->coordinator_master) {
             assert(!strcmp(coordinator_master, sanc->coordinator_master));
+            assert(!strcmp(coordinator_dbname, sanc->coordinator_dbname));
+            assert(!strcmp(coordinator_tier, sanc->coordinator_tier));
         } else {
             sanc->coordinator_master = strdup(coordinator_master);
+            sanc->coordinator_dbname = strdup(coordinator_dbname);
+            sanc->coordinator_tier = strdup(coordinator_tier);
         }
         rtn = 1;
     } else {
@@ -1917,11 +1951,24 @@ int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid
         sanc->coordinator_tier = strdup(coordinator_tier);
         sanc->coordinator_master = strdup(coordinator_master);
         sanc->sanctioned = 1;
+        sanc->hbeats.sanc = sanc;
         hash_add(sanctioned_hash, sanc);
         rtn = 0;
     }
     Pthread_mutex_unlock(&sanc_lk);
+    enable_dist_heartbeats(&sanc->hbeats);
     return rtn;
+}
+
+void dist_heartbeat_free_tran(dist_hbeats_type *dt)
+{
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dt->sanc->dist_txnid);
+    }
+    Pthread_mutex_lock(&sanc_lk);
+    hash_del(sanctioned_hash, dt->sanc);
+    Pthread_mutex_unlock(&sanc_lk);
+    destroy_sanc(dt->sanc);
 }
 
 enum { PRIME = 8388013 };
