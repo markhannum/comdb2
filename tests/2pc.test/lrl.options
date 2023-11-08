@@ -54,16 +54,16 @@ early_ack_trace 1
 debug_disttxn_trace 1
 
 # Need this to debug 
-#set_seqnum_trace 1
+set_seqnum_trace 1
 
 # Need this to debug
-#ack_trace 1
+ack_trace 1
 
 # Also need this
-#set_coherent_state_trace 1
+set_coherent_state_trace 1
 
 # Also wait-for-seqnum trace
-#wait_for_seqnum_trace 1
+wait_for_seqnum_trace 1
 
 # 'lost-connection + restart' seems to return 'success' to the client prior to the
 # commit record being written .. wth?
