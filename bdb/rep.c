@@ -3170,10 +3170,8 @@ static int bdb_wait_for_seqnum_from_all_int(bdb_state_type *bdb_state,
     if ((seqnum->lsn.file == 0) && (seqnum->lsn.offset == 0))
         return 0;
 
-    /*
-    logmsg(LOGMSG_DEBUG, "%s waiting for %s\n", __func__,
+    logmsg(LOGMSG_USER, "%s waiting for %s\n", __func__,
            lsn_to_str(str, &(seqnum->lsn)));
-    */
 
     begin_time = comdb2_time_epochms();
 

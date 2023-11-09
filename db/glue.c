@@ -742,8 +742,11 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int
                comdb2uuidstr(iq->sorese->uuid, us), iq->written_row_count);
     }
 
+    int startms = comdb2_time_epochms();
     rc = trans_commit_seqnum_int(bdb_handle, thedb, iq, trans, &ss, logical,
                                  blkseq, blklen, blkkey, blkkeylen);
+    int endms = comdb2_time_epochms();
+    logmsg(LOGMSG_USER, "%s commit took %d ms\n", __func__, endms - startms);
 
     if (gbl_extended_sql_debug_trace && IQ_HAS_SNAPINFO_KEY(iq)) {
         cn_len = IQ_SNAPINFO(iq)->keylen;
@@ -769,7 +772,10 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int
     }
 
     if (nowait == 0) {
+        startms = comdb2_time_epochms();
         rc = trans_wait_for_seqnum_int(bdb_handle, thedb, iq, source_host, timeoutms, adaptive, &ss);
+        endms = comdb2_time_epochms();
+        logmsg(LOGMSG_USER, "%s wait-for-seqnum took %d ms\n", __func__, endms - startms);
     }
 
     if (release_schema_lk && gbl_debug_add_replication_latency) {
