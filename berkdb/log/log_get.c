@@ -443,13 +443,18 @@ __log_c_get(logc, alsn, dbt, flags)
 	DBT *dbt;
 	u_int32_t flags;
 {
-    u_int64_t start;
-    int rc;
+	u_int64_t start;
+	int rc;
 
-    start = comdb2_time_epochus();
-    rc = __log_c_get_timed(logc, alsn, dbt, flags);
-    logc->totalus += (comdb2_time_epochus() - start);
-    return rc;
+	start = comdb2_time_epochus();
+	int startms = comdb2_time_epochms();
+	rc = __log_c_get_timed(logc, alsn, dbt, flags);
+	int endms = comdb2_time_epochms();
+	logc->totalus += (comdb2_time_epochus() - start);
+	if ((endms - startms) > 1000) {
+		logmsg(LOGMSG_USER, "%s LONG LOGCGET, %d ms\n", __func__, (endms - startms));
+	}
+	return rc;
 }
 
 
