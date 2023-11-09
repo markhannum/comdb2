@@ -66,15 +66,8 @@ oflags(int flags, char *o_flags)
 	return o_flags;
 }
 
-/*
- * __os_openhandle --
- *	Open a file, using POSIX 1003.1 open flags.
- *
- * PUBLIC: int __os_openhandle
- * PUBLIC:     __P((DB_ENV *, const char *, int, int, DB_FH **));
- */
-int
-___os_openhandle(dbenv, name, flags, mode, fhpp)
+static int
+___os_openhandle_int(dbenv, name, flags, mode, fhpp)
 	DB_ENV *dbenv;
 	const char *name;
 	int flags, mode;
@@ -236,6 +229,33 @@ err:	if (ret != 0) {
 
 	return (ret);
 }
+
+extern int comdb2_time_epochms();
+#include <logmsg.h>
+
+/*
+ * __os_openhandle --
+ *	Open a file, using POSIX 1003.1 open flags.
+ *
+ * PUBLIC: int __os_openhandle
+ * PUBLIC:     __P((DB_ENV *, const char *, int, int, DB_FH **));
+ */
+int
+___os_openhandle(dbenv, name, flags, mode, fhpp)
+	DB_ENV *dbenv;
+	const char *name;
+	int flags, mode;
+	DB_FH **fhpp;
+{
+	int start = comdb2_time_epochms();
+	int ret = ___os_openhandle_int(dbenv, name, flags, mode, fhpp);
+	int end = comdb2_time_epochms();
+	if ((end - start) > 1000) {
+		logmsg(LOGMSG_USER, "%s LONG OPEN HANDLE %s TOOK %d ms\n", __func__, name, (end - start));
+	}
+	return ret;
+}
+
 
 /*
  * __os_closehandle --
