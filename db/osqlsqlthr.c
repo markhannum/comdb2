@@ -223,6 +223,7 @@ enum {
     OSQL_START_KEEP_RQID = 1,
     OSQL_START_NO_REORDER = 2,
 };
+extern int gbl_debug_disttxn_trace;
 static int osql_sock_start_int(struct sqlclntstate *clnt, int type,
                                int start_flags)
 {
@@ -240,7 +241,9 @@ static int osql_sock_start_int(struct sqlclntstate *clnt, int type,
         uuidstr_t us;
         osql->rqid = OSQL_RQID_USE_UUID;
         comdb2uuid(osql->uuid);
-        logmsg(LOGMSG_USER, "%s starting uuid %s\n", __func__, comdb2uuidstr(osql->uuid, us));
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "%s starting uuid %s\n", __func__, comdb2uuidstr(osql->uuid, us));
+        }
     }
 
     osql->is_reorder_on = start_flags & OSQL_START_NO_REORDER
@@ -412,13 +415,15 @@ static int osql_wait(struct sqlclntstate *clnt)
         if (!clnt->wait(clnt, timeout, err))
             return 0;
 
-    // return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
+    //return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
     int startms = comdb2_time_epochms();
     int rc = osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
     int endms = comdb2_time_epochms();
-    uuidstr_t us;
-    logmsg(LOGMSG_USER, "%s took %d ms to commit rqid=%llu uuid=%s\n", __func__, (endms - startms), osql->rqid,
-           comdb2uuidstr(osql->uuid, us));
+    if (gbl_debug_disttxn_trace) {
+        uuidstr_t us;
+        logmsg(LOGMSG_USER, "%s took %d ms to commit rqid=%llu uuid=%s\n", __func__, (endms - startms), osql->rqid,
+                comdb2uuidstr(osql->uuid, us));
+    }
     return rc;
 }
 
@@ -868,8 +873,10 @@ static int osql_sock_restart(struct sqlclntstate *clnt, int maxretries,
     int bdberr = 0;
     int sentops = 0;
 
-    logmsg(LOGMSG_USER, "%s restarting rqid=%llx uuid=%s keep-session=%d\n", __func__, clnt->osql.rqid,
-           comdb2uuidstr(clnt->osql.uuid, us), keep_session);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "%s restarting rqid=%llx uuid=%s keep-session=%d\n", __func__, clnt->osql.rqid,
+                comdb2uuidstr(clnt->osql.uuid, us), keep_session);
+    }
 
     if (!thd) {
         logmsg(LOGMSG_ERROR, "%s:%d Bug, not sql thread !\n", __func__, __LINE__);

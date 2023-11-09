@@ -3681,7 +3681,6 @@ gap_check:		max_lsn_dbtp = NULL;
 			comdb2_early_ack(dbenv, rp->lsn,
 					rep->committed_gen);
 		}
-
 		break;
 	case DB___txn_dist_abort:
 		if ((ret = __txn_dist_abort_read(dbenv, rec->data, &dist_abort_args)) != 0) {

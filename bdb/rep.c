@@ -3170,8 +3170,10 @@ static int bdb_wait_for_seqnum_from_all_int(bdb_state_type *bdb_state,
     if ((seqnum->lsn.file == 0) && (seqnum->lsn.offset == 0))
         return 0;
 
-    logmsg(LOGMSG_USER, "%s waiting for %s\n", __func__,
+    /*
+    logmsg(LOGMSG_DEBUG, "%s waiting for %s\n", __func__,
            lsn_to_str(str, &(seqnum->lsn)));
+    */
 
     begin_time = comdb2_time_epochms();
 
@@ -4099,13 +4101,6 @@ static int process_berkdb(bdb_state_type *bdb_state, char *host, DBT *control,
         bdb_state->seqnum_info->seqnums[myhost_ix].lsn = permlsn;
         bdb_state->seqnum_info->seqnums[myhost_ix].generation = generation;
         Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
-
-        if (gbl_set_seqnum_trace) {
-            logmsg(LOGMSG_USER, "%s line %d set %s seqnum to %d:%d gen %d\n",
-                   __func__, __LINE__, bdb_state->repinfo->myhost, permlsn.file,
-                   permlsn.offset, generation);
-        }
-
 
         /*
         fprintf(stderr, "%s line %d DB_REP_ISPERM lastlsn = <%d:%d>\n",

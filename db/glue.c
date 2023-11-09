@@ -724,6 +724,7 @@ int trans_commit_logical_tran(void *trans, int *bdberr)
 int gbl_javasp_early_release = 1;
 int gbl_debug_add_replication_latency = 0;
 uint32_t gbl_written_rows_warn = 0;
+extern int gbl_debug_disttxn_trace;
 
 static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int timeoutms, int adaptive, int logical,
                             void *blkseq, int blklen, void *blkkey, int blkkeylen, int release_schema_lk, int nowait)
@@ -746,7 +747,9 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int
     rc = trans_commit_seqnum_int(bdb_handle, thedb, iq, trans, &ss, logical,
                                  blkseq, blklen, blkkey, blkkeylen);
     int endms = comdb2_time_epochms();
-    logmsg(LOGMSG_USER, "%s commit took %d ms\n", __func__, endms - startms);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "%s commit took %d ms\n", __func__, endms - startms);
+    }
 
     if (gbl_extended_sql_debug_trace && IQ_HAS_SNAPINFO_KEY(iq)) {
         cn_len = IQ_SNAPINFO(iq)->keylen;
@@ -775,7 +778,9 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int
         startms = comdb2_time_epochms();
         rc = trans_wait_for_seqnum_int(bdb_handle, thedb, iq, source_host, timeoutms, adaptive, &ss);
         endms = comdb2_time_epochms();
-        logmsg(LOGMSG_USER, "%s wait-for-seqnum took %d ms\n", __func__, endms - startms);
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "%s wait-for-seqnum took %d ms\n", __func__, endms - startms);
+        }
     }
 
     if (release_schema_lk && gbl_debug_add_replication_latency) {

@@ -67,6 +67,7 @@ static unsigned int curtran_counter = 0;
 int gbl_flush_on_prepare = 1;
 int gbl_wait_for_prepare_seqnum = 1;
 extern int gbl_debug_txn_sleep;
+extern int gbl_debug_disttxn_trace;
 extern int __txn_getpriority(DB_TXN *txnp, int *priority);
 
 #if 0
@@ -1507,7 +1508,9 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
         int startms = comdb2_time_epochms();
         bdb_state->dbenv->log_flush(bdb_state->dbenv, NULL);
         int endms = comdb2_time_epochms();
-        logmsg(LOGMSG_USER, "DISTTXN %s %s log-flush took %d ms\n", __func__, dist_txnid, (endms - startms));
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s %s log-flush took %d ms\n", __func__, dist_txnid, (endms - startms));
+        }
     }
 
     if (!prepare_rc && gbl_wait_for_prepare_seqnum) {
@@ -1515,12 +1518,13 @@ int bdb_tran_prepare(bdb_state_type *bdb_state, tran_type *tran, const char *dis
         seqnum_type seqnum = {{0}};
         memcpy(&seqnum.lsn, &commit_lsn, sizeof(commit_lsn));
         bdb_state->dbenv->get_rep_gen(bdb_state->dbenv, &seqnum.generation);
-        logmsg(LOGMSG_USER, "DISTTXN %s %s wait-for-seqnum start commit-lsn is %d:%d\n", __func__, dist_txnid, commit_lsn.file, commit_lsn.offset);
         int startms = comdb2_time_epochms();
         bdb_wait_for_seqnum_from_all_adaptive_newcoh(bdb_state, &seqnum, 0,
                                                      &timeoutms);
         int endms = comdb2_time_epochms();
-        logmsg(LOGMSG_USER, "DISTTXN %s %s wait-for-seqnum took %d ms commit-lsn is %d:%d\n", __func__, dist_txnid, (endms - startms), commit_lsn.file, commit_lsn.offset);
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s %s wait-for-seqnum took %d ms commit-lsn is %d:%d\n", __func__, dist_txnid, (endms - startms), commit_lsn.file, commit_lsn.offset);
+        }
     }
 
     return prepare_rc;

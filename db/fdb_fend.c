@@ -3953,7 +3953,7 @@ int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
         if (clnt->use_2pc) {
             clnt->is_coordinator = 1;
         }
-        /* Handled as 'prepare' by 2pc txns */
+        /* Converted to 'prepare' by 2pc txns */
         rc = fdb_send_commit(msg, tran, clnt->dbtran.mode, tran->sb);
         if (clnt->use_2pc && !rc) {
             const char *tier = fdb_dbname_class_routing(tran->fdb);

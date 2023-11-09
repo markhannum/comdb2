@@ -78,6 +78,7 @@ void participant_has_propagated(const char *dist_txnid, const char *dbname, cons
 int participant_heartbeat(const char *dist_txnid, const char *participant_name, const char *participant_tier);
 
 /* Coordinator updates his own heartbeat timestamp */
+/* XXX rethink (unused) */
 void coordinator_heartbeat(const char *dist_txnid);
 
 /* This participant tells coordinator it has prepared and waits for response */

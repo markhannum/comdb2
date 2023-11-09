@@ -108,6 +108,7 @@ typedef struct sanctioned {
     char *coordinator_master;
     int sanctioned;
     int time_added;
+    int heartbeats_enabled;
     dist_hbeats_type hbeats;
 } sanctioned_t;
 
@@ -631,6 +632,7 @@ static struct participant *find_participant_lk(transaction_t *dtran, const char 
         if (!strcmp(part->participant_name, dbname))
             return part;
     }
+    logmsg(LOGMSG_ERROR, "%s couldn't find participant %s for dist-txnid %s\n", __func__, dbname, dtran->dist_txnid);
     return NULL;
 }
 
@@ -983,7 +985,6 @@ static int check_participant_timeout_lk(transaction_t *dtran)
     /* XXX only count heartbeats from preparing transactions */
     LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
     {
-        /* heartbeat_count > 0 is a hack .. i have to revise this */
         if (part->status == PARTICIPANT_PREPARING && ((nowms - part->last_heartbeat) > 10000)) {
             logmsg(LOGMSG_USER, "%s disttxn %s no hbeat from %s %s timing out\n", __func__, dtran->dist_txnid,
                    part->participant_name, part->participant_tier);
@@ -1048,7 +1049,6 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
     }
 
     /* Measured from beginning of txn */
-    /* TODO .. dorin says use heartbeats instead of timeouts */
     int elapsed = (comdb2_time_epochms() - dtran->start_time);
     int start_timer = comdb2_time_epochms();
     while (coordinator_should_wait_lk(dtran, can_retry)) {
@@ -1228,6 +1228,7 @@ static void disttxn_timeout(void)
             abort_transaction_lk(dtran, 0);
             dtran->failrc = ERR_DIST_ABORT;
             dtran->outrc = ERR_BLOCK_FAILED;
+            dtran->errstr = strdup("Transaction timeout");
             logmsg(LOGMSG_INFO, "DISTTXN %s disttxn %s aborted by timeout\n", __func__, dtran->dist_txnid);
         }
         if (dtran) {
@@ -1255,7 +1256,7 @@ int disttxn_purgeable_lk(transaction_t *dtran)
     return 0;
 }
 
-/* TODO this is dumb nix entirely */
+/* TODO revise */
 static void disttxn_purge(void)
 {
     struct disttxn_collect collect = {0};
@@ -1268,7 +1269,8 @@ static void disttxn_purge(void)
     Pthread_mutex_unlock(&active_transactions_lk);
     deleted_disttxns = malloc(sizeof(char *) * alloc);
 
-    /* Purge completed transactions */
+    /* Purge completed transactions 
+     * TODO: do this inline */
     for (int i = 0; i < collect.count; i++) {
         transaction_t *dtran;
 
@@ -1293,23 +1295,6 @@ static void disttxn_purge(void)
         Pthread_mutex_unlock(&active_transactions_lk);
     }
 
-    /* Purge sanctioned hash */
-    /*
-    for (int i = 0; i < deleted; i++) {
-        Pthread_mutex_lock(&sanc_lk);
-        sanctioned_t *sanc = hash_find(sanctioned_hash, &deleted_disttxns[i]);
-        if (sanc) {
-            hash_del(sanctioned_hash, sanc);
-        }
-        Pthread_mutex_unlock(&sanc_lk);
-        if (sanc) {
-            if (gbl_debug_disttxn_trace) {
-                logmsg(LOGMSG_USER, "DISTTXN %s deleting disttxn %s from sanc\n", __func__, deleted_disttxns[i]);
-            }
-            destroy_sanc(sanc);
-        }
-    }
-    */
 
     /* Free dup'd strings */
     for (int i = 0; i < collect.count; i++) {
@@ -1319,36 +1304,6 @@ static void disttxn_purge(void)
     /* Free deleted list */
     free(deleted_disttxns);
 
-#if 0
-    /* Collect old sanctioned */
-    Pthread_mutex_lock(&sanc_lk);
-    hash_info(sanctioned_hash, NULL, NULL, NULL, NULL, &alloc, NULL, NULL);
-    collect.disttxns = realloc(collect.disttxns, sizeof(char *) * alloc);
-    collect.count = 0;
-    hash_for(sanctioned_hash, collect_sanc, &collect);
-    Pthread_mutex_unlock(&sanc_lk);
-
-    /* Free old sanctioned */
-    for (int i = 0; i < collect.count; i++) {
-        Pthread_mutex_lock(&sanc_lk);
-        sanctioned_t *sanc = hash_find(sanctioned_hash, &collect.disttxns[i]);
-        if (sanc) {
-            hash_del(sanctioned_hash, sanc);
-        }
-        Pthread_mutex_unlock(&sanc_lk);
-        if (sanc) {
-            if (gbl_debug_disttxn_trace) {
-                logmsg(LOGMSG_USER, "DISTTXN %s deleting disttxn %s from sanc (old)\n", __func__, sanc->dist_txnid);
-            }
-            destroy_sanc(sanc);
-        }
-    }
-
-    /* Free dup'd strings */
-    for (int i = 0; i < collect.count; i++) {
-        free(collect.disttxns[i]);
-    }
-#endif
 
     /* Free collect list */
     free(collect.disttxns);
@@ -1418,7 +1373,6 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
             struct participant *part = find_participant_lk(dtran, dbname);
             participant_prepared_lk(dtran, part);
             part->last_heartbeat = comdb2_time_epochms();
-            part->heartbeat_count++;
             disttxn_check_commitable_lk(dtran);
             signal_coordinator_wakeup_lk(dtran);
             Pthread_mutex_unlock(&dtran->lk);
@@ -1710,6 +1664,7 @@ static int participant_wait_int(const char *dist_txnid, const char *coordinator_
     return rtn == I_AM_COMMITTED ? 0 : -1;
 }
 
+/* XXX not used right now .. rethink this */
 void coordinator_heartbeat(const char *dist_txnid)
 {
     if (gbl_debug_disttxn_trace) {
@@ -1745,9 +1700,10 @@ int participant_heartbeat(const char *dist_txnid, const char *participant_name, 
     if (dtran) {
         struct participant *part = find_participant_lk(dtran, participant_name);
         part->last_heartbeat = comdb2_time_epochms();
-        part->heartbeat_count++;
         Pthread_mutex_unlock(&dtran->lk);
         rcode = 0;
+    } else {
+        logmsg(LOGMSG_ERROR, "%s heartbeat from %s/%s unable to find dist-txn %s\n", __func__, participant_name, participant_tier, dist_txnid);
     }
 
     return rcode;
@@ -1938,7 +1894,7 @@ int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid
     if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
     }
-    int rtn = 0;
+    int rtn = 0, enable_heartbeats = 0;
     sanctioned_t *sanc;
     Pthread_mutex_lock(&sanc_lk);
     sanc = hash_find(sanctioned_hash, &dist_txnid);
@@ -1968,8 +1924,13 @@ int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid
         hash_add(sanctioned_hash, sanc);
         rtn = 0;
     }
+    if (!sanc->heartbeats_enabled) {
+        enable_heartbeats = 1;
+        sanc->heartbeats_enabled = 1;
+    }
     Pthread_mutex_unlock(&sanc_lk);
-    enable_dist_heartbeats(&sanc->hbeats);
+    if (enable_heartbeats)
+        enable_dist_heartbeats(&sanc->hbeats);
     return rtn;
 }
 

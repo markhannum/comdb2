@@ -6842,11 +6842,6 @@ int osql_set_usedb(struct ireq *iq, const char *tablename, int tableversion, int
     return 0;
 }
 
-static inline int is_2pc_transaction(struct ireq *iq)
-{
-    return (iq->sorese && (iq->sorese->is_participant || iq->sorese->is_coordinator));
-}
-
 /**
  * Handles each packet and calls record.c functions
  * to apply to received row updates
@@ -6876,24 +6871,6 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
     /* throttle blocproc on master if replication threads backing up */
     if (gbl_toblock_net_throttle && is_write_request(type))
         net_throttle_wait(thedb->handle_sibling);
-
-    /*
-    if (is_2pc_transaction(iq)) {
-        extern int gbl_2pc_heartbeat_timeout;
-        int nowms = comdb2_time_epochms();
-        if ((nowms - iq->sorese->last_2pc_heartbeat) > (gbl_2pc_heartbeat_timeout / 3)) {
-            if (iq->sorese->is_coordinator) {
-                coordinator_heartbeat(iq->sorese->dist_txnid);
-                iq->sorese->last_2pc_heartbeat = nowms;
-            }
-            if (iq->sorese->is_participant) {
-                if (!participant_send_heartbeat(iq->sorese->dist_txnid, iq->sorese->coordinator_dbname,
-                                                iq->sorese->coordinator_master))
-                    iq->sorese->last_2pc_heartbeat = nowms;
-            }
-        }
-    }
-    */
 
 #if DEBUG_REORDER
     const char *osql_reqtype_str(int type);

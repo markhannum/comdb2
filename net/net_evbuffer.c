@@ -1856,10 +1856,9 @@ static void do_enable_dist_heartbeats(int dummyfd, short what, void *data)
         logmsg(LOGMSG_ERROR, "Failed to create new event for dist_heartbeat\n");
         return;
     }
-    dt->tv.tv_sec = 1;
+    dt->tv.tv_sec = 5;
     dt->tv.tv_usec = 0;
 
-    logmsg(LOGMSG_USER, "enabling heartbeat for %p\n", data);
     event_add(dt->ev_hbeats, &dt->tv);
 }
 

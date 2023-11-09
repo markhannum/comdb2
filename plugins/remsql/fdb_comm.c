@@ -238,19 +238,6 @@ typedef struct {
     uuid_t tiduuid;
 } fdb_msg_hbeat_t;
 
-/* first part identical to fdb_msg_tran_t */
-typedef struct {
-    fdb_msg_header_t type;      /* FDB_MSG_TRAN_BEGIN, ... */
-    char *tid;                  /* transaction id */
-    enum transaction_level lvl; /* TRANLEVEL_SOSQL & co. */
-    int flags;                  /* extensions */
-    uuid_t tiduuid;
-    int seq;                  /* sequencing tran begin/commit/rollback, writes, cursor open/close */
-    char *dist_txnid;         /* distributed-txnid */
-    char *coordinator_dbname; /* coordinator */
-    char *coordinator_tier;   /* coordinator-tier */
-} fdb_msg_prep_t;
-
 typedef struct {
     fdb_msg_header_t type; /* FDB_MSG_CURSOR_OPEN */
     char *cid;             /* cursor id */
@@ -284,7 +271,6 @@ union fdb_msg {
     fdb_msg_update_t up;
     fdb_msg_index_t ix;
     fdb_msg_hbeat_t hb;
-    fdb_msg_prep_t fp;
     fdb_msg_2pc_tran_t tv;
 };
 
@@ -716,21 +702,6 @@ char *fdb_msg_data(fdb_msg_t *msg)
 void fdb_msg_clean_message(fdb_msg_t *msg)
 {
     switch (msg->hd.type & FD_MSG_TYPE) {
-    /* TODO : NIX THIS MESSAGE ENTIRELY */
-    case FDB_MSG_TRAN_PREPARE:
-        if (msg->fp.dist_txnid) {
-            free(msg->fp.dist_txnid);
-            msg->fp.dist_txnid = NULL;
-        }
-        if (msg->fp.coordinator_dbname) {
-            free(msg->fp.coordinator_dbname);
-            msg->fp.coordinator_dbname = NULL;
-        }
-        if (msg->fp.coordinator_tier) {
-            free(msg->fp.coordinator_tier);
-            msg->fp.coordinator_tier = NULL;
-        }
-        break;
 
     case FDB_MSG_TRAN_2PC_BEGIN:
         if (msg->tv.dist_txnid) {
@@ -874,10 +845,6 @@ void fdb_msg_clean_message(fdb_msg_t *msg)
 static void fdb_msg_prepare_message(fdb_msg_t *msg)
 {
     switch (msg->hd.type & FD_MSG_TYPE) {
-    case FDB_MSG_TRAN_PREPARE:
-        msg->fp.tid = (char *)msg->fp.tiduuid;
-        break;
-
     case FDB_MSG_TRAN_2PC_BEGIN:
         msg->tv.tid = (char *)msg->tv.tiduuid;
         break;
@@ -1000,61 +967,6 @@ int fdb_msg_read_message_int(SBUF2 *sb, fdb_msg_t *msg, enum recv_flags flags,
 
     recv_dk = 0;
     switch (msg->hd.type & FD_MSG_TYPE) {
-    case FDB_MSG_TRAN_PREPARE:
-        rc = sbuf2fread(msg->fp.tid, 1, idsz, sb);
-        if (rc != idsz)
-            return -1;
-
-        rc = sbuf2fread((char *)&msg->fp.lvl, 1, sizeof(msg->fp.lvl), sb);
-        if (rc != sizeof(msg->fp.lvl))
-            return -1;
-        msg->fp.lvl = ntohl(msg->fp.lvl);
-
-        rc = sbuf2fread((char *)&msg->fp.flags, 1, sizeof(msg->fp.flags), sb);
-        if (rc != sizeof(msg->fp.flags))
-            return -1;
-        msg->fp.flags = ntohl(msg->fp.flags);
-
-        rc = sbuf2fread((char *)&msg->fp.seq, 1, sizeof(msg->fp.seq), sb);
-        if (rc != sizeof(msg->fp.seq))
-            return -1;
-        msg->fp.seq = ntohl(msg->fp.seq);
-
-        /* dist-txnid */
-        rc = sbuf2fread((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return -1;
-        tmp = ntohl(tmp);
-
-        msg->fp.dist_txnid = malloc(tmp);
-        rc = sbuf2fread((char *)msg->fp.dist_txnid, 1, tmp, sb);
-        if (rc != tmp)
-            return -1;
-
-        /* coordinator-dbname */
-        rc = sbuf2fread((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return -1;
-        tmp = ntohl(tmp);
-
-        msg->fp.coordinator_dbname = malloc(tmp);
-        rc = sbuf2fread((char *)msg->fp.coordinator_dbname, 1, tmp, sb);
-        if (rc != tmp)
-            return -1;
-
-        /* coordinator-tier */
-        rc = sbuf2fread((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return -1;
-        tmp = ntohl(tmp);
-
-        msg->fp.coordinator_tier = malloc(tmp);
-        rc = sbuf2fread((char *)msg->fp.coordinator_tier, 1, tmp, sb);
-        if (rc != tmp)
-            return -1;
-
-        break;
-
     case FDB_MSG_TRAN_2PC_BEGIN:
 
         rc = sbuf2fread((char *)&msg->tv.version, 1, sizeof(msg->tv.version), sb);
@@ -2018,62 +1930,6 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
 
     send_dk = 0;
     switch (msg->hd.type & FD_MSG_TYPE) {
-
-    case FDB_MSG_TRAN_PREPARE:
-        rc = sbuf2fwrite((char *)msg->tr.tid, 1, idsz, sb);
-        if (rc != idsz)
-            return FDB_ERR_WRITE_IO;
-
-        tmp = htonl(msg->fp.lvl);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
-
-        tmp = htonl(msg->fp.flags);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
-
-        tmp = htonl(msg->fp.seq);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
-
-        /* dist-txnid */
-        tmp = htonl(strlen(msg->fp.dist_txnid) + 1);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
-
-        tmp = ntohl(tmp);
-        rc = sbuf2fwrite((char *)msg->fp.dist_txnid, 1, tmp, sb);
-        if (rc != tmp)
-            return FDB_ERR_WRITE_IO;
-
-        /* coordinator-dbname */
-        tmp = htonl(strlen(msg->fp.coordinator_dbname) + 1);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
-
-        tmp = ntohl(tmp);
-        rc = sbuf2fwrite((char *)msg->fp.coordinator_dbname, 1, tmp, sb);
-        if (rc != tmp)
-            return FDB_ERR_WRITE_IO;
-
-        /* coordinator-tier */
-        tmp = htonl(strlen(msg->fp.coordinator_tier) + 1);
-        rc = sbuf2fwrite((char *)&tmp, 1, sizeof(tmp), sb);
-        if (rc != sizeof(tmp))
-            return FDB_ERR_WRITE_IO;
-
-        tmp = ntohl(tmp);
-        rc = sbuf2fwrite((char *)msg->fp.coordinator_tier, 1, tmp, sb);
-        if (rc != tmp)
-            return FDB_ERR_WRITE_IO;
-
-        break;
-
     case FDB_MSG_TRAN_2PC_BEGIN:
 
         tmp = htonl(msg->tv.version);
@@ -3351,34 +3207,6 @@ int fdb_send_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl
     return rc;
 }
 
-extern char gbl_dbname[];
-int fdb_send_prepare(fdb_msg_t *msg, fdb_tran_t *trans, char *dist_txnid, enum transaction_level lvl, SBUF2 *sb)
-{
-    int rc;
-    msg->hd.type = FDB_MSG_TRAN_PREPARE;
-    msg->hd.type |= FD_MSG_FLAGS_ISUUID;
-
-    msg->fp.tid = trans->tid;
-    msg->fp.lvl = lvl;
-    msg->fp.flags = 0;
-    msg->fp.seq = trans->seq;
-    msg->fp.dist_txnid = dist_txnid;
-    msg->fp.coordinator_dbname = gbl_dbname;
-    msg->fp.coordinator_tier = (char *)get_my_mach_class_str();
-
-    rc = fdb_msg_write_message(sb, msg, 1);
-    if (rc) {
-        logmsg(LOGMSG_ERROR, "%s: failed sending commit transaction message rc=%d\n", __func__, rc);
-        return rc;
-    }
-
-    if (gbl_fdb_track) {
-        fdb_msg_print_message(sb, msg, "sending msg");
-    }
-
-    return rc;
-}
-
 int fdb_send_commit(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, SBUF2 *sb)
 {
     int rc;
@@ -3534,6 +3362,11 @@ int fdb_bend_trans_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     return rc;
 }
 
+int fdb_bend_trans_prepare(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
+{
+    return -1;
+}
+
 int fdb_bend_trans_2pc_begin(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
 {
     char *tid = msg->tv.tid;
@@ -3628,23 +3461,6 @@ int fdb_bend_trans_commit(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     }
 
     return rc;
-}
-
-/* XXX actually don't need this at all: the information comes in fdb_begin_2pc */
-int fdb_bend_trans_prepare(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
-{
-    /* This is a participant-replicant in a 2pc transaction.  Record the coordinator
-     * information in the clnt.  This emits OSQL_PREPARE rather than OSQL_DONE. */
-    struct sqlclntstate *clnt = arg->clnt;
-
-    assert(!clnt->is_coordinator);
-    clnt->dist_txnid = strdup(msg->fp.dist_txnid);
-    clnt->coordinator_dbname = strdup(msg->fp.coordinator_dbname);
-    clnt->coordinator_tier = strdup(msg->fp.coordinator_tier);
-    clnt->use_2pc = 1;
-    clnt->is_participant = 1;
-
-    return fdb_bend_trans_commit(sb, msg, arg);
 }
 
 int fdb_bend_trans_rollback(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
