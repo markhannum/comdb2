@@ -4100,6 +4100,13 @@ static int process_berkdb(bdb_state_type *bdb_state, char *host, DBT *control,
         bdb_state->seqnum_info->seqnums[myhost_ix].generation = generation;
         Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
 
+        if (gbl_set_seqnum_trace) {
+            logmsg(LOGMSG_USER, "%s line %d set %s seqnum to %d:%d gen %d\n",
+                   __func__, __LINE__, bdb_state->repinfo->myhost, permlsn.file,
+                   permlsn.offset, generation);
+        }
+
+
         /*
         fprintf(stderr, "%s line %d DB_REP_ISPERM lastlsn = <%d:%d>\n",
         __FILE__, __LINE__,
