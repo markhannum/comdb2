@@ -139,30 +139,30 @@ function find_tertiary_master
 function create_tables
 {
     # Create t1
-    x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int)" 2>&1) 
+    x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table if not exists t1(a int)" 2>&1) 
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating table t1 for $DBNAME $x"
-    x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create unique index t1a on t1(a)" 2>&1)
+    x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create unique index if not exists t1a on t1(a)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating unique index for $DBNAME $x"
 
-    x=$($CDB2SQL_EXE $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "create table t1(a int)" 2>&1)
+    x=$($CDB2SQL_EXE $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "create table if not exists t1(a int)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating table t1 for $SECONDARY_DBNAME $x"
-    x=$($CDB2SQL_EXE $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "create unique index t1a on t1(a)" 2>&1)
+    x=$($CDB2SQL_EXE $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "create unique index if not exists t1a on t1(a)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating unique index for $SECONDARY_DBNAME $x"
 
-    x=$($CDB2SQL_EXE $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "create table t1(a int)" 2>&1)
+    x=$($CDB2SQL_EXE $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "create table if not exists t1(a int)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating table t1 for $TERTIARY_DBNAME $x"
-    x=$($CDB2SQL_EXE $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "create unique index t1a on t1(a)" 2>&1)
+    x=$($CDB2SQL_EXE $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "create unique index if not exists t1a on t1(a)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating index for $TERTIARY_DBNAME $x"
 
 
-    x=$($CDB2SQL_EXE $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "create table t1(a int)" 2>&1)
+    x=$($CDB2SQL_EXE $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "create table if not exists t1(a int)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating table t1 for $QUATERNARY_DBNAME $x"
-    x=$($CDB2SQL_EXE $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "create unique index t1a on t1(a)" 2>&1)
+    x=$($CDB2SQL_EXE $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "create unique index if not exists t1a on t1(a)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating index for $QUATERNARY_DBNAME $x"
 
-    x=$($CDB2SQL_EXE $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "create table t1(a int)" 2>&1)
+    x=$($CDB2SQL_EXE $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "create table if not exists t1(a int)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating table t1 for $QUINARY_DBNAME $x"
-    x=$($CDB2SQL_EXE $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "create unique index t1a on t1(a)" 2>&1)
+    x=$($CDB2SQL_EXE $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "create unique index if not exists t1a on t1(a)" 2>&1)
     r=$? ; [[ "$r" == "0" ]] || failexit "failed creating index for $QUINARY_DBNAME $x"
 }
 
