@@ -748,7 +748,8 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int
                                  blkseq, blklen, blkkey, blkkeylen);
     int endms = comdb2_time_epochms();
     if (gbl_debug_disttxn_trace) {
-        logmsg(LOGMSG_USER, "%s commit took %d ms\n", __func__, endms - startms);
+        logmsg(LOGMSG_USER, "%s commit took %d ms commit-lsn %d:%d\n", __func__, endms - startms,
+            ss.lsn.file, ss.lsn.offset);
     }
 
     if (gbl_extended_sql_debug_trace && IQ_HAS_SNAPINFO_KEY(iq)) {
