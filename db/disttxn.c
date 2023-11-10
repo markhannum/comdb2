@@ -145,7 +145,6 @@ static pthread_mutex_t hndl_lk = PTHREAD_MUTEX_INITIALIZER;
 int gbl_2pc = 0;
 int gbl_coordinator_propagate_timeout_ms = 5000;
 int gbl_disttxn_linger_time = 10;
-int gbl_disttxn_sanctioned_linger_time = 600;
 int gbl_disttxn_handle_linger_time = 60;
 int gbl_coordinator_notify = POSTCOMMIT;
 int gbl_disttxn_handle_cache = 1;
@@ -1191,16 +1190,6 @@ static int collect_handles(void *obj, void *arg)
     return 0;
 }
 
-int collect_sanc(void *obj, void *arg)
-{
-    struct disttxn_collect *collect = (struct disttxn_collect *)arg;
-    sanctioned_t *sanc = (sanctioned_t *)obj;
-    if ((comdb2_time_epoch() - sanc->time_added) > gbl_disttxn_sanctioned_linger_time) {
-        collect->disttxns[collect->count++] = strdup(sanc->dist_txnid);
-    }
-    return 0;
-}
-
 /* This is required to prevent distributed deadlocks */
 static void disttxn_timeout(void)
 {
@@ -1371,6 +1360,10 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         /* Register success for ongoing transaction */
         if (prepare_success && dtran->state == DISTTXN_PREPARING) {
             struct participant *part = find_participant_lk(dtran, dbname);
+            if (!part) {
+                Pthread_mutex_unlock(&dtran->lk);
+                return -1;
+            }
             participant_prepared_lk(dtran, part);
             part->last_heartbeat = comdb2_time_epochms();
             disttxn_check_commitable_lk(dtran);
@@ -1382,6 +1375,10 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         /* Notify participant of abort  */
         if (prepare_success && is_aborted(dtran)) {
             struct participant *part = find_participant_lk(dtran, dbname);
+            if (!part) {
+                Pthread_mutex_unlock(&dtran->lk);
+                return -1;
+            }
             participant_failed_lk(dtran, part);
             signal_coordinator_wakeup_lk(dtran);
             Pthread_mutex_unlock(&dtran->lk);
@@ -1399,6 +1396,10 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         /* Tell all participants to abort */
         if (!prepare_success && dtran->state == DISTTXN_PREPARING) {
             struct participant *part = find_participant_lk(dtran, dbname);
+            if (!part) {
+                Pthread_mutex_unlock(&dtran->lk);
+                return -1;
+            }
             participant_failed_lk(dtran, part);
             dtran->failrc = partrc;
             dtran->outrc = outrc;
@@ -1420,6 +1421,10 @@ static int participant_result(const char *dist_txnid, const char *dbname, const 
         /* Don't need to abort already failed txn */
         if (!prepare_success) {
             struct participant *part = find_participant_lk(dtran, dbname);
+            if (!part) {
+                Pthread_mutex_unlock(&dtran->lk);
+                return -1;
+            }
             participant_failed_lk(dtran, part);
 
             /* Switch from retryable to non-retryable rcode */
@@ -1507,6 +1512,10 @@ int participant_propagated(const char *dist_txnid, const char *dbname, const cha
 
     if (dtran) {
         struct participant *part = find_participant_lk(dtran, dbname);
+        if (!part) {
+            Pthread_mutex_unlock(&dtran->lk);
+            return -1;
+        }
         participant_propagated_lk(dtran, part);
         Pthread_mutex_unlock(&dtran->lk);
     }
@@ -1699,6 +1708,10 @@ int participant_heartbeat(const char *dist_txnid, const char *participant_name, 
 
     if (dtran) {
         struct participant *part = find_participant_lk(dtran, participant_name);
+        if (!part) {
+            Pthread_mutex_unlock(&dtran->lk);
+            return -1;
+        }
         part->last_heartbeat = comdb2_time_epochms();
         Pthread_mutex_unlock(&dtran->lk);
         rcode = 0;

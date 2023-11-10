@@ -253,8 +253,6 @@ REGISTER_TUNABLE("debug_disttxn_trace", "Print disttxn debug information.  (Defa
                  &gbl_debug_disttxn_trace, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("disttxn_linger", "Time disttxns persist in-memory after resolution.  (Default: 10s)", TUNABLE_INTEGER,
                  &gbl_disttxn_linger_time, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("disttxn_sanctioned_linger", "Time sanctioned disttxns persist prior to resolution.  (Default: 600s)",
-                 TUNABLE_INTEGER, &gbl_disttxn_sanctioned_linger_time, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("disttxn_handle_cache", "Enable the disttxn handle-cache.  (Default: on)", TUNABLE_BOOLEAN,
                  &gbl_disttxn_handle_cache, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("disttxn_handle_linger_time", "Time that unused handles persist.  (Default: 60s)", TUNABLE_INTEGER,

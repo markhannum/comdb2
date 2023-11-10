@@ -70,8 +70,6 @@ extern int gbl_coordinator_propagate_timeout_ms;
 extern int gbl_coordinator_sync_on_commit;
 extern int gbl_coordinator_notify;
 extern int gbl_disttxn_linger_time;
-extern int gbl_disttxn_sanctioned_linger_time;
-extern int gbl_disttxn_sanctioned_linger_time;
 extern int gbl_disttxn_handle_cache;
 extern int gbl_disttxn_handle_linger_time;
 extern int gbl_disttxn_async_messages;
