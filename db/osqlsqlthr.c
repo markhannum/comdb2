@@ -415,14 +415,14 @@ static int osql_wait(struct sqlclntstate *clnt)
         if (!clnt->wait(clnt, timeout, err))
             return 0;
 
-    //return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
+    // return osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
     int startms = comdb2_time_epochms();
     int rc = osql_chkboard_wait_commitrc(osql->rqid, osql->uuid, timeout, err);
     int endms = comdb2_time_epochms();
     if (gbl_debug_disttxn_trace) {
         uuidstr_t us;
         logmsg(LOGMSG_USER, "%s took %d ms to commit rqid=%llu uuid=%s\n", __func__, (endms - startms), osql->rqid,
-                comdb2uuidstr(osql->uuid, us));
+               comdb2uuidstr(osql->uuid, us));
     }
     return rc;
 }
@@ -875,7 +875,7 @@ static int osql_sock_restart(struct sqlclntstate *clnt, int maxretries,
 
     if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "%s restarting rqid=%llx uuid=%s keep-session=%d\n", __func__, clnt->osql.rqid,
-                comdb2uuidstr(clnt->osql.uuid, us), keep_session);
+               comdb2uuidstr(clnt->osql.uuid, us), keep_session);
     }
 
     if (!thd) {

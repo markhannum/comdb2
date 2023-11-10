@@ -347,29 +347,29 @@ enum {
   ERR_CONVERSION_DT = -5,
 };
 
-#define RESPONSE_TYPES                                                         \
-    XRESPONSE(RESPONSE_COLUMNS)                                                \
-    XRESPONSE(RESPONSE_COLUMNS_LUA)                                            \
-    XRESPONSE(RESPONSE_COLUMNS_STR)                                            \
-    XRESPONSE(RESPONSE_COLUMNS_FDB_PUSH)                                       \
-    XRESPONSE(RESPONSE_COST)                                                   \
-    XRESPONSE(RESPONSE_DEBUG)                                                  \
-    XRESPONSE(RESPONSE_EFFECTS)                                                \
-    XRESPONSE(RESPONSE_ERROR)                                                  \
-    XRESPONSE(RESPONSE_ERROR_ACCESS)                                           \
-    XRESPONSE(RESPONSE_ERROR_BAD_STATE)                                        \
-    XRESPONSE(RESPONSE_ERROR_PREPARE)                                          \
-    XRESPONSE(RESPONSE_ERROR_PREPARE_RETRY)                                    \
-    XRESPONSE(RESPONSE_ERROR_REJECT)                                           \
-    XRESPONSE(RESPONSE_REDIRECT_FOREIGN)                                       \
-    XRESPONSE(RESPONSE_FLUSH)                                                  \
-    XRESPONSE(RESPONSE_HEARTBEAT)                                              \
-    XRESPONSE(RESPONSE_QUERY_STATS)                                            \
-    XRESPONSE(RESPONSE_ROW)                                                    \
-    XRESPONSE(RESPONSE_ROW_LAST)                                               \
-    XRESPONSE(RESPONSE_ROW_LAST_DUMMY)                                         \
-    XRESPONSE(RESPONSE_ROW_LUA)                                                \
-    XRESPONSE(RESPONSE_ROW_STR)                                                \
+#define RESPONSE_TYPES                                                                                                 \
+    XRESPONSE(RESPONSE_COLUMNS)                                                                                        \
+    XRESPONSE(RESPONSE_COLUMNS_LUA)                                                                                    \
+    XRESPONSE(RESPONSE_COLUMNS_STR)                                                                                    \
+    XRESPONSE(RESPONSE_COLUMNS_FDB_PUSH)                                                                               \
+    XRESPONSE(RESPONSE_COST)                                                                                           \
+    XRESPONSE(RESPONSE_DEBUG)                                                                                          \
+    XRESPONSE(RESPONSE_EFFECTS)                                                                                        \
+    XRESPONSE(RESPONSE_ERROR)                                                                                          \
+    XRESPONSE(RESPONSE_ERROR_ACCESS)                                                                                   \
+    XRESPONSE(RESPONSE_ERROR_BAD_STATE)                                                                                \
+    XRESPONSE(RESPONSE_ERROR_PREPARE)                                                                                  \
+    XRESPONSE(RESPONSE_ERROR_PREPARE_RETRY)                                                                            \
+    XRESPONSE(RESPONSE_ERROR_REJECT)                                                                                   \
+    XRESPONSE(RESPONSE_REDIRECT_FOREIGN)                                                                               \
+    XRESPONSE(RESPONSE_FLUSH)                                                                                          \
+    XRESPONSE(RESPONSE_HEARTBEAT)                                                                                      \
+    XRESPONSE(RESPONSE_QUERY_STATS)                                                                                    \
+    XRESPONSE(RESPONSE_ROW)                                                                                            \
+    XRESPONSE(RESPONSE_ROW_LAST)                                                                                       \
+    XRESPONSE(RESPONSE_ROW_LAST_DUMMY)                                                                                 \
+    XRESPONSE(RESPONSE_ROW_LUA)                                                                                        \
+    XRESPONSE(RESPONSE_ROW_STR)                                                                                        \
     XRESPONSE(RESPONSE_TRACE)
 
 #define XRESPONSE(x) x,
@@ -928,8 +928,8 @@ struct sqlclntstate {
     replay_func *recover_ddlk_fail;
     unsigned skip_eventlog: 1;
     unsigned request_fp: 1;
-    unsigned dohsql_disable: 1;
-    unsigned can_redirect_fdb: 1;
+    unsigned dohsql_disable : 1;
+    unsigned can_redirect_fdb : 1;
 
     char *sqlengine_state_file;
     int sqlengine_state_line;

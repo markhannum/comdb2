@@ -540,7 +540,8 @@ int has_parallel_sql(struct sqlclntstate *clnt)
 
     if (!clnt) {
         struct sql_thread *thd = pthread_getspecific(query_info_key);
-        if (thd) clnt = thd->clnt;
+        if (thd)
+            clnt = thd->clnt;
     }
     /* disable anything involving shared shadows;
        recom requires a read-only share;

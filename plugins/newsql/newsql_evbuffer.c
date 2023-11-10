@@ -989,16 +989,19 @@ static int newsql_pack_small(struct sqlwriter *writer, struct newsql_pack_arg *a
     struct newsqlheader *hdr = arg->hdr;
     struct evbuffer *wrbuf = sql_wrbuf(writer);
     int len = arg->resp_len;
-    if (hdr) len += sizeof(*hdr);
+    if (hdr)
+        len += sizeof(*hdr);
     struct iovec v[1];
-    if (evbuffer_reserve_space(wrbuf, len, v, 1) == -1) return -1;
+    if (evbuffer_reserve_space(wrbuf, len, v, 1) == -1)
+        return -1;
     v[0].iov_len = len;
     uint8_t *out = v[0].iov_base;
     if (hdr) {
         memcpy(out, hdr, sizeof(*hdr));
         out += sizeof(*hdr);
     }
-    if (resp) cdb2__sqlresponse__pack(resp, out);
+    if (resp)
+        cdb2__sqlresponse__pack(resp, out);
     evbuffer_commit_space(wrbuf, v, 1);
     return resp ? resp->response_type == RESPONSE_TYPE__LAST_ROW : 0;
 }

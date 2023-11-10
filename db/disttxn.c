@@ -29,7 +29,7 @@
  */
 
 #define DISTRIBUTED_TRANSACTIONS_TABLE "comdb2_distributed_transactions"
-#define DISTRIBUTED_TRANSACTIONS_SCHEMA "{ schema { cstring dist_txnid[129] } keys{ \"ix0\" = dist_txnid }}"
+#define DISTRIBUTED_TRANSACTIONS_SCHEMA "{ tag ondisk { cstring dist_txnid[129] datetime timestamp dbstore=\"CURRENT_TIMESTAMP\" null=yes } keys{ \"ix0\" = dist_txnid dup \"ix1\" = timestamp }}"
 #define COORDINATOR_LOCAL "_coordinator_local"
 #define DISTTXN_DEBUG
 
@@ -107,7 +107,6 @@ typedef struct sanctioned {
     char *coordinator_tier;
     char *coordinator_master;
     int sanctioned;
-    int time_added;
     int heartbeats_enabled;
     dist_hbeats_type hbeats;
 } sanctioned_t;
@@ -163,9 +162,6 @@ extern char gbl_dbname[MAX_DBNAME_LENGTH];
 extern char *gbl_machine_class;
 extern char *gbl_myhostname;
 
-/* Check for distributed transactions table */
-static int have_disttxn_table = 0;
-
 /* Create the distributed transactions table */
 static void create_distributed_transactions_table(void)
 {
@@ -196,7 +192,6 @@ void disttxn_verify_table(void)
     if (get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE) == NULL) {
         create_distributed_transactions_table();
     }
-    have_disttxn_table = get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE) ? 1 : 0;
 }
 
 static void disttxn_recover_prepared(void)
@@ -614,6 +609,21 @@ void destroy_dtran(transaction_t *dtran)
     free(dtran);
 }
 
+void cleanup_dtran(const char *dist_txnid)
+{
+    Pthread_mutex_lock(&active_transactions_lk);
+    transaction_t *dtran = hash_find(active_transactions_hash, &dist_txnid);
+    if (dtran) {
+        Pthread_mutex_lock(&dtran->lk);
+        hash_del(active_transactions_hash, dtran);
+    }
+    Pthread_mutex_unlock(&active_transactions_lk);
+    if (dtran) {
+        Pthread_mutex_unlock(&dtran->lk);
+        destroy_dtran(dtran);
+    }
+}
+
 void destroy_sanc(sanctioned_t *sanc)
 {
     free(sanc->dist_txnid);
@@ -638,7 +648,7 @@ static struct participant *find_participant_lk(transaction_t *dtran, const char 
 int disttxn_ondisk_record(struct ireq *iq, char *dist_txnid, unsigned char *rec)
 {
     struct schema *s;
-    int rc, fix;
+    int rc = 0, fix;
 
     s = iq->usedb->schema;
     if (!s) {
@@ -647,27 +657,34 @@ int disttxn_ondisk_record(struct ireq *iq, char *dist_txnid, unsigned char *rec)
     }
 
     /* Borrowing Adi sqlstat1 scheme */
-    for (fix = 0; fix < s->nmembers; fix++) {
+    for (fix = 0; fix < s->nmembers && rc == 0; fix++) {
         struct field *f = &s->member[fix];
         char *cur = NULL;
-        int outdtsz = 0, null = 0;
+        int outdtsz = 0, null = 0, type = 0, len = 0, epoch;
 
         if (0 == strcmp(f->name, "dist_txnid")) {
             cur = dist_txnid;
+            type = CLIENT_CSTR;
+            len = strlen(cur) + 1;
+        } else if (0 == strcmp(f->name, "timestamp")) {
+            epoch = htonl(comdb2_time_epoch());
+            type = CLIENT_INT;
+            cur = (char *)&epoch;
+            len = sizeof(int);
         } else {
             logmsg(LOGMSG_ERROR, "%s: unknown field '%s' in " DISTRIBUTED_TRANSACTIONS_TABLE "\n", __func__, f->name);
+            return -1;
         }
 
-        rc = CLIENT_to_SERVER(cur, strlen(cur) + 1, CLIENT_CSTR, null, NULL, NULL, rec + f->offset, f->len, f->type, 0,
+        rc = CLIENT_to_SERVER(cur, len, type, null, NULL, NULL, rec + f->offset, f->len, f->type, 0,
                               &outdtsz, &f->convopts, NULL);
 
         if (-1 == rc) {
             logmsg(LOGMSG_ERROR, "%s: CLIENT_to_SERVER returns %d\n", __func__, rc);
-            free(rec);
             return -1;
         }
     }
-    return 0;
+    return rc;
 }
 
 static void flush_log(void)
@@ -754,7 +771,7 @@ static int disttxn_check_propagated_lk(transaction_t *dtran)
         rtn = 1;
     } else if (gbl_debug_disttxn_trace) {
         struct participant *part = NULL, *tmp = NULL;
-        char *hosts = calloc(1024, 1);
+        char hosts[1024] = {0};
         int count = 0;
         LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
         {
@@ -766,7 +783,6 @@ static int disttxn_check_propagated_lk(transaction_t *dtran)
         }
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s has not yet propagated, waiting for %s\n", __func__,
                dtran->dist_txnid, hosts);
-        free(hosts);
     }
     return rtn;
 }
@@ -798,7 +814,8 @@ static int disttxn_check_commitable_lk(transaction_t *dtran)
                 count++;
             }
         }
-        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s not-yet commitable waiting for %s\n", __func__, dtran->dist_txnid, hosts);
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s not-yet commitable waiting for %s\n", __func__, dtran->dist_txnid,
+               hosts);
     }
     return rtn;
 }
@@ -890,6 +907,7 @@ void coordinator_failed(const char *dist_txnid)
     dtran->state = DISTTXN_ABORT_RESOLVED;
 
     Pthread_mutex_unlock(&dtran->lk);
+    cleanup_dtran(dist_txnid);
 }
 
 int coordinator_wait_propagate(const char *dist_txnid)
@@ -923,7 +941,7 @@ int coordinator_wait_propagate(const char *dist_txnid)
 
     while (dtran->state == DISTTXN_COMMITTED && (elapsed < gbl_coordinator_propagate_timeout_ms)) {
         if ((elapsed / 1000 > 5)) {
-            logmsg(LOGMSG_ERROR, "%s: dist-txnid %s waiting for participants to propagate for %d seconds\n", __func__,
+            logmsg(LOGMSG_DEBUG, "%s: dist-txnid %s waiting for participants to propagate for %d seconds\n", __func__,
                    dist_txnid, elapsed / 1000);
         }
         struct timespec ts;
@@ -954,18 +972,17 @@ int coordinator_wait_propagate(const char *dist_txnid)
     dtran->coordinator_waiting = 0;
     dtran->resolved_time = comdb2_time_epochms();
     Pthread_mutex_unlock(&dtran->lk);
-    /* remove from hash */
+    cleanup_dtran(dist_txnid);
+
     return !(state == DISTTXN_PROPAGATED);
 }
 
 int retryable_rcode(int rcode, int outrc)
 {
-    /* TODO verify this */
-    // return (rcode == 0 || rcode == ERR_VERIFY || rcode == ERR_NOTSERIAL);
     return (outrc == ERR_NOTSERIAL || (outrc == ERR_BLOCK_FAILED && rcode == ERR_VERIFY));
 }
 
-/*
+/* TODO .. 
 static int check_coordinator_timeout_lk(transaction_t *dtran)
 {
     int nowms = comdb2_time_epochms();
@@ -985,7 +1002,7 @@ static int check_participant_timeout_lk(transaction_t *dtran)
     LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
     {
         if (part->status == PARTICIPANT_PREPARING && ((nowms - part->last_heartbeat) > 10000)) {
-            logmsg(LOGMSG_USER, "%s disttxn %s no hbeat from %s %s timing out\n", __func__, dtran->dist_txnid,
+            logmsg(LOGMSG_INFO, "%s disttxn %s no heartbeat from %s %s timing out\n", __func__, dtran->dist_txnid,
                    part->participant_name, part->participant_tier);
             return 1;
         }
@@ -996,19 +1013,26 @@ static int check_participant_timeout_lk(transaction_t *dtran)
 static int coordinator_should_wait_lk(transaction_t *dtran, int can_retry)
 {
     if (check_participant_timeout_lk(dtran)) {
-        logmsg(LOGMSG_USER, "DISTTXN %s disttxn %s participant timeout\n", __func__, dtran->dist_txnid);
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s disttxn %s participant timeout\n", __func__, dtran->dist_txnid);
+        }
         return 0;
     }
 
     if (dtran->state == DISTTXN_COLLECTED || dtran->state == DISTTXN_PREPARING) {
-        logmsg(LOGMSG_USER, "DISTTXN %s returning true because state=%s\n", __func__,
-               dtran->state == DISTTXN_COLLECTED ? "collected" : "preparing");
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s returning true because state=%s\n", __func__,
+                   dtran->state == DISTTXN_COLLECTED ? "collected" : "preparing");
+        }
         return 1;
     }
     if (dtran->state == DISTTXN_ABORTED && can_retry && retryable_rcode(dtran->failrc, dtran->outrc) &&
         (dtran->prepared_count + dtran->failed_count) < listc_size(&dtran->participants)) {
-        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s returning true because prepared=%d failed=%d sz=%d\n", __func__,
-               dtran->dist_txnid, dtran->prepared_count, dtran->failed_count, listc_size(&dtran->participants));
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s returning true because prepared=%d failed=%d sz=%d\n",
+                   __func__, dtran->dist_txnid, dtran->prepared_count, dtran->failed_count,
+                   listc_size(&dtran->participants));
+        }
         return 1;
     }
     return 0;
@@ -1063,13 +1087,17 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
         elapsed = (comdb2_time_epochms() - dtran->start_time);
     }
     int stop_timer = comdb2_time_epochms();
-    logmsg(LOGMSG_USER, "DISTTXN %s wait took %d ms\n", __func__, stop_timer - start_timer);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s wait took %d ms\n", __func__, stop_timer - start_timer);
+    }
     /* Aborted or timeout -> RESOLVED */
     if (dtran->state == DISTTXN_ABORTED) {
         *rcode = dtran->failrc;
         *outrc = dtran->outrc;
         snprintf(errmsg, errmsglen, "%s:%s %s", dtran->failpart_name, dtran->failpart_tier, dtran->errstr);
-        logmsg(LOGMSG_USER, "DISTTXN %s setting rc=%d outrc=%d errmsg=%s\n", __func__, *rcode, *outrc, errmsg);
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s setting rc=%d outrc=%d errmsg=%s\n", __func__, *rcode, *outrc, errmsg);
+        }
         dtran->state = DISTTXN_ABORT_RESOLVED;
     }
 
@@ -1089,8 +1117,8 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
         snprintf(errmsg, errmsglen, "coordinator timeout");
         if (gbl_debug_disttxn_trace) {
             logmsg(LOGMSG_USER, "%s DISTTXN coordinator timing out %s\n", __func__, dtran->dist_txnid);
+            logmsg(LOGMSG_USER, "DISTTXN %s setting rc=%d outrc=%d errmsg=%s\n", __func__, *rcode, *outrc, errmsg);
         }
-        logmsg(LOGMSG_USER, "DISTTXN %s setting rc=%d outrc=%d errmsg=%s\n", __func__, *rcode, *outrc, errmsg);
         dtran->state = DISTTXN_ABORT_RESOLVED;
     }
     state = dtran->state;
@@ -1110,7 +1138,9 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
         start_timer = comdb2_time_epochms();
         int rc = commit_distributed_transaction(dtran);
         stop_timer = comdb2_time_epochms();
-        logmsg(LOGMSG_USER, "DISTTXN %s commit took %d ms\n", __func__, stop_timer - start_timer);
+        if (gbl_debug_disttxn_trace) {
+            logmsg(LOGMSG_USER, "DISTTXN %s commit took %d ms\n", __func__, stop_timer - start_timer);
+        }
 
         if (gbl_debug_exit_coordinator_after_commit) {
             flush_log();
@@ -1129,12 +1159,17 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
                 start_timer = comdb2_time_epochms();
                 abort_transaction_lk(dtran, 0);
                 stop_timer = comdb2_time_epochms();
-                logmsg(LOGMSG_USER, "DISTTXN %s abort txn took %d ms\n", __func__, stop_timer - start_timer);
+                if (gbl_debug_disttxn_trace) {
+                    logmsg(LOGMSG_USER, "DISTTXN %s abort txn took %d ms\n", __func__, stop_timer - start_timer);
+                }
             } else {
                 start_timer = comdb2_time_epochms();
                 commit_participants_lk(dtran);
                 stop_timer = comdb2_time_epochms();
-                logmsg(LOGMSG_USER, "DISTTXN %s commit participants took %d ms\n", __func__, stop_timer - start_timer);
+                if (gbl_debug_disttxn_trace) {
+                    logmsg(LOGMSG_USER, "DISTTXN %s commit participants took %d ms\n", __func__,
+                           stop_timer - start_timer);
+                }
             }
             dtran->resolved_time = comdb2_time_epochms();
             state = dtran->state;
@@ -1147,6 +1182,9 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
         }
     }
     dtran->coordinator_waiting = 0;
+    if (state == DISTTXN_ABORT_RESOLVED) {
+        cleanup_dtran(dist_txnid);
+    }
     return !(state == DISTTXN_COMMITTED || returnzero);
 }
 
@@ -1156,7 +1194,9 @@ int coordinator_wait(const char *dist_txnid, int can_retry, int *rcode, int *out
     int startms = comdb2_time_epochms();
     int rc = coordinator_wait_int(dist_txnid, can_retry, rcode, outrc, errmsg, errmsglen, force_failure);
     int endms = comdb2_time_epochms();
-    logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    }
     return rc;
 }
 
@@ -1230,73 +1270,8 @@ static void disttxn_timeout(void)
     free(collect.disttxns);
 }
 
-int disttxn_purgeable_lk(transaction_t *dtran)
-{
-    if (dtran->coordinator_waiting) {
-        return 0;
-    }
-    switch (dtran->state) {
-    case DISTTXN_ABORT_RESOLVED:
-    case DISTTXN_PROPAGATED:
-    case DISTTXN_PROPAGATE_TIMEOUT:
-        return (((comdb2_time_epochms() - dtran->resolved_time) / 1000) > gbl_disttxn_linger_time);
-        break;
-    }
-    return 0;
-}
-
-/* TODO revise */
 static void disttxn_purge(void)
 {
-    struct disttxn_collect collect = {0};
-    int alloc, deleted = 0;
-    char **deleted_disttxns;
-    Pthread_mutex_lock(&active_transactions_lk);
-    hash_info(active_transactions_hash, NULL, NULL, NULL, NULL, &alloc, NULL, NULL);
-    collect.disttxns = malloc(sizeof(char *) * alloc);
-    hash_for(active_transactions_hash, collect_disttxn, &collect);
-    Pthread_mutex_unlock(&active_transactions_lk);
-    deleted_disttxns = malloc(sizeof(char *) * alloc);
-
-    /* Purge completed transactions 
-     * TODO: do this inline */
-    for (int i = 0; i < collect.count; i++) {
-        transaction_t *dtran;
-
-        Pthread_mutex_lock(&active_transactions_lk);
-        dtran = hash_find(active_transactions_hash, &collect.disttxns[i]);
-        if (dtran) {
-            Pthread_mutex_lock(&dtran->lk);
-        }
-        if (dtran && disttxn_purgeable_lk(dtran)) {
-            if (gbl_debug_disttxn_trace) {
-                logmsg(LOGMSG_USER, "DISTTXN %s deleting disttxn %s\n", __func__, collect.disttxns[i]);
-            }
-            deleted_disttxns[deleted++] = collect.disttxns[i];
-            hash_del(active_transactions_hash, dtran);
-            Pthread_mutex_unlock(&dtran->lk);
-            destroy_dtran(dtran);
-            dtran = NULL;
-        }
-        if (dtran) {
-            Pthread_mutex_unlock(&dtran->lk);
-        }
-        Pthread_mutex_unlock(&active_transactions_lk);
-    }
-
-
-    /* Free dup'd strings */
-    for (int i = 0; i < collect.count; i++) {
-        free(collect.disttxns[i]);
-    }
-
-    /* Free deleted list */
-    free(deleted_disttxns);
-
-
-    /* Free collect list */
-    free(collect.disttxns);
-
     /* Collect old handles */
     LISTC_T(struct hndlnode) oldhandles;
     listc_init(&oldhandles, offsetof(hndlnode_t, linkv));
@@ -1716,13 +1691,15 @@ int participant_heartbeat(const char *dist_txnid, const char *participant_name, 
         Pthread_mutex_unlock(&dtran->lk);
         rcode = 0;
     } else {
-        logmsg(LOGMSG_ERROR, "%s heartbeat from %s/%s unable to find dist-txn %s\n", __func__, participant_name, participant_tier, dist_txnid);
+        logmsg(LOGMSG_ERROR, "%s heartbeat from %s/%s unable to find dist-txn %s\n", __func__, participant_name,
+               participant_tier, dist_txnid);
     }
 
     return rcode;
 }
 
-static int participant_send_heartbeat(const char *dist_txnid, const char *coordinator_name, const char *coordinator_master)
+static int participant_send_heartbeat(const char *dist_txnid, const char *coordinator_name,
+                                      const char *coordinator_master)
 {
     if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
@@ -1742,7 +1719,9 @@ int participant_wait(const char *dist_txnid, const char *coordinator_name, const
     int startms = comdb2_time_epochms();
     int rc = participant_wait_int(dist_txnid, coordinator_name, coordinator_tier, coordinator_master);
     int endms = comdb2_time_epochms();
-    logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    if (gbl_debug_disttxn_trace) {
+        logmsg(LOGMSG_USER, "DISTTXN %s txnid %s took %d ms\n", __func__, dist_txnid, endms - startms);
+    }
     return rc;
 }
 
@@ -1808,8 +1787,9 @@ int coordinator_committed(const char *dist_txnid)
     participant_t *p = hash_find(participant_hash, &dist_txnid);
     if (!p) {
         p = add_participant_lk(dist_txnid, I_AM_COMMITTED);
-        if (gbl_debug_disttxn_trace)
+        if (gbl_debug_disttxn_trace) {
             logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s commit occurred prior to wait\n", __func__, dist_txnid);
+        }
         Pthread_mutex_unlock(&part_lk);
         /* Possibly a recovered prepare */
         int rc = thedb->bdb_env->dbenv->txn_commit_recovered(thedb->bdb_env->dbenv, dist_txnid);
@@ -1847,7 +1827,6 @@ int osql_register_disttxn(const char *dist_txnid, unsigned long long rqid, uuid_
     if (sanc == NULL) {
         sanc = (sanctioned_t *)calloc(sizeof(*sanc), 1);
         sanc->dist_txnid = strdup(dist_txnid);
-        sanc->time_added = comdb2_time_epoch();
         sanc->rqid = rqid;
         comdb2uuidcpy(sanc->uuid, uuid);
         sanc->hbeats.sanc = sanc;
@@ -1885,7 +1864,6 @@ int osql_cancel_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t
     } else {
         sanc = (sanctioned_t *)calloc(sizeof(*sanc), 1);
         sanc->dist_txnid = strdup(dist_txnid);
-        sanc->time_added = comdb2_time_epoch();
         hash_add(sanctioned_hash, sanc);
         sanc->sanctioned = -1;
         rtn = 0;
@@ -1900,6 +1878,7 @@ int dist_heartbeats(dist_hbeats_type *dt)
 }
 
 extern int enable_dist_heartbeats(dist_hbeats_type *dt);
+
 /* Called from osql_prepare- coordinator master tells me (participant master) to prepare */
 int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid_t *uuid,
                           const char *coordinator_dbname, const char *coordinator_tier, const char *coordinator_master)
@@ -1928,7 +1907,6 @@ int osql_sanction_disttxn(const char *dist_txnid, unsigned long long *rqid, uuid
     } else {
         sanc = (sanctioned_t *)calloc(sizeof(*sanc), 1);
         sanc->dist_txnid = strdup(dist_txnid);
-        sanc->time_added = comdb2_time_epoch();
         sanc->coordinator_dbname = strdup(coordinator_dbname);
         sanc->coordinator_tier = strdup(coordinator_tier);
         sanc->coordinator_master = strdup(coordinator_master);
@@ -2008,6 +1986,5 @@ void disttxn_init()
     active_transactions_hash = hash_init_strptr(0);
     sanctioned_hash = hash_init_strptr(0);
     handle_hash = hash_init_user((hashfunc_t *)hndl_hash, (cmpfunc_t *)hndl_cmp, 0, 0);
-    have_disttxn_table = get_dbtable_by_name(DISTRIBUTED_TRANSACTIONS_TABLE) ? 1 : 0;
     thedb->bdb_env->dbenv->set_recover_prepared_callback(thedb->bdb_env->dbenv, recover_prepared_transaction);
 }

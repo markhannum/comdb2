@@ -5073,15 +5073,17 @@ read_record:
 
     // TODO: other settings (contexts)
     if (hndl->firstresponse->foreign_db) {
-        if (cdb2_open(&hndl->fdb_hndl, hndl->firstresponse->foreign_db, hndl->firstresponse->foreign_class, hndl->firstresponse->foreign_policy_flag)) {
+        if (cdb2_open(&hndl->fdb_hndl, hndl->firstresponse->foreign_db, hndl->firstresponse->foreign_class,
+                      hndl->firstresponse->foreign_policy_flag)) {
             cdb2_close(hndl->fdb_hndl);
             hndl->fdb_hndl = NULL;
             if (is_hasql_commit)
                 cleanup_query_list(hndl, commit_query_list, __LINE__);
 
-            sprintf(hndl->errstr, "%s: Can't open fdb %s:%s", __func__, hndl->firstresponse->foreign_db, hndl->firstresponse->foreign_class);
+            sprintf(hndl->errstr, "%s: Can't open fdb %s:%s", __func__, hndl->firstresponse->foreign_db,
+                    hndl->firstresponse->foreign_class);
             debugprint("Can't open fdb %s:%s\n", hndl->firstresponse->foreign_db, hndl->firstresponse->foreign_class);
-            clear_responses(hndl);  // signal to cdb2_next_record_int that we are done
+            clear_responses(hndl); // signal to cdb2_next_record_int that we are done
             PRINT_AND_RETURN(-1);
         }
         attach_to_handle(hndl->fdb_hndl, hndl);
@@ -5090,7 +5092,7 @@ read_record:
         if (is_hasql_commit)
             cleanup_query_list(hndl, commit_query_list, __LINE__);
 
-        clear_responses(hndl);  // signal to cdb2_next_record_int that we are done
+        clear_responses(hndl); // signal to cdb2_next_record_int that we are done
         PRINT_AND_RETURN(return_value);
     }
 
@@ -6208,8 +6210,7 @@ retry:
     rc = -1;
     int i = 0;
     int node_seq = 0;
-    if ((hndl->flags & CDB2_RANDOM) ||
-        ((hndl->flags & CDB2_RANDOMROOM) && (hndl->num_hosts_sameroom == 0))) {
+    if ((hndl->flags & CDB2_RANDOM) || ((hndl->flags & CDB2_RANDOMROOM) && (hndl->num_hosts_sameroom == 0))) {
         node_seq = rand() % hndl->num_hosts;
     } else if ((hndl->flags & CDB2_RANDOMROOM) && (hndl->num_hosts_sameroom > 0)) {
         node_seq = rand() % hndl->num_hosts_sameroom;
@@ -7066,8 +7067,7 @@ int cdb2_unregister_event(cdb2_hndl_tp *hndl, cdb2_event *event)
         ++cdb2_gbl_event_version;
         pthread_mutex_unlock(&cdb2_event_mutex);
     } else if (hndl->events) {
-        for (prev = hndl->events, curr = prev->next;
-             curr != NULL && curr != event; prev = curr, curr = curr->next)
+        for (prev = hndl->events, curr = prev->next; curr != NULL && curr != event; prev = curr, curr = curr->next)
             ;
         if (curr != event)
             return EINVAL;
@@ -7239,8 +7239,7 @@ static int refresh_gbl_events_on_hndl(cdb2_hndl_tp *hndl)
     knot = gbl;
 
     /* Clone and append global events to the handle. */
-    for (gbl = cdb2_gbl_events.next, lcl = hndl->events; gbl != NULL;
-         gbl = gbl->next) {
+    for (gbl = cdb2_gbl_events.next, lcl = hndl->events; gbl != NULL; gbl = gbl->next) {
         elen = sizeof(cdb2_event) + gbl->argc * sizeof(cdb2_event_arg);
         tmp = malloc(elen);
         if (tmp == NULL) {

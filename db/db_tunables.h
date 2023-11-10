@@ -517,7 +517,8 @@ REGISTER_TUNABLE("foreign_db_resolve_local", NULL, TUNABLE_BOOLEAN,
                  NULL, NULL, NULL);
 REGISTER_TUNABLE("foreign_db_push_remote", NULL, TUNABLE_BOOLEAN,
                  &gbl_fdb_push_remote, NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("foreign_db_push_redirect", "Redirect fdb query to run via client instead of on server. (Default: off)", TUNABLE_BOOLEAN,
+REGISTER_TUNABLE("foreign_db_push_redirect",
+                 "Redirect fdb query to run via client instead of on server. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_fdb_push_redirect_foreign, NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("fullrecovery", "Attempt to run database "
                                  "recovery from the beginning of "
@@ -1330,8 +1331,8 @@ REGISTER_TUNABLE("debug.random_sql_work_rejected",
                  "Force a random SQL query to be rejected 1/this many times.  "
                  "(Default: 0)", TUNABLE_INTEGER, &gbl_random_sql_work_rejected,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("debug.osql_random_restart", "randomly restart osql operations",
-                 TUNABLE_BOOLEAN, &gbl_osql_random_restart, NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("debug.osql_random_restart", "randomly restart osql operations", TUNABLE_BOOLEAN,
+                 &gbl_osql_random_restart, NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug.toblock_random_deadlock_trans", "return deadlock for a fraction of txns", TUNABLE_BOOLEAN,
                  &gbl_toblock_random_deadlock_trans, NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("debug.toblock_random_verify_error", "return verify error for a fraction of txns", TUNABLE_BOOLEAN,
