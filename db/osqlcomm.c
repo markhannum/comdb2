@@ -7298,7 +7298,7 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         if (cur_gen != dt.start_gen) {
             err->errcode = OP_FAILED_VERIFY;
             uuidstr_t us;
-            logmsg(LOGMSG_INFO,
+            logmsg(LOGMSG_DEBUG,
                    "[%llx %s] Startgen check failed, start_gen "
                    "%u, cur_gen %u\n",
                    rqid, comdb2uuidstr(uuid, us), dt.start_gen, cur_gen);
@@ -7682,16 +7682,8 @@ int osql_process_packet(struct ireq *iq, unsigned long long rqid, uuid_t uuid,
         return 0;
     } break;
 
-    case OSQL_DIST_TXNID: {
-        /* handled in pre_process_saveop */
-        return 0;
-    } break;
-
-    case OSQL_PARTICIPANT: {
-        /* handled in pre_process_saveop */
-        return 0;
-    } break;
-
+    case OSQL_DIST_TXNID:
+    case OSQL_PARTICIPANT:
     case OSQL_PREPARE: {
         /* handled in pre_process_saveop */
         return 0;

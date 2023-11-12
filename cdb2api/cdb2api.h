@@ -40,7 +40,6 @@ enum cdb2_hndl_alloc_flags {
     CDB2_TYPE_IS_FD = 256,
     CDB2_REQUIRE_FASTSQL = 512,
     CDB2_MASTER = 1024,
-    CDB2_DEBUG = 2048
 };
 
 enum cdb2_request_type {

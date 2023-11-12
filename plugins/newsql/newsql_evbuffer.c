@@ -45,7 +45,6 @@
 #include <fsnapf.h>
 
 extern int gbl_nid_dbname;
-extern int gbl_debug_disttxn_trace;
 extern SSL_CTX *gbl_ssl_ctx;
 extern ssl_mode gbl_client_ssl_mode;
 extern uint64_t gbl_ssl_num_full_handshakes;
@@ -128,9 +127,6 @@ static void free_newsql_appdata_evbuffer(int dummyfd, short what, void *arg)
     free_newsql_appdata(clnt);
     sqlwriter_free(appdata->writer);
     free(appdata);
-    if (gbl_debug_disttxn_trace) {
-        logmsg(LOGMSG_USER, "DISTTXN %s closing fd %d\n", __func__, fd);
-    }
     shutdown(fd, SHUT_RDWR);
     close(fd);
 }
@@ -491,22 +487,10 @@ out:
 
 static void process_disttxn(struct newsql_appdata_evbuffer *appdata, CDB2DISTTXN *disttxn)
 {
-    if (gbl_debug_disttxn_trace) {
-        logmsg(LOGMSG_USER, "DISTTXN %s txnid %s name=%s tier=%s master=%s fd %d op %d rcode=%d errstr=%s\n", __func__,
-               disttxn->disttxn->txnid, disttxn->disttxn->name ? disttxn->disttxn->name : "(null)",
-               disttxn->disttxn->tier ? disttxn->disttxn->tier : "(null)",
-               disttxn->disttxn->master ? disttxn->disttxn->master : "(null)", appdata->fd, disttxn->disttxn->operation,
-               disttxn->disttxn->rcode, disttxn->disttxn->errmsg ? disttxn->disttxn->errmsg : "(null)");
-    }
-
     struct evbuffer *buf = sql_wrbuf(appdata->writer);
     CDB2DISTTXNRESPONSE response = CDB2__DISTTXNRESPONSE__INIT;
     int rcode = 0;
     if (!bdb_amimaster(thedb->bdb_env)) {
-        if (gbl_debug_disttxn_trace) {
-            logmsg(LOGMSG_USER, "DISTTXN %s disttxn %s ignoring operation %d because i am not master\n", __func__,
-                   disttxn->disttxn->txnid, disttxn->disttxn->operation);
-        }
         rcode = -1;
         goto sendresponse;
     }
@@ -757,16 +741,7 @@ static int rd_evbuffer_ssl(struct newsql_appdata_evbuffer *appdata)
 
 static int rd_evbuffer_plaintext(struct newsql_appdata_evbuffer *appdata)
 {
-    EVUTIL_SET_SOCKET_ERROR(0);
-    int n = evbuffer_read(appdata->rd_buf, appdata->fd, -1), e = 0;
-    if (n <= 0) {
-        e = EVUTIL_SOCKET_ERROR();
-        int len = evbuffer_get_length(appdata->rd_buf);
-        if (gbl_debug_disttxn_trace) {
-            logmsg(LOGMSG_USER, "DISTTXN %s fd %d errno=%d len=%d\n", __func__, appdata->fd, e, len);
-        }
-    }
-    return n;
+    return evbuffer_read(appdata->rd_buf, appdata->fd, -1);
 }
 
 static void process_ssl_request(struct newsql_appdata_evbuffer *appdata)
@@ -834,9 +809,6 @@ static void rd_payload(int dummyfd, short what, void *arg)
         goto payload;
     }
     if (rd_evbuffer(appdata) <= 0 && (what & EV_READ)) {
-        if (gbl_debug_disttxn_trace) {
-            logmsg(LOGMSG_USER, "DISTTXN %s cleanup for fd %d\n", __func__, appdata->fd);
-        }
         newsql_cleanup(appdata);
         return;
     }
@@ -849,10 +821,6 @@ payload:
         int len = appdata->hdr.length;
         void *data = evbuffer_pullup(appdata->rd_buf, len);
         if (data == NULL || (query = cdb2__query__unpack(&pb_alloc, len, data)) == NULL) {
-            if (gbl_debug_disttxn_trace) {
-                logmsg(LOGMSG_USER, "DISTTXN %s data-null=%s query-null=%s\n", __func__, data ? "N" : "Y",
-                       query ? "N" : "Y");
-            }
             newsql_cleanup(appdata);
             return;
         }
@@ -868,11 +836,7 @@ static void rd_hdr(int dummyfd, short what, void *arg)
     if (evbuffer_get_length(appdata->rd_buf) >= sizeof(struct newsqlheader)) {
         goto hdr;
     }
-    int cnt;
-    if ((cnt = rd_evbuffer(appdata)) <= 0 && (what & EV_READ)) {
-        if (gbl_debug_disttxn_trace) {
-            logmsg(LOGMSG_USER, "DISTTXN %s cleanup for fd %d cnt=%d\n", __func__, appdata->fd, cnt);
-        }
+    if (rd_evbuffer(appdata) <= 0 && (what & EV_READ)) {
         newsql_cleanup(appdata);
         return;
     }
@@ -989,19 +953,16 @@ static int newsql_pack_small(struct sqlwriter *writer, struct newsql_pack_arg *a
     struct newsqlheader *hdr = arg->hdr;
     struct evbuffer *wrbuf = sql_wrbuf(writer);
     int len = arg->resp_len;
-    if (hdr)
-        len += sizeof(*hdr);
+    if (hdr) len += sizeof(*hdr);
     struct iovec v[1];
-    if (evbuffer_reserve_space(wrbuf, len, v, 1) == -1)
-        return -1;
+    if (evbuffer_reserve_space(wrbuf, len, v, 1) == -1) return -1;
     v[0].iov_len = len;
     uint8_t *out = v[0].iov_base;
     if (hdr) {
         memcpy(out, hdr, sizeof(*hdr));
         out += sizeof(*hdr);
     }
-    if (resp)
-        cdb2__sqlresponse__pack(resp, out);
+    if (resp) cdb2__sqlresponse__pack(resp, out);
     evbuffer_commit_space(wrbuf, v, 1);
     return resp ? resp->response_type == RESPONSE_TYPE__LAST_ROW : 0;
 }

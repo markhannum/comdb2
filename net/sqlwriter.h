@@ -20,7 +20,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-// writer will block if outstanding data hits:
+//writer will block if outstanding data hits:
 #define SQLWRITER_MAX_BUF KB(256)
 
 struct evbuffer;

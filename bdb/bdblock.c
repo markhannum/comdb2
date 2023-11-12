@@ -811,10 +811,11 @@ static void delete_thread_lock_info(bdb_state_type *bdb_state)
     if (lk->callers > 0) {
         /* if we have called bdb_thread_event nested, only
          * the last caller frees it
-         * NOTE: obviously, only the first stack is saved !
+         * NOTE: obviously, only the first stack is saved ! 
          */
         return;
     }
+
 
     Pthread_setspecific(lock_key, NULL);
 

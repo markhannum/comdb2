@@ -197,19 +197,19 @@ void javasp_splock_rdlock(void);
 void javasp_splock_unlock(void);
 
 struct trigger_entry {
-    char *name;
-    char *type;
-    char *tbl_name;
-    char *event;
-    char *col;
-    char *seq;
+  char *name;
+  char *type;
+  char *tbl_name;
+  char *event;
+  char *col;
+  char *seq;
 };
 
 struct gather_triggers_arg;
 struct gather_triggers_arg {
     tran_type *tran;
     char *user;
-    int (*func)(struct gather_triggers_arg *, struct trigger_entry *);
+    int(*func)(struct gather_triggers_arg *, struct trigger_entry *);
     struct trigger_entry *entries;
     int n;
     int capacity;

@@ -68,7 +68,6 @@ extern int gbl_logmsg_epochms;
 extern int gbl_2pc;
 extern int gbl_coordinator_propagate_timeout_ms;
 extern int gbl_coordinator_sync_on_commit;
-extern int gbl_coordinator_notify;
 extern int gbl_disttxn_linger_time;
 extern int gbl_disttxn_handle_cache;
 extern int gbl_disttxn_handle_linger_time;
@@ -492,19 +491,6 @@ extern char *gbl_cdb2api_policy_override;
   special treatment.
   =========================================================
 */
-
-static void *coordinator_notify_value(void *context)
-{
-    comdb2_tunable *tunable = (comdb2_tunable *)context;
-    return (void *)coordinator_notify_string(*(int *)tunable->var);
-}
-
-static int coordinator_notify_update(void *context, void *algo)
-{
-    gbl_coordinator_notify = coordinator_notify_algo((char *)algo);
-    logmsg(LOGMSG_INFO, "Coordinator notify: %s\n", coordinator_notify_string(gbl_coordinator_notify));
-    return 0;
-}
 
 static void *init_with_compr_value(void *context)
 {

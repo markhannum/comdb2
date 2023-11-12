@@ -1748,8 +1748,7 @@ void fdb_msg_print_message(SBUF2 *sb, fdb_msg_t *msg, char *prefix)
              (prefix) ? " " : "", (prefix) ? prefix : "");
     prefix = prf;
 
-    // This assert is broken - header might have already been cleaned
-    // assert(msg->hd.type & FD_MSG_FLAGS_ISUUID);
+    assert(msg->hd.type & FD_MSG_FLAGS_ISUUID);
 
     switch (msg->hd.type & FD_MSG_TYPE) {
     case FDB_MSG_TRAN_BEGIN:
@@ -1915,17 +1914,17 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
     int idsz;
     int send_dk;
 
-    assert(msg->hd.type & FD_MSG_FLAGS_ISUUID);
-    logmsg(LOGMSG_USER, "DISTTXN %s writing message type %d\n", __func__, (msg->hd.type & FD_MSG_TYPE));
     type = htonl(msg->hd.type);
 
     rc = sbuf2fwrite((char *)&type, 1, sizeof(type), sb);
 
     if (rc != sizeof(type)) {
-        logmsg(LOGMSG_ERROR, "%s: failed to write header rc=%d\n", __func__, rc);
+        logmsg(LOGMSG_ERROR, "%s: failed to write header rc=%d\n", __func__,
+               rc);
         return FDB_ERR_WRITE_IO;
     }
 
+    assert(msg->hd.type & FD_MSG_FLAGS_ISUUID);
     idsz = sizeof(uuid_t);
 
     send_dk = 0;
@@ -1992,6 +1991,7 @@ static int fdb_msg_write_message_lk(SBUF2 *sb, fdb_msg_t *msg, int flush)
         break;
 
     case FDB_MSG_TRAN_BEGIN:
+    case FDB_MSG_TRAN_PREPARE:
     case FDB_MSG_TRAN_COMMIT:
     case FDB_MSG_TRAN_ROLLBACK:
 
@@ -2789,8 +2789,7 @@ int fdb_bend_cursor_find(SBUF2 *sb, fdb_msg_t *msg, svc_callback_arg_t *arg)
     int datacopylen;
     int rc;
 
-    assert((msg->hd.type & FD_MSG_TYPE) == FDB_MSG_CURSOR_FIND ||
-           (msg->hd.type & FD_MSG_TYPE) == FDB_MSG_CURSOR_FIND_LAST);
+    assert(msg->hd.type == FDB_MSG_CURSOR_FIND || msg->hd.type == FDB_MSG_CURSOR_FIND_LAST);
 
     rc = fdb_svc_cursor_find(cid, keylen, key, msg->hd.type == FDB_MSG_CURSOR_FIND_LAST, &genid, &datalen, &data,
                              &datacopy, &datacopylen);
@@ -3207,7 +3206,8 @@ int fdb_send_begin(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl
     return rc;
 }
 
-int fdb_send_commit(fdb_msg_t *msg, fdb_tran_t *trans, enum transaction_level lvl, SBUF2 *sb)
+int fdb_send_commit(fdb_msg_t *msg, fdb_tran_t *trans,
+                    enum transaction_level lvl, SBUF2 *sb)
 {
     int rc;
 
@@ -3308,18 +3308,16 @@ int fdb_send_heartbeat(fdb_msg_t *msg, char *tid, SBUF2 *sb)
 
     clock_gettime(CLOCK_REALTIME, &msg->hb.timespec);
 
-    if (gbl_fdb_track) {
-        fdb_msg_print_message(sb, msg, "sending hbeat (before)");
-    }
-
     rc = fdb_msg_write_message(sb, msg, 1);
     if (rc) {
-        logmsg(LOGMSG_ERROR, "%s: failed sending heartbeat transaction message rc=%d\n", __func__, rc);
+        logmsg(LOGMSG_ERROR,
+               "%s: failed sending heartbeat transaction message rc=%d\n",
+               __func__, rc);
         return rc;
     }
 
     if (gbl_fdb_track) {
-        fdb_msg_print_message(sb, msg, "sending hbeat (after)");
+        fdb_msg_print_message(sb, msg, "sending hbeat");
     }
 
     return rc;
@@ -3567,6 +3565,7 @@ static int handle_remsql_session(SBUF2 *sb, struct dbenv *dbenv)
             return -1;
         }
     }
+
 
     /* check and protect against newer versions */
     if (_check_code_release(sb, open_msg.cid, open_msg.rootpage)) {
@@ -3844,7 +3843,8 @@ int handle_remtran_request(comdb2_appsock_arg_t *arg)
 
         rc = callbacks[msg_type](sb, &msg, &svc_cb_arg);
 
-        if (msg_type == FDB_MSG_TRAN_COMMIT || msg_type == FDB_MSG_TRAN_PREPARE || msg_type == FDB_MSG_TRAN_ROLLBACK) {
+        if (msg_type == FDB_MSG_TRAN_COMMIT ||
+            msg_type == FDB_MSG_TRAN_ROLLBACK) {
             /* Sanity check:
              * The msg buffer is reused for response, thus in some cases,
              * the type it initially stored, could change.
@@ -3865,8 +3865,9 @@ int handle_remtran_request(comdb2_appsock_arg_t *arg)
                 goto done;
             }
 
-            rc2 = fdb_svc_trans_rollback(open_msg.tid, open_msg.lvl, svc_cb_arg.clnt,
-                                         svc_cb_arg.clnt->dbtran.dtran->fdb_trans.top->seq);
+            rc2 = fdb_svc_trans_rollback(
+                open_msg.tid, open_msg.lvl, svc_cb_arg.clnt,
+                svc_cb_arg.clnt->dbtran.dtran->fdb_trans.top->seq);
             if (rc2) {
                 logmsg(LOGMSG_ERROR,
                        "%s: fdb_svc_trans_rollback failed rc=%d\n", __func__,

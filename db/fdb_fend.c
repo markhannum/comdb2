@@ -2270,7 +2270,6 @@ static int _fdb_send_open_retries(struct sqlclntstate *clnt, fdb_t *fdb,
                     char *coordinator_dbname = strdup(gbl_dbname);
                     char *coordinator_tier = gbl_machine_class ? strdup(gbl_machine_class) : strdup(gbl_myhostname);
                     char *dist_txnid = strdup(clnt->dist_txnid);
-                    /* for 'clean-message' .. rethink maybe, these mallocs are useless */
                     rc = fdb_send_2pc_begin(msg, trans, clnt->dbtran.mode, tran_flags, dist_txnid, coordinator_dbname,
                                             coordinator_tier, trans->sb);
                 } else {
@@ -3938,6 +3937,10 @@ int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
 
     Pthread_mutex_lock(&clnt->dtran_mtx);
 
+    if (clnt->use_2pc && listc_size(&dtran->fdb_trans) > 0) {
+        clnt->is_coordinator = 1;
+    }
+
     LISTC_FOR_EACH(&dtran->fdb_trans, tran, lnk)
     {
         /*
@@ -3950,9 +3953,6 @@ int fdb_trans_commit(struct sqlclntstate *clnt, enum trans_clntcomm sideeffects)
         if (sideeffects == TRANS_CLNTCOMM_CHUNK && tran->nwrites == 0)
             continue;
 
-        if (clnt->use_2pc) {
-            clnt->is_coordinator = 1;
-        }
         /* Converted to 'prepare' by 2pc txns */
         rc = fdb_send_commit(msg, tran, clnt->dbtran.mode, tran->sb);
         if (clnt->use_2pc && !rc) {

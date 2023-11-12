@@ -141,7 +141,6 @@ extern int gbl_update_startlsn_printstep;
 int maxstep = 0;
 
 void comdb2_cheapstack(FILE *f);
-void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
 
 /* Update the startlsn of an outstanding logical transaction - you are holding
  * the lock*/
@@ -1671,7 +1670,6 @@ int bdb_tran_commit_with_seqnum_int(bdb_state_type *bdb_state, tran_type *tran,
         flags = DB_TXN_DONT_GET_REPO_MTX;
         flags |= (tran->request_ack) ? DB_TXN_REP_ACK : 0;
         rc = tran->tid->commit_getlsn(tran->tid, flags, out_txnsize, &lsn, tran);
-        comdb2_cheapstack_sym(stderr, "DISTTXN commit-lsn %d:%d", lsn.file, lsn.offset);
         bdb_osql_trn_repo_unlock();
         if (rc != 0) {
             logmsg(LOGMSG_ERROR, 

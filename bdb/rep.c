@@ -3717,8 +3717,8 @@ int gbl_last_locked_seqnum = 1;
 void bdb_set_seqnum(void *in_bdb_state)
 {
     bdb_state_type *bdb_state = (bdb_state_type *)in_bdb_state;
-    // static int lastpr = 0;
-    // int now;
+    static int lastpr = 0;
+    int now;
     DB_LSN lastlsn;
     uint32_t mygen;
 
@@ -3738,12 +3738,11 @@ void bdb_set_seqnum(void *in_bdb_state)
         bdb_state->seqnum_info->seqnums[myhost_ix].lsn = lastlsn;
         bdb_state->seqnum_info->seqnums[myhost_ix].generation = mygen;
 
-        // if (gbl_set_seqnum_trace && (now = time(NULL)) - lastpr) {
-        if (gbl_set_seqnum_trace) {
+        if (gbl_set_seqnum_trace && (now = time(NULL)) - lastpr) {
             logmsg(LOGMSG_USER, "%s line %d set %s seqnum to %d:%d gen %d\n",
                    __func__, __LINE__, bdb_state->repinfo->myhost, lastlsn.file,
                    lastlsn.offset, mygen);
-            // lastpr = now;
+            lastpr = now;
         }
         Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
     }

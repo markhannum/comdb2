@@ -55,8 +55,6 @@ copy_files_to_node() {
       
     ssh $SSH_OPT $SSH_MSTR -MNf $node   #start master ssh session for node
     ssh $SSH_OPT $SSH_MSTR $node "mkdir -p $d1 $d2 $d3 $d4 $TESTDIR/logs/ $TESTDIR/var/log/cdb2 $TESTDIR/tmp/cdb2 $TESTDIR/etc/cdb2/config.d" < /dev/null
-    # $TESTDIR == COMDB2_ROOT
-    # /home/markhannum/comdb2/tests/test_12530 / etc/cdb2/config.d/
 
     if [[ "$SKIP_COPY_EXE" != "1" ]] ; then
         scp $SSH_OPT $SSH_MSTR $COMDB2AR_EXE $node:$COMDB2AR_EXE

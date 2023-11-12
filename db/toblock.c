@@ -5671,7 +5671,6 @@ add_blkseq:
                             if (waitrc == 0) {
                                 irc = trans_commit_adaptive(iq, parent_trans, source_host);
                                 if (iq->sorese->is_coordinator) {
-                                    coordinator_notify(iq->sorese->dist_txnid);
                                     coordinator_wait_propagate(iq->sorese->dist_txnid);
                                 }
                                 if (iq->sorese->is_participant) {
@@ -5704,9 +5703,6 @@ add_blkseq:
                                 trans_abort(iq, parent_trans);
                             }
                         } else {
-                            /* XXX TODO: need to wait if the error is retryable as a participant could
-                             * have a non-retryable rcode */
-
                             if (iq->sorese->is_coordinator) {
                                 if ((outrc == ERR_NOTSERIAL ||
                                      (outrc == ERR_BLOCK_FAILED && err.errcode == ERR_VERIFY)) &&

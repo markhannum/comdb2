@@ -44,8 +44,9 @@ static struct switch_type *switches = NULL;
 static int num_switches = 0;
 int maxnamelen = 0;
 
-static void register_switch_flags(const char *name, const char *descr, switch_on_fn on_fn, switch_off_fn off_fn,
-                                  switch_stat_fn stat_fn, void *context, int flags)
+static void register_switch_flags(const char *name, const char *descr, switch_on_fn on_fn,
+                                  switch_off_fn off_fn, switch_stat_fn stat_fn, void *context,
+                                  int flags)
 {
     struct switch_type *p;
     int len;
@@ -78,8 +79,9 @@ static void register_switch_flags(const char *name, const char *descr, switch_on
     REGISTER_TUNABLE((char *)name, (char *)descr, TUNABLE_BOOLEAN, context, flags, NULL, NULL, NULL, NULL);
 }
 
-void register_switch(const char *name, const char *descr, switch_on_fn on_fn, switch_off_fn off_fn,
-                     switch_stat_fn stat_fn, void *context)
+void register_switch(const char *name, const char *descr, switch_on_fn on_fn,
+                     switch_off_fn off_fn, switch_stat_fn stat_fn,
+                     void *context)
 {
     register_switch_flags(name, descr, on_fn, off_fn, stat_fn, context, NOARG);
 }

@@ -176,7 +176,7 @@ int osql_send_prepare(osql_target_t *target, unsigned long long rqid, uuid_t uui
 int osql_send_dist_txnid(osql_target_t *target, unsigned long long rqid, uuid_t uuid, const char *dist_txnid, int type);
 
 /**
- * Send participant to coordinator
+ * Send a participant to coordinator
  *
  */
 int osql_send_participant(osql_target_t *target, unsigned long long rqid, uuid_t uuid, const char *participant_dbname,

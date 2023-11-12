@@ -19,11 +19,6 @@
 #include <comdb2.h>
 #include <net_int.h>
 
-enum COORDINATOR_NOTIFY {
-    POSTCOMMIT = 1,
-    POSTDISTCOMMIT = 2,
-};
-
 /* This coordinator records participant information */
 int collect_participants(const char *dist_txnid, participant_list_t *participants);
 
@@ -49,9 +44,6 @@ int coordinator_wait_propagate(const char *dist_txnid);
 
 /* This coordinator was unable to prepare */
 void coordinator_failed(const char *dist_txnid);
-
-/* This coordinator tells participants to commit */
-void coordinator_notify(const char *dist_txnid);
 
 /* This participant registers a dist-txn from osql stream */
 int osql_register_disttxn(const char *dist_txnid, unsigned long long rqid, uuid_t uuid, char **coordinator_dbname,
@@ -93,11 +85,5 @@ int coordinator_committed(const char *dist_txnid);
 
 /* Initialize disttxn data structures & register recovery callback */
 void disttxn_init();
-
-/* Enum-to-string for tunables */
-const char *coordinator_notify_string(int alg);
-
-/* String-to-enum for tunables */
-int coordinator_notify_algo(const char *a);
 
 #endif

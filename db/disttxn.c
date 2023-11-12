@@ -145,7 +145,6 @@ int gbl_2pc = 0;
 int gbl_coordinator_propagate_timeout_ms = 5000;
 int gbl_disttxn_linger_time = 10;
 int gbl_disttxn_handle_linger_time = 60;
-int gbl_coordinator_notify = POSTCOMMIT;
 int gbl_disttxn_handle_cache = 1;
 int gbl_disttxn_async_prepare = 0;
 int gbl_disttxn_async_messages = 0;
@@ -248,7 +247,6 @@ static int send_2pc_message(const char *dist_txnid, const char *dbname, const ch
     int flags = CDB2_DIRECT_CPU | CDB2_ADMIN, rc;
 
     if (gbl_debug_disttxn_trace) {
-        flags |= CDB2_DEBUG;
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s dbname=%s pname=%s ptier=%s master=%s op=%d\n", __func__,
                dist_txnid, dbname, pname, ptier, master, op);
     }
@@ -406,7 +404,6 @@ static int send_prepare_message(transaction_t *dtran, struct participant *part, 
     if (gbl_debug_disttxn_trace) {
         logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s pname %s tier %s op %d\n", __func__, dtran->dist_txnid,
                part->participant_name, part->participant_tier, op);
-        flags |= CDB2_DEBUG;
     }
 
     if ((rc = cdb2_open(&hndl, part->participant_name, part->participant_tier, flags)) != 0) {
@@ -860,23 +857,6 @@ static void participant_failed_lk(transaction_t *dtran, struct participant *part
     }
 }
 
-/* Tell participants to commit if we haven't already */
-void coordinator_notify(const char *dist_txnid)
-{
-    if (gbl_debug_disttxn_trace) {
-        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s\n", __func__, dist_txnid);
-    }
-    transaction_t *dtran;
-    Pthread_mutex_lock(&active_transactions_lk);
-    dtran = hash_find(active_transactions_hash, &dist_txnid);
-    assert(dtran != NULL);
-    Pthread_mutex_lock(&dtran->lk);
-    Pthread_mutex_unlock(&active_transactions_lk);
-    commit_participants_lk(dtran);
-    Pthread_mutex_unlock(&dtran->lk);
-    return;
-}
-
 /* The coordinator was unable to execute it's osql stream */
 void coordinator_failed(const char *dist_txnid)
 {
@@ -1149,32 +1129,29 @@ static int coordinator_wait_int(const char *dist_txnid, int can_retry, int *rcod
             exit(1);
         }
 
-        /* XXX maybe just make POSTCOMMIT only codepath */
-        if (rc || gbl_coordinator_notify == POSTCOMMIT) {
-            Pthread_mutex_lock(&dtran->lk);
-            if (rc) {
-                *rcode = ERR_DIST_ABORT;
-                *outrc = ERR_BLOCK_FAILED;
-                snprintf(errmsg, errmsglen, "failed writing to disttxn table");
-                start_timer = comdb2_time_epochms();
-                abort_transaction_lk(dtran, 0);
-                stop_timer = comdb2_time_epochms();
-                if (gbl_debug_disttxn_trace) {
-                    logmsg(LOGMSG_USER, "DISTTXN %s abort txn took %d ms\n", __func__, stop_timer - start_timer);
-                }
-            } else {
-                start_timer = comdb2_time_epochms();
-                commit_participants_lk(dtran);
-                stop_timer = comdb2_time_epochms();
-                if (gbl_debug_disttxn_trace) {
-                    logmsg(LOGMSG_USER, "DISTTXN %s commit participants took %d ms\n", __func__,
-                           stop_timer - start_timer);
-                }
+        Pthread_mutex_lock(&dtran->lk);
+        if (rc) {
+            *rcode = ERR_DIST_ABORT;
+            *outrc = ERR_BLOCK_FAILED;
+            snprintf(errmsg, errmsglen, "failed writing to disttxn table");
+            start_timer = comdb2_time_epochms();
+            abort_transaction_lk(dtran, 0);
+            stop_timer = comdb2_time_epochms();
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s abort txn took %d ms\n", __func__, stop_timer - start_timer);
             }
-            dtran->resolved_time = comdb2_time_epochms();
-            state = dtran->state;
-            Pthread_mutex_unlock(&dtran->lk);
+        } else {
+            start_timer = comdb2_time_epochms();
+            commit_participants_lk(dtran);
+            stop_timer = comdb2_time_epochms();
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "DISTTXN %s commit participants took %d ms\n", __func__,
+                        stop_timer - start_timer);
+            }
         }
+        dtran->resolved_time = comdb2_time_epochms();
+        state = dtran->state;
+        Pthread_mutex_unlock(&dtran->lk);
     } else {
         if (gbl_debug_disttxn_trace) {
             logmsg(LOGMSG_USER, "%s DISTTXN coordinator aborting %s state=%d force-failure=%d\n", __func__,
@@ -1495,28 +1472,6 @@ int participant_propagated(const char *dist_txnid, const char *dbname, const cha
         Pthread_mutex_unlock(&dtran->lk);
     }
     return 0;
-}
-
-int coordinator_notify_algo(const char *a)
-{
-    if (strcasecmp(a, "postcommit"))
-        return POSTCOMMIT;
-    if (strcasecmp(a, "postdistcommit"))
-        return POSTDISTCOMMIT;
-    return POSTCOMMIT;
-}
-
-const char *coordinator_notify_string(int alg)
-{
-    switch (alg) {
-    case POSTCOMMIT:
-        return "postcommit";
-    case POSTDISTCOMMIT:
-        return "postdistcommit";
-    default:
-        logmsg(LOGMSG_ERROR, "%s called with invalid algorithm %d\n", __func__, alg);
-        return "?invalid?";
-    }
 }
 
 static participant_t *add_participant_lk(const char *dist_txnid, int state)

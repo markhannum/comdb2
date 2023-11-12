@@ -219,8 +219,7 @@ int handle_fdb_push(struct sqlclntstate *clnt, struct errstat *err)
     int rc, irc;
 
     const char *class = "default";
-    int cdb2api_policy_flag =
-        push->local ? 0 : convert_policy_override_string_to_cdb2api_flag(gbl_cdb2api_policy_override);
+    int cdb2api_policy_flag = push->local ? 0 : convert_policy_override_string_to_cdb2api_flag(gbl_cdb2api_policy_override);
     if (push->local)
         class = "local";
     else if (push->class_override) {

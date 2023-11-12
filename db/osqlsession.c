@@ -216,8 +216,6 @@ static void _destroy_session(osql_sess_t **psess)
  * ignored in implementations when redundant packets can
  * arrive
  */
-void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
-
 int osql_sess_addclient(osql_sess_t *psess)
 {
     sess_impl_t *sess = psess->impl;
@@ -263,12 +261,6 @@ int osql_sess_remclient(osql_sess_t *psess)
         rc = 1;
     }
     Pthread_mutex_unlock(&sess->mtx);
-
-    if (rc != 0) {
-        uuidstr_t us;
-        comdb2_cheapstack_sym(stderr, "%s rqid %llu uuid %s rc=%d\n", __func__, psess->rqid,
-                              comdb2uuidstr(psess->uuid, us), rc);
-    }
 
     return rc;
 }
@@ -367,7 +359,6 @@ int osql_prepare(const char *dist_txnid, const char *coordinator_dbname, const c
 }
 
 /* Coordinator asked participant to discard this session */
-// int osql_discard(unsigned long long rqid, uuid_t uuid)
 int osql_discard(const char *dist_txnid)
 {
     int close = 0, rc;
@@ -454,18 +445,20 @@ int osql_sess_rcvop(unsigned long long rqid, uuid_t uuid, int type, void *data,
     }
     int dispatch = 0;
     int cancel = 0;
-    Pthread_mutex_lock(&sess->participant_lk);
-    if (sess->is_participant && sess->is_sanctioned == 1) {
-        if (gbl_debug_disttxn_trace) {
-            logmsg(LOGMSG_USER, "%s setting dispatch to 1 on sanctioned participant\n", __func__);
+    if (is_msg_done) {
+        Pthread_mutex_lock(&sess->participant_lk);
+        if (sess->is_participant && sess->is_sanctioned == 1) {
+            if (gbl_debug_disttxn_trace) {
+                logmsg(LOGMSG_USER, "%s setting dispatch to 1 on sanctioned participant\n", __func__);
+            }
+            dispatch = 1;
+        } else if (sess->is_participant && sess->is_sanctioned == -1) {
+            cancel = 1;
+        } else {
+            sess->is_done = 1;
         }
-        dispatch = 1;
-    } else if (sess->is_participant && sess->is_sanctioned == -1) {
-        cancel = 1;
-    } else {
-        sess->is_done = is_msg_done;
+        Pthread_mutex_unlock(&sess->participant_lk);
     }
-    Pthread_mutex_unlock(&sess->participant_lk);
 
     /* release the session */
     if (!is_msg_done || (sess->is_participant && !dispatch)) {

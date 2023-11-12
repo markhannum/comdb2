@@ -2416,8 +2416,6 @@ static int cdb2portmux_get(cdb2_hndl_tp *hndl, const char *type, const char *rem
 /* Tries to connect to specified node using sockpool.
  * If there is none, then makes a new socket connection.
  */
-void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
-
 static int newsql_connect(cdb2_hndl_tp *hndl, int node_indx)
 {
     const char *host = hndl->hosts[node_indx];
@@ -2430,10 +2428,6 @@ static int newsql_connect(cdb2_hndl_tp *hndl, int node_indx)
     void *callbackrc;
     int overwrite_rc = 0;
     cdb2_event *e = NULL;
-
-    if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr, "DISTTXN %s connecting to %s\n", __func__, host);
-    }
 
     /* Handle BEFRE_NEWSQL_CONNECT callbacks */
     while ((e = cdb2_next_callback(hndl, CDB2_BEFORE_NEWSQL_CONNECT, e)) != NULL) {
@@ -2515,9 +2509,6 @@ static int newsql_connect(cdb2_hndl_tp *hndl, int node_indx)
     debugprint("connected_host=%s\n", hndl->hosts[hndl->connected_host]);
 
 after_callback:
-    if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr, "DISTTXN %s to %s rcode %d\n", __func__, host, rc);
-    }
     while ((e = cdb2_next_callback(hndl, CDB2_AFTER_NEWSQL_CONNECT, e)) != NULL) {
         callbackrc = cdb2_invoke_callback(hndl, e, 3, CDB2_HOSTNAME, host, CDB2_PORT, port, CDB2_RETURN_VALUE, rc);
         PROCESS_EVENT_CTRL_AFTER(hndl, e, rc, callbackrc);
@@ -2532,12 +2523,7 @@ static void newsql_disconnect(cdb2_hndl_tp *hndl, SBUF2 *sb, int line)
 
     debugprint("disconnecting from %s, line %d\n",
                hndl->hosts[hndl->connected_host], line);
-
     int fd = sbuf2fileno(sb);
-
-    if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr, "DISTTXN %s fd %d\n", __func__, fd);
-    }
 
     int timeoutms = 10 * 1000;
     if (hndl->is_admin ||
@@ -2547,17 +2533,10 @@ static void newsql_disconnect(cdb2_hndl_tp *hndl, SBUF2 *sb, int line)
         (!hndl->firstresponse) ||
         (hndl->in_trans) ||
         ((hndl->flags & CDB2_TYPE_IS_FD) != 0)) {
-
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN %s closing fd %d typestring %s\n", __func__, fd, hndl->newsql_typestr);
-        }
-
         sbuf2close(sb);
     } else if (sbuf2free(sb) == 0) {
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN %s donating fd %d typestring %s\n", __func__, fd, hndl->newsql_typestr);
-        }
-        cdb2_socket_pool_donate_ext(hndl->newsql_typestr, fd, timeoutms / 1000, hndl->dbnum);
+        cdb2_socket_pool_donate_ext(hndl->newsql_typestr, fd, timeoutms / 1000,
+                                    hndl->dbnum);
     }
     hndl->use_hint = 0;
     hndl->sb = NULL;
@@ -2738,13 +2717,7 @@ retry_connect:
     if ((hndl->flags & CDB2_MASTER)) {
         bzero(hndl->hosts_connected, sizeof(hndl->hosts_connected));
         if (newsql_connect(hndl, hndl->master) == 0) {
-            if (hndl->flags & CDB2_DEBUG) {
-                fprintf(stderr, "DISTTXN connected to %s\n", hndl->hosts[hndl->master]);
-            }
             return 0;
-        }
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN failed to connect to %s\n", hndl->hosts[hndl->master]);
         }
         hndl->connected_host = -1;
         return -1;
@@ -2957,7 +2930,8 @@ static void clear_responses(cdb2_hndl_tp *hndl)
 {
     if (hndl->lastresponse) {
         if (hndl->protobuf_used_sysmalloc)
-            cdb2__sqlresponse__free_unpacked(hndl->lastresponse, &hndl->allocator);
+            cdb2__sqlresponse__free_unpacked(hndl->lastresponse,
+                                             &hndl->allocator);
         hndl->protobuf_offset = 0;
         free((void *)hndl->last_buf);
         hndl->last_buf = NULL;
@@ -2975,34 +2949,16 @@ static void clear_responses(cdb2_hndl_tp *hndl)
 int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, char *cmaster, unsigned int op,
                   char *dist_txnid, int rcode, int outrc, char *errmsg, int async)
 {
-    if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr,
-                "DISTTXN %s dbname=%s pname=%s ptier=%s cmaster=%s op=%d async=%d rcode=%d outrc=%d errmsg=%s\n",
-                __func__, dbname ? dbname : "(null)", pname ? pname : "(null)", ptier ? ptier : "(null)",
-                cmaster ? cmaster : "(null)", op, async, rcode, outrc, errmsg);
-    }
     if (!hndl->sb) {
         cdb2_connect_sqlhost(hndl);
         if (!hndl->sb) {
-            if (hndl->flags & CDB2_DEBUG) {
-                fprintf(stderr, "DISTTXN %s line %d failed to connect\n", __func__, __LINE__);
-            }
             return -1;
         }
-    }
-
-    if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr, "DISTTXN %s connected to %s\n", __func__, hndl->hosts[hndl->connected_host]);
     }
 
     if (op != CDB2_DIST__PREPARE && op != CDB2_DIST__DISCARD && op != CDB2_DIST__PREPARED &&
         op != CDB2_DIST__FAILED_PREPARE && op != CDB2_DIST__COMMIT && op != CDB2_DIST__ABORT &&
         op != CDB2_DIST__PROPAGATED && op != CDB2_DIST__HEARTBEAT) {
-
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN %s line %d ignoring bad op\n", __func__, __LINE__);
-        }
-
         return -1;
     }
 
@@ -3010,6 +2966,7 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
     CDB2DISTTXN distquery = CDB2__DISTTXN__INIT;
     CDB2DISTTXN__Disttxn disttxn = CDB2__DISTTXN__DISTTXN__INIT;
 
+    /* TODO: hand-craft each msg-type on a switch */
     disttxn.operation = op;
     disttxn.async = async;
     disttxn.txnid = dist_txnid;
@@ -3040,10 +2997,6 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
     int rc = sbuf2flush(hndl->sb);
     free(buf);
 
-    if ((hndl->flags & CDB2_DEBUG)) {
-        fprintf(stderr, "DISTTXN %s line %d flush returns %d\n", __func__, __LINE__, rc);
-    }
-
     if (rc < 0) {
         sprintf(hndl->errstr, "%s: Error writing to other master", __func__);
         sbuf2close(hndl->sb);
@@ -3057,9 +3010,6 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
 
     rc = sbuf2fread((char *)&hdr, 1, sizeof(hdr), hndl->sb);
     if (rc != sizeof(hdr)) {
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN %s line %d error reading response %d\n", __func__, __LINE__, rc);
-        }
         sbuf2close(hndl->sb);
         hndl->sb = NULL;
         return -1;
@@ -3072,9 +3022,6 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
     rc = sbuf2fread(p, 1, hdr.length, hndl->sb);
 
     if (rc != hdr.length) {
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN %s line %d error mallocing response %d\n", __func__, __LINE__, rc);
-        }
         sbuf2close(hndl->sb);
         hndl->sb = NULL;
         free(p);
@@ -3083,9 +3030,6 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
     CDB2DISTTXNRESPONSE *disttxn_response = cdb2__disttxnresponse__unpack(NULL, hdr.length, (const unsigned char *)p);
 
     if (disttxn_response == NULL) {
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN %s line %d got no disttxn response\n", __func__, __LINE__);
-        }
         sbuf2close(hndl->sb);
         hndl->sb = NULL;
         free(p);
@@ -3095,10 +3039,6 @@ int cdb2_send_2pc(cdb2_hndl_tp *hndl, char *dbname, char *pname, char *ptier, ch
     int response_rcode = disttxn_response->rcode;
 
     cdb2__disttxnresponse__free_unpacked(disttxn_response, NULL);
-
-    if (hndl->flags & CDB2_DEBUG) {
-        fprintf(stderr, "DISTTXN %s line %d response rcode=%d\n", __func__, __LINE__, response_rcode);
-    }
 
     return response_rcode;
 }
@@ -3766,9 +3706,6 @@ int cdb2_close(cdb2_hndl_tp *hndl)
 
     if (hndl->auto_consume_timeout_ms > 0 && hndl->sb && !hndl->in_trans && hndl->firstresponse &&
         (!hndl->lastresponse || (hndl->lastresponse->response_type != RESPONSE_TYPE__LAST_ROW))) {
-        if (hndl->flags & CDB2_DEBUG) {
-            fprintf(stderr, "DISTTXN %s auto-consuming\n", __func__);
-        }
         int nrec = 0;
         sbuf2settimeout(hndl->sb, hndl->auto_consume_timeout_ms, hndl->auto_consume_timeout_ms);
         struct timeval tv;
@@ -5088,10 +5025,9 @@ read_record:
             if (is_hasql_commit)
                 cleanup_query_list(hndl, commit_query_list, __LINE__);
 
-            sprintf(hndl->errstr, "%s: Can't open fdb %s:%s", __func__, hndl->firstresponse->foreign_db,
-                    hndl->firstresponse->foreign_class);
+            sprintf(hndl->errstr, "%s: Can't open fdb %s:%s", __func__, hndl->firstresponse->foreign_db, hndl->firstresponse->foreign_class);
             debugprint("Can't open fdb %s:%s\n", hndl->firstresponse->foreign_db, hndl->firstresponse->foreign_class);
-            clear_responses(hndl); // signal to cdb2_next_record_int that we are done
+            clear_responses(hndl);  // signal to cdb2_next_record_int that we are done
             PRINT_AND_RETURN(-1);
         }
         attach_to_handle(hndl->fdb_hndl, hndl);
@@ -5100,7 +5036,7 @@ read_record:
         if (is_hasql_commit)
             cleanup_query_list(hndl, commit_query_list, __LINE__);
 
-        clear_responses(hndl); // signal to cdb2_next_record_int that we are done
+        clear_responses(hndl);  // signal to cdb2_next_record_int that we are done
         PRINT_AND_RETURN(return_value);
     }
 
@@ -6207,9 +6143,8 @@ retry:
     }
 
     if (hndl->num_hosts == 0) {
-        sprintf(hndl->errstr,
-                "cdb2_get_dbhosts: comdb2db has no entry of "
-                "db %s of cluster type %s.",
+        sprintf(hndl->errstr, "cdb2_get_dbhosts: comdb2db has no entry of "
+                              "db %s of cluster type %s.",
                 hndl->dbname, hndl->cluster);
         rc = -1;
         goto after_callback;
@@ -6218,15 +6153,19 @@ retry:
     rc = -1;
     int i = 0;
     int node_seq = 0;
-    if ((hndl->flags & CDB2_RANDOM) || ((hndl->flags & CDB2_RANDOMROOM) && (hndl->num_hosts_sameroom == 0))) {
+    if ((hndl->flags & CDB2_RANDOM) ||
+        ((hndl->flags & CDB2_RANDOMROOM) && (hndl->num_hosts_sameroom == 0))) {
         node_seq = rand() % hndl->num_hosts;
-    } else if ((hndl->flags & CDB2_RANDOMROOM) && (hndl->num_hosts_sameroom > 0)) {
+    } else if ((hndl->flags & CDB2_RANDOMROOM) &&
+               (hndl->num_hosts_sameroom > 0)) {
         node_seq = rand() % hndl->num_hosts_sameroom;
         /* Try dbinfo on same room first */
         for (i = 0; i < hndl->num_hosts_sameroom; i++) {
             int try_node = (node_seq + i) % hndl->num_hosts_sameroom;
-            rc = cdb2_dbinfo_query(hndl, hndl->type, hndl->dbname, hndl->dbnum, hndl->hosts[try_node], hndl->hosts,
-                                   hndl->ports, &hndl->master, &hndl->num_hosts, &hndl->num_hosts_sameroom);
+            rc = cdb2_dbinfo_query(hndl, hndl->type, hndl->dbname, hndl->dbnum,
+                                   hndl->hosts[try_node], hndl->hosts,
+                                   hndl->ports, &hndl->master, &hndl->num_hosts,
+                                   &hndl->num_hosts_sameroom);
             if (rc == 0) {
                 goto after_callback;
             }
@@ -6246,9 +6185,10 @@ retry:
     }
 
     if (rc != 0) {
-        sprintf(hndl->errstr, "cdb2_get_dbhosts: can't do dbinfo query on %s hosts.", hndl->dbname);
-        if (hndl->num_hosts > 1)
-            goto retry;
+        sprintf(hndl->errstr,
+                "cdb2_get_dbhosts: can't do dbinfo query on %s hosts.",
+                hndl->dbname);
+        if (hndl->num_hosts > 1) goto retry;
     }
 after_callback: /* We are going to exit the function in this label. */
     while ((e = cdb2_next_callback(hndl, CDB2_AFTER_DISCOVERY, e)) != NULL) {
@@ -7076,7 +7016,8 @@ int cdb2_unregister_event(cdb2_hndl_tp *hndl, cdb2_event *event)
         ++cdb2_gbl_event_version;
         pthread_mutex_unlock(&cdb2_event_mutex);
     } else if (hndl->events) {
-        for (prev = hndl->events, curr = prev->next; curr != NULL && curr != event; prev = curr, curr = curr->next)
+        for (prev = hndl->events, curr = prev->next;
+             curr != NULL && curr != event; prev = curr, curr = curr->next)
             ;
         if (curr != event)
             return EINVAL;
@@ -7248,7 +7189,8 @@ static int refresh_gbl_events_on_hndl(cdb2_hndl_tp *hndl)
     knot = gbl;
 
     /* Clone and append global events to the handle. */
-    for (gbl = cdb2_gbl_events.next, lcl = hndl->events; gbl != NULL; gbl = gbl->next) {
+    for (gbl = cdb2_gbl_events.next, lcl = hndl->events; gbl != NULL;
+         gbl = gbl->next) {
         elen = sizeof(cdb2_event) + gbl->argc * sizeof(cdb2_event_arg);
         tmp = malloc(elen);
         if (tmp == NULL) {

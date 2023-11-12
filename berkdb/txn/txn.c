@@ -1278,8 +1278,6 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 						if ((ret = __txn_discard_recovered(dbenv, txnp->dist_txnid)) != 0) {
 							abort();
 						}
-                        logmsg(LOGMSG_USER, "DISTTXN %s committed %s at %d:%d\n",
-                                __func__, txnp->dist_txnid, lsn_out->file, lsn_out->offset);
 					} else {
 						ret =
 							__txn_regop_rowlocks_log(dbenv,

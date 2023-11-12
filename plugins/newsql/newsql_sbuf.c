@@ -39,7 +39,6 @@ extern ssl_mode gbl_client_ssl_mode;
 extern SSL_CTX *gbl_ssl_ctx;
 extern char gbl_dbname[MAX_DBNAME_LENGTH];
 extern int gbl_nid_dbname;
-extern int gbl_debug_disttxn_trace;
 extern unsigned long long gbl_ssl_num_full_handshakes;
 extern unsigned long long gbl_ssl_num_partial_handshakes;
 
@@ -474,10 +473,6 @@ retry_read:
         CDB2DISTTXN *disttxn = query->disttxn;
 
         if (!bdb_amimaster(thedb->bdb_env)) {
-            if (gbl_debug_disttxn_trace) {
-                logmsg(LOGMSG_USER, "DISTTXN %s disttxn %s ignoring operation %d because i am not master\n", __func__,
-                       disttxn->disttxn->txnid, disttxn->disttxn->operation);
-            }
             rcode = -1;
             goto sendresponse;
         }

@@ -1179,6 +1179,7 @@ typedef struct bpfunc bpfunc_t;
 typedef struct bpfunc_lstnode {
     bpfunc_t *func;
     LINKC_T(struct bpfunc_lstnode) linkct;
+
 } bpfunc_lstnode_t;
 
 typedef LISTC_T(bpfunc_lstnode_t) bpfunc_list_t;
@@ -1276,7 +1277,6 @@ struct osql_sess {
     char *coordinator_dbname;
     char *coordinator_tier;
     char *coordinator_master;
-    int last_2pc_heartbeat;
     participant_list_t participants;
 
     /* these are set asynchronously */
@@ -1458,7 +1458,6 @@ struct ireq {
 
     int sc_running;
     int comdbg_flags;
-
     /* REVIEW COMMENTS AT BEGINING OF STRUCT BEFORE ADDING NEW VARIABLES */
 };
 

@@ -529,10 +529,8 @@ static void sess_save_participant(osql_sess_t *sess, int is_uuid, char *rpl, int
 
     LISTC_FOR_EACH(&sess->participants, chk, linkv)
     {
-        if (!strcmp(chk->participant_name, p->participant_name) &&
-            !strcmp(chk->participant_tier, p->participant_tier)) {
-            logmsg(LOGMSG_FATAL, "%s participant %s:%s already on list\n", __func__, p->participant_name,
-                   p->participant_tier);
+        if (!strcmp(chk->participant_name, p->participant_name)) {
+            logmsg(LOGMSG_FATAL, "%s participant %s already on list\n", __func__, p->participant_name);
             abort();
         }
     }

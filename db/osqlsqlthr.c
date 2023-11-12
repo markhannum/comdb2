@@ -238,10 +238,10 @@ static int osql_sock_start_int(struct sqlclntstate *clnt, int type,
 
     /* new id */
     if (!keep_rqid) {
-        uuidstr_t us;
         osql->rqid = OSQL_RQID_USE_UUID;
         comdb2uuid(osql->uuid);
         if (gbl_debug_disttxn_trace) {
+            uuidstr_t us;
             logmsg(LOGMSG_USER, "%s starting uuid %s\n", __func__, comdb2uuidstr(osql->uuid, us));
         }
     }

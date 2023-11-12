@@ -238,8 +238,6 @@ REGISTER_TUNABLE("coordinator_sync_on_commit", "Coordinator syncs log and waits 
                  TUNABLE_BOOLEAN, &gbl_coordinator_sync_on_commit, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("coordinator_propagate_timeout_ms", "Coordinator max wait for propagating txns.  (Default: 5000ms)",
                  TUNABLE_INTEGER, &gbl_coordinator_propagate_timeout_ms, 0, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("coordinator_notify", "Coordinator notify algorithm.  (Default: postcommit)", TUNABLE_ENUM,
-                 &gbl_coordinator_notify, 0, coordinator_notify_value, NULL, coordinator_notify_update, NULL);
 REGISTER_TUNABLE("debug_exit_participant_after_prepare", "Participant exits after successful prepare.  (Default: off)",
                  TUNABLE_BOOLEAN, &gbl_debug_exit_participant_after_prepare, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL,
                  NULL);
