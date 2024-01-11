@@ -2181,8 +2181,8 @@ rep_verify_err:if ((t_ret = __log_c_close(logc)) != 0 &&
 	case REP_VERIFY_FAIL:
 		rep->stat.st_outdated++;
 		ret = DB_REP_OUTDATED;
-        logmsg(LOGMSG_INFO, "%s:%d returning DB_REP_OUTDATED\n",
-                __func__, __LINE__);
+		logmsg(LOGMSG_INFO, "%s:%d returning DB_REP_OUTDATED\n",
+				__func__, __LINE__);
 		fromline = __LINE__;
 		goto errlock;
 	case REP_VERIFY_REQ:
@@ -5362,6 +5362,9 @@ static unsigned long long rep_process_txn_usc = 0;
 static unsigned long long rep_process_txn_cnt = 0;
 
 int gbl_abort_ufid_open = 0;
+int bdb_lockref(void);
+void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
+void assert_bdb_writelock(const char *func, int line);
 
 // PUBLIC: int __rep_process_txn __P((DB_ENV *, REP_CONTROL *, DBT *, LTDESC **, DB_LSN, uint32_t *));
 int
@@ -5376,6 +5379,7 @@ __rep_process_txn(dbenv, rctl, rec, ltrans, maxlsn, commit_gen)
 	static int lastpr = 0;
 	int now;
 	int rc;
+	assert(bdb_lockref() > 0);
 
 	if (debug_switch_abort_ufid_open()) {
 		gbl_abort_ufid_open = 1;
@@ -5551,6 +5555,7 @@ __rep_process_txn_concurrent_int(dbenv, rctl, rec, ltrans, ctrllsn, maxlsn,
 	uint32_t *commit_gen;
 	DB_LSN prev_commit_lsn;
 {
+	assert(bdb_lockref() > 0);
 	DBT *lock_dbt, lsn_lock_dbt, lock_dbt_mem = {0};
 	int32_t timestamp = 0;
 	char *dist_txnid = NULL;
@@ -8372,11 +8377,15 @@ __rep_verify_match(dbenv, rp, savetime, online)
 		goto errunlock;
 	}
 
+	assert_bdb_writelock(__func__, __LINE__);
+	assert(rep->gen >= dbenv->rep_gen);
+	logmsg(LOGMSG_USER, "%s moving dbenv->rep_gen from %d to %d\n", __func__, dbenv->rep_gen, rep->gen);
+	comdb2_cheapstack_sym(stderr, "setting dbenv->rep_gen to %d\n", rep->gen);
 	dbenv->rep_gen = rep->gen;
 
-	ctrace("%s truncated log from [%d:%d] to [%d:%d]\n",
+	ctrace("%s truncated log from [%d:%d] to [%d:%d] for generation %d\n",
 		__func__, prevlsn.file, prevlsn.offset, trunclsn.file,
-		trunclsn.offset);
+		trunclsn.offset, dbenv->rep_gen);
 
 	/*
 	 * The log has been truncated (either directly by us or by __db_apprec)

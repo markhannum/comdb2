@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+#export debug=1
+[[ $debug == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export stopfile=./stopfile.txt
+
+function create_table
+{
+    $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME default "create table if not exists t1(a int)"
+}
+
+function insert_thread
+{
+    typeset td=$1
+    while [[ ! -f $stopfile ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS --tabs $DBNAME default "insert into t1 select value from generate_series(1,5000)" > /dev/null
+    done
+}
+
+function run_test
+{
+    typeset maxtime=3600
+    typeset instds=9
+    typeset dgsecs=10
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    j=0
+    while [[ "$j" -lt "$instds" ]]; do
+        insert_thread $j &
+        let j=j+1
+    done
+
+    while [[ ! -f $stopfile && "$(date +%s)" -lt "$endtime" ]]; do
+        sleep $dgsecs
+        for n in $CLUSTER ; do
+            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $n "exec procedure sys.cmd.send('downgrade')"
+        done
+    done
+
+    touch $stopfile
+    wait
+}
+
+[[ -z "$CLUSTER" ]] && failexit "This test requires a cluster"
+
+create_table
+run_test
+#stop_cluster
+wait
+echo "Success"

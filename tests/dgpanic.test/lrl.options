@@ -1,0 +1,6 @@
+nowatch
+setattr REP_PROCESSORS 8
+setattr REP_WORKERS 16
+decoupled_logputs 0
+online_recovery 0
+abort_on_replicant_log_write 1

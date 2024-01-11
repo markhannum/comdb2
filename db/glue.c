@@ -2923,6 +2923,11 @@ void thedb_set_master(char *master)
     Pthread_mutex_unlock(&new_master_lk);
 }
 
+void assert_bdb_writelock(const char *func, int line)
+{
+    bdb_assert_wrlock(thedb->bdb_env, func, line);
+}
+
 static void new_master_callback_int(void *bdb_handle, int assert_sc_clear)
 {
     char *host;

@@ -560,10 +560,6 @@ void bdb_assert_wrlock(bdb_state_type *bdb_state, const char *funcname,
                        int line)
 {
     thread_lock_info_type *lk = pthread_getspecific(lock_key);
-    bdb_state_type *lock_handle = bdb_state;
-
-    if (lock_handle->parent)
-        lock_handle = lock_handle->parent;
 
     if (lk == NULL) {
         logmsg(LOGMSG_FATAL, "%s(%s): bdb lock not inited in this thread\n",
