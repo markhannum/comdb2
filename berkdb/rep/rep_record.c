@@ -8246,7 +8246,7 @@ int __dbenv_rep_verify_match(DB_ENV* dbenv, unsigned int file, unsigned int offs
 	return ret;
 }
 
-int gbl_rep_skip_recovery = 0;
+int gbl_rep_skip_recovery = 1;
 
 int __log_find_latest_checkpoint_before_lsn(DB_ENV *dbenv,
 	DB_LOGC *logc, DB_LSN *max_lsn, DB_LSN *start_lsn);
