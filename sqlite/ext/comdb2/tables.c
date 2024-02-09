@@ -46,10 +46,8 @@
 #include "timepart_systable.h"
 #include "ezsystables.h"
 
-extern pthread_rwlock_t views_lk;
-
 sqlite3_module systblTablesModule = {
-    .access_flag = CDB2_ALLOW_ALL,
+    .access_flag = CDB2_ALLOW_ALL | CDB2_VIEWS_LK,
     .systable_lock = "comdb2_tables"
 };
 
@@ -61,7 +59,7 @@ static int collect_tables(void **pd, int *pn)
     int nviewable = 0;
     char **data = NULL;
 
-    Pthread_rwlock_rdlock(&views_lk);
+    assert_rdlock_views_lk();
 
     ntables = timepart_systable_num_tables_and_views();
     data = calloc(ntables, sizeof(char *));
@@ -74,7 +72,14 @@ static int collect_tables(void **pd, int *pn)
         }
     }
 
-    Pthread_rwlock_unlock(&views_lk);
+    struct sql_thread *thd = pthread_getspecific(query_info_key);
+    struct sqlclntstate *clnt = thd->clnt;
+    Vdbe *v = (Vdbe *)clnt->dbtran.pStmt;
+    assert(v->viewsLockCnt > 0);
+
+    if (--v->viewsLockCnt == 0){
+        unlock_views_lk();
+    }
 
     *pn = nviewable;
     *pd = data;

@@ -112,6 +112,8 @@
 #include <net_appsock.h>
 #include <typessql.h>
 
+#include <schema_lk.h>
+
 /*
 ** WARNING: These enumeration values are not arbitrary.  They represent
 **          indexes into the array of meta-command names contained in
@@ -735,7 +737,7 @@ void sqlinit(void)
         abort();
 }
 
-static char *vtable_lockname(sqlite3 *db, const char *vtable, int *is_system_table)
+static char *vtable_lockname(sqlite3 *db, const char *vtable, int *is_system_table, int *access_flag)
 {
     *is_system_table = 0;
     if (vtable == NULL || db == NULL || db->aModule.count == 0)
@@ -746,6 +748,7 @@ static char *vtable_lockname(sqlite3 *db, const char *vtable, int *is_system_tab
     if ((module = sqlite3HashFind(&db->aModule, vtable)) != NULL) {
         *is_system_table = 1;
         lockname = module->pModule->systable_lock;
+        *access_flag = module->pModule->access_flag;
     }
     sqlite3_mutex_leave(db->mutex);
     return lockname;
@@ -763,15 +766,19 @@ static int vtable_search(char **vtables, int ntables, const char *table)
 
 static void record_locked_vtable(struct sql_authorizer_state *pAuthState, const char *table)
 {
-    int is_system_table;
-    const char *vtable_lock = vtable_lockname(pAuthState->db, table, &is_system_table);
+    int is_system_table, access_flag;
+    const char *vtable_lock = vtable_lockname(pAuthState->db, table, &is_system_table, &access_flag);
     if (vtable_lock && !vtable_search(pAuthState->vTableLocks, pAuthState->numVTableLocks, vtable_lock)) {
         pAuthState->vTableLocks =
             (char **)realloc(pAuthState->vTableLocks, sizeof(char *) * (pAuthState->numVTableLocks + 1));
         pAuthState->vTableLocks[pAuthState->numVTableLocks++] = strdup(vtable_lock);
     }
-    if (is_system_table && !pAuthState->hasVTables)
+    if (is_system_table) {
         pAuthState->hasVTables = 1;
+        if (access_flag & CDB2_VIEWS_LK) {
+            pAuthState->viewsLockCnt++;
+        }
+    }
 }
 
 static int comdb2_authorizer_for_sqlite(
@@ -876,6 +883,7 @@ static void comdb2_set_authstate(struct sqlthdstate *thd, struct sqlclntstate *c
     thd->authState.numVTableLocks = 0;
     thd->authState.vTableLocks = NULL;
     thd->authState.hasVTables = 0;
+    thd->authState.viewsLockCnt = 0;
     thd->authState.db = thd->sqldb;
 }
 
@@ -3132,9 +3140,10 @@ static int get_prepared_stmt_int(struct sqlthdstate *thd,
 
         if (rec->stmt) {
             stmt_set_vlock_tables(rec->stmt, thd->authState.vTableLocks, thd->authState.numVTableLocks,
-                                  thd->authState.hasVTables, thd->authState.flags);
+                                  thd->authState.hasVTables, thd->authState.viewsLockCnt, thd->authState.flags);
             thd->authState.numVTableLocks = 0;
             thd->authState.vTableLocks = NULL;
+            thd->authState.viewsLockCnt = 0;
             thd->authState.hasVTables = 0;
         } else {
             for (int i = 0; i < thd->authState.numVTableLocks; i++) {
@@ -3143,6 +3152,7 @@ static int get_prepared_stmt_int(struct sqlthdstate *thd,
             free(thd->authState.vTableLocks);
             thd->authState.numVTableLocks = 0;
             thd->authState.vTableLocks = NULL;
+            thd->authState.viewsLockCnt = 0;
             thd->authState.hasVTables = 0;
         }
 
@@ -4347,7 +4357,7 @@ check_version:
 
             rdlock_schema_lk();
 
-            views_lock();
+            rdlock_views_lk();
             got_views_lock = 1;
             if (thd->sqldb) {
                 /* we kept engine, but the versions might have changed while
@@ -4393,7 +4403,7 @@ check_version:
     }
  done: /* reached via goto for error handling case. */
     if (got_views_lock) {
-        views_unlock();
+        unlock_views_lk();
     }
 
     if (got_curtran && put_curtran(thedb->bdb_env, clnt)) {

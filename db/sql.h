@@ -97,6 +97,7 @@ struct sql_authorizer_state {
     int numVTableLocks;
     char **vTableLocks;
     int hasVTables;
+    int viewsLockCnt;
 };
 
 /* Thread specific sql state */

@@ -14,6 +14,8 @@
    limitations under the License.
  */
 
+#include <schema_lk.h>
+
 /********* SYSTABLE INTERFACE IMPLEMENTATION HERE *******************/
 
 int timepart_systable_timepartitions_collect(void **data, int *nrecords)
@@ -21,11 +23,15 @@ int timepart_systable_timepartitions_collect(void **data, int *nrecords)
     timepart_views_t *views = thedb->timepart_views;
     timepart_view_t *view;
     systable_timepartition_t *arr = NULL;
+    struct sql_thread *thd = pthread_getspecific(query_info_key);
+    struct sqlclntstate *clnt = thd->clnt;
+    Vdbe *v = (Vdbe *)clnt->dbtran.pStmt;
+
     int narr = 0;
     int rc = 0;
     uuidstr_t us;
 
-    Pthread_rwlock_rdlock(&views_lk);
+    assert_rdlock_views_lk();
     arr = calloc(views->nviews, sizeof(systable_timepartition_t));
     if (!arr) {
         logmsg(LOGMSG_ERROR, "%s OOM %zu!\n", __func__,
@@ -56,7 +62,13 @@ int timepart_systable_timepartitions_collect(void **data, int *nrecords)
         }
     }
 done:
-    Pthread_rwlock_unlock(&views_lk);
+
+    assert(v->viewsLockCnt > 0);
+
+    if (--v->viewsLockCnt == 0){
+        unlock_views_lk();
+    }
+
     *data = arr;
     *nrecords = narr;
     return rc;
@@ -91,7 +103,7 @@ int timepart_systable_timepartshards_collect(void **data, int *nrecords)
     int rc = 0;
     struct dbtable *db;
 
-    Pthread_rwlock_rdlock(&views_lk);
+    assert_rdlock_views_lk();
 
     narr = 0;
     for (nview = 0; nview < views->nviews; nview++) {
@@ -128,7 +140,6 @@ int timepart_systable_timepartshards_collect(void **data, int *nrecords)
         }
     }
 done:
-    Pthread_rwlock_unlock(&views_lk);
     *data = arr;
     *nrecords = narr;
     return rc;
