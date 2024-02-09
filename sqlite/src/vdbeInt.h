@@ -590,6 +590,7 @@ struct Vdbe {
   u16 numVTableLocks;
   char **vTableLocks;
   u16 hasVTables;
+  u16 viewsLockCnt;
   u8 hasScalarFunc;
   char tzname[TZNAME_MAX];/* timezone info for datetime support */
   int dtprec;             /* datetime precision - make it u32 to silence compiler */

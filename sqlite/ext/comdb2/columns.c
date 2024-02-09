@@ -48,8 +48,6 @@
 #include "timepart_systable.h"
 #include "ezsystables.h"
 
-extern pthread_rwlock_t views_lk;
-
 struct systable_column {
     char *tablename;
     char *columnname;
@@ -75,7 +73,7 @@ static int collect_columns(void **pd, int *pn)
     struct systable_column *data = NULL, *p = NULL;
     int ncols = 0;
 
-    Pthread_rwlock_rdlock(&views_lk);
+    assert_rdlock_views_lk();
 
     ntables = timepart_systable_num_tables_and_views();
 
@@ -139,7 +137,14 @@ static int collect_columns(void **pd, int *pn)
         }
     }
 
-    Pthread_rwlock_unlock(&views_lk);
+    struct sql_thread *thd = pthread_getspecific(query_info_key);
+    struct sqlclntstate *clnt = thd->clnt;
+    Vdbe *v = (Vdbe *)clnt->dbtran.pStmt;
+    assert(v->viewsLockCnt > 0);
+
+    if (--v->viewsLockCnt == 0){
+        unlock_views_lk();
+    }
 
     *pn = ncols;
     *pd = data;
@@ -164,7 +169,7 @@ static void free_columns(void *data, int n)
 }
 
 sqlite3_module systblColumnsModule = {
-  .access_flag = CDB2_ALLOW_ALL,
+  .access_flag = CDB2_ALLOW_ALL | CDB2_VIEWS_LK,
   .systable_lock = "comdb2_tables"
 };
 

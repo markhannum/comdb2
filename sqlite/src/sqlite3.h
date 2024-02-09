@@ -4855,7 +4855,7 @@ char *stmt_column_name(sqlite3_stmt *, int);
 char *stmt_column_decltype(sqlite3_stmt *pStmt, int index);
 char *stmt_cached_column_decltype(sqlite3_stmt *pStmt, int index);
 void stmt_set_cached_columns(sqlite3_stmt *, char **, char **, int);
-void stmt_set_vlock_tables(sqlite3_stmt *, char **, int, int, int);
+void stmt_set_vlock_tables(sqlite3_stmt *, char **, int, int, int, int);
 void stmt_set_has_scalar_func(sqlite3_stmt *, int);
 int stmt_do_column_names_match(sqlite3_stmt *);
 int stmt_do_column_decltypes_match(sqlite3_stmt *pStmt);
@@ -6535,8 +6535,8 @@ struct sqlite3_module {
 enum {
   CDB2_ALLOW_ALL  = 1<<0, /* Allow access to all */
   CDB2_ALLOW_USER = 1<<1, /* Limit access only to permitted users */
-  CDB2_HIDDEN     = 1<<2, /* Remove it from system table list
-                             (comdb2_systables) */
+  CDB2_HIDDEN     = 1<<2, /* Remove it from system table list (comdb2_systables) */
+  CDB2_VIEWS_LK   = 1<<3, /* Acquire the views-lock first */
 };
 #endif /* defined(SQLITE_BUILDING_FOR_COMDB2) */
 
