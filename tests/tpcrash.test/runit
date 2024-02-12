@@ -41,6 +41,13 @@ function create_partitions
     done
 }
 
+function query_tables
+{
+    while [[ ! -f $stopfile ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME "select * from comdb2_tables where tablename not in (select name from comdb2_timepartitions)" >/dev/null 2>&1
+    done
+}
+
 function create_procedures
 {
     typeset count=${1:-20}
@@ -62,9 +69,13 @@ EOF
 
 function run_test
 {
+    query_tables &
     create_tables $maxtable
     create_partitions $maxtable
     create_procedures $maxtable
+    sleep 5
+    touch $stopfile
+    wait
 }
 
 run_test
