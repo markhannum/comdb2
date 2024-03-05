@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+#export debug=1
+[[ "$debug" == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+. ${TESTSROOTDIR}/tools/runit_common.sh
+
+export stopfile=./stopfile.txt
+
+function create_table
+{
+    typeset func=create_table
+    write_prompt $func "Creating table"
+    $CDB2SQL_EXE -s --cdb2cfg ${CDB2_CONFIG} ${DBNAME} default "create table t1 (a int)" >/dev/null 2>&1
+    [[ "$?" == "0" ]] && write_prompt $func "Created table t1"
+}
+
+function findmaster
+{
+    $CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default 'select host from comdb2_cluster where is_master="Y"'
+}
+
+function verify_up
+{
+    typeset maxtry=10
+    typeset j=0
+    typeset failed=1
+
+    while [[ "$failed" == "1" && $j -lt "$maxtry" ]]; do
+        failed=0
+
+        for n in $CLUSTER; do
+            $CDB2SQL_EXE $CDB2_OPTIONS --host $n $DBNAME "select 1"
+            r=$?
+            if [[ "$r" != 0 ]]; then
+                echo "Verify-up failed to select against node $n, iteration $j of $maxtry"
+                failed=1
+            fi
+        done
+        let j=j+1
+        if [[ "$failed" == 1 ]]; then
+            sleep 3
+        fi
+    done
+    if [[ "$failed" == "1" ]] ; then
+        touch $stopfile
+        failexit "database is not up"
+    fi
+}
+
+function run_test
+{
+    typeset maxtime=`echo "(${TEST_TIMEOUT%%m}-2)*60" | bc`
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+    typeset func=run_test
+    typeset logtarget=10
+    rm -f $stopfile >/dev/null 2>&1
+    create_table
+
+    while [[ ! -f $stopfile && "$(date +%s)" -lt "$endtime" ]]; do
+        master=$(findmaster)
+        echo "MASTER is $master"
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1(a) values(1)";
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "truncate t1";
+        $CDB2SQL_EXE $CDB2_OPTIONS --host $master $DBNAME "exec procedure sys.cmd.send('downgrade')";
+        sleep 10
+        bounce_database
+        sleep 3
+        verify_up
+    done
+}
+
+run_test
+
+echo "Success!"
