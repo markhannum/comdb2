@@ -95,6 +95,8 @@ static int collect_keycomponents(void **pd, int *pn)
     Vdbe *v = (Vdbe *)clnt->dbtran.pStmt;
     assert(v->viewsLockCnt > 0);
 
+    logmsg(LOGMSG_USER, "%s td %p clnt %p viewsLockCnt %d\n", __func__, (void *)pthread_self(), clnt, v->viewsLockCnt);
+
     if (--v->viewsLockCnt == 0){
         unlock_views_lk();
     }

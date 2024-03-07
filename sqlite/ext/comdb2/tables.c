@@ -59,6 +59,11 @@ static int collect_tables(void **pd, int *pn)
     int nviewable = 0;
     char **data = NULL;
 
+    struct sql_thread *thd = pthread_getspecific(query_info_key);
+    struct sqlclntstate *clnt = thd->clnt;
+    Vdbe *v = (Vdbe *)clnt->dbtran.pStmt;
+    assert(v->viewsLockCnt > 0);
+
     assert_rdlock_views_lk();
 
     ntables = timepart_systable_num_tables_and_views();
@@ -72,10 +77,7 @@ static int collect_tables(void **pd, int *pn)
         }
     }
 
-    struct sql_thread *thd = pthread_getspecific(query_info_key);
-    struct sqlclntstate *clnt = thd->clnt;
-    Vdbe *v = (Vdbe *)clnt->dbtran.pStmt;
-    assert(v->viewsLockCnt > 0);
+    logmsg(LOGMSG_USER, "%s td %p clnt %p viewsLockCnt %d\n", __func__, (void *)pthread_self(), clnt, v->viewsLockCnt);
 
     if (--v->viewsLockCnt == 0){
         unlock_views_lk();

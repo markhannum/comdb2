@@ -184,6 +184,8 @@ static void stmt_free_vtable_locks(sqlite3_stmt *pStmt) {
   }
   free(vdbe->vTableLocks);
   vdbe->vTableLocks = 0;
+  vdbe->viewsLockCnt = 0;
+  vdbe->vTableFlags = 0;
   vdbe->numVTableLocks = 0;
   vdbe->hasVTables = 0;
 }

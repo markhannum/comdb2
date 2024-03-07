@@ -27,7 +27,7 @@ static pthread_t last_##lock##_wrlock_owner;                                    
 static __thread int have_##lock##_readlock = 0;                                                             \
 static __thread int have_##lock##_writelock = 0;                                                            \
 static int debug_##lock##_lock = 0;                                                                         \
-static int verbose_##lock##_lock = 0;                                                                       \
+static int verbose_##lock##_lock = 1;                                                                       \
                                                                                                             \
 int have_##lock##_lock(void)                                                                                \
 {                                                                                                           \

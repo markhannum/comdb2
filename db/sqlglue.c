@@ -7644,7 +7644,12 @@ static int sqlite3LockStmtTables_int(sqlite3_stmt *pStmt, int after_recovery)
 
     /* Acquire views-lock first */
     if (p->viewsLockCnt > 0) {
+        logmsg(LOGMSG_USER, "%s td %p clnt %p authstate %p ACQUIRED views-lk count=%d\n", __func__, (void *)pthread_self(), clnt, p, p->viewsLockCnt);
+        assert(p->vTableFlags & CDB2_VIEWS_LK);
         rdlock_views_lk();
+    } else {
+        assert(!(p->vTableFlags & CDB2_VIEWS_LK));
+        logmsg(LOGMSG_USER, "%s td %p clnt %p authstate %p DID-NOT-ACQUIRE views-lk\n", __func__, (void *)pthread_self(), clnt, p);
     }
 
     for (int i = 0; i < p->numVTableLocks; i++) {
@@ -9670,11 +9675,13 @@ int put_curtran_flags(bdb_state_type *bdb_state, struct sqlclntstate *clnt,
     fprintf(stderr, "%p, %s\n", (void *)pthread_self(), __func__);
 #endif
 
-    if (p && p->vTableFlags & CDB2_VIEWS_LK) {
+    if (p && p->viewsLockCnt > 0) {
+        logmsg(LOGMSG_USER, "%s td %p clnt %p viewslockcount is %d\n",
+            __func__, (void *)pthread_self(), clnt, p->viewsLockCnt);
         assert_rdlock_views_lk();
         unlock_views_lk();
-        assert_no_views_lk();
     }
+    assert_no_views_lk();
 
     if (!is_recovery) {
         if (clnt->dbtran.nLockedRemTables > 0) {

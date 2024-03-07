@@ -776,12 +776,23 @@ static void record_locked_vtable(struct sql_authorizer_state *pAuthState, const 
     if (is_system_table) {
         pAuthState->hasVTables = 1;
         if (access_flag & CDB2_VIEWS_LK) {
+            pAuthState->flags |= CDB2_VIEWS_LK;
             pAuthState->viewsLockCnt++;
+            logmsg(LOGMSG_USER, "%s td %p INCREMENTED authstate %p clnt %p viewsLockCnt to %d for table %s\n", __func__,
+                (void *)pthread_self(), pAuthState, pAuthState->clnt, pAuthState->viewsLockCnt, table);
+        } else {
+            logmsg(LOGMSG_USER, "%s td %p RETAINED authstate %p clnt %p viewsLockCnt at %d for table %s\n", __func__,
+                (void *)pthread_self(), pAuthState, pAuthState->clnt, pAuthState->viewsLockCnt, table);
+            if (pAuthState->flags & CDB2_VIEWS_LK && pAuthState->viewsLockCnt == 0) {
+                logmsg(LOGMSG_USER, "%s thd %p authstate %p clnt %p have flag but no views-lk\n",
+                    __func__, (void *)pthread_self(), pAuthState, pAuthState->clnt);
+                abort();
+            }
         }
     }
 }
 
-static int comdb2_authorizer_for_sqlite(
+static int comdb2_authorizer_for_sqlite_int(
   void *pArg,        /* IN: NOT USED */
   int code,          /* IN: NOT USED */
   const char *zArg1, /* IN: NOT USED */
@@ -870,6 +881,36 @@ static int comdb2_authorizer_for_sqlite(
   }
 }
 
+
+static int comdb2_authorizer_for_sqlite(
+  void *pArg,        /* IN: NOT USED */
+  int code,          /* IN: NOT USED */
+  const char *zArg1, /* IN: NOT USED */
+  const char *zArg2, /* IN: NOT USED */
+  const char *zArg3, /* IN: NOT USED */
+  const char *zArg4  /* IN: NOT USED */
+#ifdef SQLITE_USER_AUTHENTICATION
+  ,const char *zArg5 /* IN: NOT USED */
+#endif
+){
+  struct sql_authorizer_state *pAuthState = pArg;
+  logmsg(LOGMSG_USER, "%s td %p authstate %p BEFORE viewslk = %u viewslkcnt=%d\n", 
+        __func__, (void *)pthread_self(), pAuthState, pAuthState->flags & CDB2_VIEWS_LK, pAuthState->viewsLockCnt);
+  fflush(stdout);
+  fflush(stderr);
+  int rc = comdb2_authorizer_for_sqlite_int(
+    pArg, code, zArg1, zArg2, zArg3, zArg4
+#ifdef SQLITE_USER_AUTHENTICATION
+    ,zArg5
+#endif
+  );
+  logmsg(LOGMSG_USER, "%s td %p authstate %p AFTER viewslk = %u viewslkcnt=%d\n", 
+        __func__, (void *)pthread_self(), pAuthState, pAuthState->flags & CDB2_VIEWS_LK, pAuthState->viewsLockCnt);
+  fflush(stdout);
+  fflush(stderr);
+  return rc;
+}
+
 static void comdb2_reset_authstate(struct sqlthdstate *thd)
 {
     bzero(&thd->authState, sizeof(thd->authState));
@@ -885,6 +926,11 @@ static void comdb2_set_authstate(struct sqlthdstate *thd, struct sqlclntstate *c
     thd->authState.hasVTables = 0;
     thd->authState.viewsLockCnt = 0;
     thd->authState.db = thd->sqldb;
+    if (flags & CDB2_VIEWS_LK) {
+        abort();
+    }
+    logmsg(LOGMSG_USER, "%s td %p RESET authstate %p clnt %p flags=%u, viewslkcnt=0\n",
+        __func__, (void *)pthread_self(), &thd->authState, clnt, flags);
 }
 
 static void comdb2_setup_authorizer_for_sqlite(
@@ -3139,6 +3185,11 @@ static int get_prepared_stmt_int(struct sqlthdstate *thd,
         }
 
         if (rec->stmt) {
+            if (thd->authState.viewsLockCnt > 0) {
+                assert (thd->authState.flags & CDB2_VIEWS_LK);
+            } else {
+                assert (!(thd->authState.flags & CDB2_VIEWS_LK));
+            }
             stmt_set_vlock_tables(rec->stmt, thd->authState.vTableLocks, thd->authState.numVTableLocks,
                                   thd->authState.hasVTables, thd->authState.viewsLockCnt, thd->authState.flags);
             thd->authState.numVTableLocks = 0;
