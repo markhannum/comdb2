@@ -2,7 +2,7 @@
 bash -n "$0" | exit 1
 
 . ${TESTSROOTDIR}/tools/ddl.sh
-. ${TESTSROOTDIR}/tools/timers.sh
+. ${TESTSROOTDIR}/tools/hrtime.sh
 
 #export debug=1
 export fasttime=200

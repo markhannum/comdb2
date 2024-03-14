@@ -1,0 +1,5 @@
+nowatch
+logmsg level info
+table t1 table.csc2
+table t2 table.csc2
+maxosqltransfer 10000000

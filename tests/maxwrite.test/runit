@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+#export debug=1
+[[ $debug == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/runit_common.sh
+. ${TESTSROOTDIR}/tools/hrtime.sh
+
+export stopfile=./stopfile.txt
+export t1lines=3000
+export t2lines=1000
+export delines=20000
+export elapsedmax=2000
+
+function randtext
+{
+    typeset len=${1:-128}
+    cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w $len | head -n 1 
+}
+
+function get_seeds
+{
+    typeset table=$1
+    $CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select seed from $table" > ${table}.seeds
+}
+
+# 4000 records total .. 3000 in t1, 1000 in t2
+# 200 different ids
+function initial_setup
+{
+    j=0
+    typeset load=./load.txt
+
+    echo "Loading normal records into t1"
+    > t1.seeds
+    echo "BEGIN" > $load
+    while [[ $j -lt $t1lines ]]; do
+
+        app=$(randtext)
+        id=$(( j / 20 ))
+        task=$(randtext)
+        cname=$(randtext)
+        hname=$(randtext)
+        seed=$(od -N 4 -t uL -An /dev/urandom | tr -d " ")
+        echo "insert into t1(app, id, task, seed, timestamp, cname, hname) values ('$app', $id, '$task', $seed, now(), '$cname', '$hname')" >> $load
+        echo "$seed" >> t1.seeds
+        let j=j+1
+    done
+
+    j=0
+    echo "Loading normal records into t2"
+    > t2.seeds
+    while [[ $j -lt $t2lines ]]; do
+
+        app=$(randtext)
+        id=$(( j / 20 ))
+        task=$(randtext)
+        cname=$(randtext)
+        hname=$(randtext)
+        seed=$(od -N 4 -t uL -An /dev/urandom | tr -d " ")
+
+        echo "insert into t2(app, id, task, seed, timestamp, cname, hname) values ('$app', $id, '$task', $seed, now(), '$cname', '$hname')" >> $load
+        echo "$seed" >> t2.seeds
+        let j=j+1
+    done
+
+    echo "COMMIT" >> $load
+    cat $load | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - 
+
+    # these are records to delete
+    j=0
+    > del.seeds
+    echo "BEGIN" > $load
+    echo "Loading todelete records into t1"
+    while [[ $j -lt $delines ]]; do
+
+        app=$(randtext)
+        id=$(( j / 20 ))
+        task=$(randtext)
+        cname=$(randtext)
+        hname=$(randtext)
+        seed=$(od -N 4 -t uL -An /dev/urandom | tr -d " ")
+        echo "insert into t1(app, id, task, seed, timestamp, cname, hname) values ('$app', $id, '$task', $seed, now(), '$cname', '$hname')" >> $load
+        echo "$seed" >> del.seeds
+        let j=j+1
+    done
+    echo "COMMIT" >> $load
+    cat $load | $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - 
+
+    echo "Early-ack'd but commits are still being applied: poll until we see all records"
+    typeset applied=0
+    while [[ $applied -eq 0 ]]; do
+        applied=1
+        for n in $CLUSTER ; do
+            x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME --host $n "select count(*) from t1")
+            if [[ "$x" -ne "$(( delines + t1lines ))" ]]; then
+                echo "Commit not applied on $n, records=$x need $(( delines + t1lines ))"
+                applied=0
+            fi
+        done
+        if [[ "$applied" == 0 ]]; then
+            sleep 1
+        fi
+    done
+}
+
+function randdelseed
+{
+    ln=$(( ( RANDOM % delines ) + 1 ))
+    sed -n "${ln}p" ./del.seeds
+}
+
+function randt1seed
+{
+    ln=$(( ( RANDOM % t1lines ) + 1 ))
+    sed -n "${ln}p" ./t1.seeds
+}
+
+function randt2seed
+{
+    ln=$(( ( RANDOM % t2lines ) + 1 ))
+    sed -n "${ln}p" ./t2.seeds
+}
+
+function delete_loop
+{
+    typeset deleter=$1
+    typeset table="t1"
+    typeset cnt=0
+    while [[ ! -f $stopfile ]]; do
+        table=t1
+        seed=$(randdelseed)
+        startms=$(timems)
+        x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "delete from t1 where seed='$seed'" 2>&1)
+        r=$?
+        endms=$(timems)
+        elapsed=$(( endms - startms ))
+        if [[ "$r" -ne "0" || "$elapsed" -gt $elapsedmax ]]; then
+            touch $stopfile
+            echo "$x"
+            failexit "Delete took $elapsed ms rcode=$r"
+        fi
+        let cnt=cnt+1
+    done
+    echo "Deleter $deleter completed $cnt deletes"
+}
+
+function update_loop
+{
+    typeset updater=$1
+    typeset table=""
+    typeset cnt=0
+    while [[ ! -f $stopfile ]]; do
+        
+        if [[ "$(( RANDOM % 2 ))" == "0" ]]; then
+            table=t1
+            seed=$(randt1seed)
+        else
+            table=t2
+            seed=$(randt2seed)
+        fi
+
+        app=$(randtext)
+        task=$(randtext)
+        cname=$(randtext)
+        hname=$(randtext)
+
+        startms=$(timems)
+        x=$($CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "update $table set app='$app', task='$task', cname='$cname', hname='$hname', timestamp = now() where seed='$seed'" 2>&1)
+        r=$?
+        endms=$(timems)
+        elapsed=$(( endms - startms ))
+        if [[ "$r" -ne "0" || "$elapsed" -gt $elapsedmax ]]; then
+            touch $stopfile
+            echo "$x"
+            failexit "Update took $elapsed ms rcode=$r"
+        fi
+        let cnt=cnt+1
+
+    done
+    echo "Updater $updater completed $cnt updates"
+}
+
+function run_test
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="run_test"
+    typeset timeoutminutes=${TEST_TIMEOUT%m}
+    typeset maxtime=$(( 4 * ( ( timeoutminutes * 60 ) / 5 ) ))
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    rm $stopfile >/dev/null 2>&1
+
+    initial_setup
+
+    j=0
+    while [[ $j -lt 10 ]]; do
+        update_loop $j &
+        let j=j+1
+    done
+    j=0
+    while [[ $j -lt 5 ]]; do
+        delete_loop $j &
+        let j=j+1
+    done
+
+    while [[ ! -f $stopfile && "$(date +%s)" -lt $endtime ]]; do
+        t1count=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+        t2count=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t2")
+        echo "t1 has $t1count records, t2 has $t2count records"
+        sleep 1
+    done
+
+    # Different thread failed the test
+    [[ -f "$stopfile" ]] && failexit "testcase failed"
+    touch "$stopfile"
+    wait
+
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "exec procedure sys.cmd.verify('t1')")
+    if [[ "$x" != *"Verify succeeded"* ]] ; then
+        echo "$x"
+        failexit "Failed verify on t1"
+    fi
+
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "exec procedure sys.cmd.verify('t2')")
+    if [[ "$x" != *"Verify succeeded"* ]] ; then
+        echo "$x"
+        failexit "Failed verify on t2"
+    fi
+}
+
+run_test
+wait
+echo "Success"

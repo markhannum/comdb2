@@ -1,0 +1,19 @@
+tag ondisk
+{
+    cstring app[129]
+    int id
+    cstring task[129]
+    longlong seed
+    datetimeus timestamp
+    cstring cname[129]
+    cstring hname[129]
+}
+
+keys
+{
+    dup "key1" = cname + app
+    dup "key2" = cname
+    "key3" = seed
+    "key4" = app + id
+    dup  "key5" = task
+}

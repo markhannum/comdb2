@@ -13,4 +13,3 @@ function timems
     echo "$secs${nsecs:0:3}"
 }
 
-
