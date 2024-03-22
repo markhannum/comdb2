@@ -1228,11 +1228,13 @@ static void *purge_old_blkseq_thread(void *arg)
         }
 
         /* queue consumer thread admin */
-        thrman_where(thr_self, "dbqueue_admin");
-        rdlock_schema_lk();
-        dbqueuedb_admin(dbenv);
-        unlock_schema_lk();
-        thrman_where(thr_self, NULL);
+        if (!gbl_is_physical_replicant) {
+            thrman_where(thr_self, "dbqueue_admin");
+            rdlock_schema_lk();
+            dbqueuedb_admin(dbenv);
+            unlock_schema_lk();
+            thrman_where(thr_self, NULL);
+        }
 
         /* purge old blobs.  i didn't want to make a whole new thread just
          * for this -- SJ */

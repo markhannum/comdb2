@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
 
+export debug=1
 [[ $debug == "1" ]] && set -x
 
 source ${TESTSROOTDIR}/tools/runit_common.sh
@@ -122,6 +123,83 @@ function run_tests
     # Make sure there are still only 3 values
     cnt=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $repname --host localhost "select count(*) from t1 where a = 1")
     [[ "$cnt" != "3" ]] && failexit "Database updates against physical replicant changed count"
+
+    # Create a procedure - we should be able to run on physical replicant
+    echo "Create test procedure"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<'EOF'
+create procedure test version 'test1' {
+local function main(test_no)
+  -- read-only test
+  if(test_no == '1') then
+    db:column_type("string", 1);
+    db:emit("123456")
+    return 0
+  end
+  -- insert a record
+  if(test_no == '2') then
+    local tbl = db:table("t1")
+    tbl:insert({a='10'})
+    db:column_type("string", 1);
+    db:emit("10")
+    return 0
+  end
+end}$$
+put default procedure test 'test1'
+EOF
+    
+    echo "Run read-only procedure against parent - should succeed"
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "exec procedure test('1')")
+    echo "$x"
+    [[ "$x" != "123456" ]] && failexit "parent readonly output not correct"
+
+    sleep 3
+
+    echo "Run read procedure against physrep - should succeed"
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $repname --host localhost "exec procedure test('1')")
+    echo "$x"
+    [[ "$x" != "123456" ]] && failexit "physrep readonly output not correct"
+
+    # Run write procedure against parent
+    echo "Run write procedure against parent - should succeed"
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "exec procedure test('2')")
+    echo "$x"
+    [[ "$x" != "10" ]] && failexit "parent write output not correct"
+
+    # verify record
+    echo "Verify inserted record from sp"
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1 where a=10")
+    echo "$x"
+    [[ "$x" != "1" ]] && failexit "parent doesn't have the 10 record"
+
+    echo "Wait for physrep to see record"
+    cnt=0
+    # Wait for 3 values to propogate to physical replicant
+    while [[ "$cnt" != "1" ]]; do
+        cnt=$($CDB2SQL_EXE -tabs $CDB2_OPTIONS $repname --host localhost "select count(*) from t1 where a=10")
+        sleep 1
+    done
+
+    echo "Run write sp against physrep - should fail."
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $repname --host localhost "exec procedure test('2')")
+    [[ $? == 0 ]] && failexit "Database allowed write-sp against physical replicatn"
+    echo "TODO: better error message"
+
+    echo "Create audit trigger (taken from sp.test)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<EOF
+create table foraudit {$(cat foraudit.csc2)}\$\$
+create table audit {$(cat audit.csc2)}\$\$
+create procedure audit version 'sptest' {$(cat audit.lua)}\$\$
+create procedure cons0 version 'sptest' {$(cat cons.lua)}\$\$
+create lua trigger audit on (table foraudit for insert and update and delete)
+create lua consumer cons0 on (table foraudit for insert and update and delete)
+EOF
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<EOF > /dev/null 2>&1 &
+exec procedure cons0(true)
+EOF
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into foraudit(i) select * from generate_series(1, 500)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "delete from foraudit where 1"
 }
 
 setup
