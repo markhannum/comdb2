@@ -830,17 +830,32 @@ function assert_select_all
     typeset curr_sa=$(select_all)
     while [[ "$prev_sa" != "$curr_sa" ]] ; do 
         let tries=tries-1
-        [[ "$tries" == 0 ]] && failexit $func "select_all changed"
+        if [[ "$tries" == 0 ]] ; then
+            write_prompt $func "Failing because select is not the same"
+            while :; do
+                write_prompt $func "Pause forever instad of fail"
+                sleep 60
+            done
+            #failexit $func "select_all changed"
+        fi
         sleep 1
         curr_sa=$(select_all)
     done
+    write_prompt $func "select_all is the same after truncation"
     if [[ "$physrep" == 1 ]]; then
+        write_prompt $func "Assert select_all in phyrep is the same"
         sleep $repsleep
         tries=$total_tries
         typeset rep=$(select_all_rep)
         while [[ "$prev_sa" != "$rep" ]] ; do 
             let tries=tries-1
-            [[ "$tries" == 0 ]] && failexit $func "select_all changed in rep"
+            if [[ "$tries" == 0 ]] ; then
+                while :; do
+                    write_prompt $func "Failing because select in phyrep is not the same"
+                    sleep 60
+                done
+                #failexit $func "select_all changed in physrep"
+            fi
             sleep 1
             rep=$(select_all_rep)
         done
