@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
 
-#export debug=1
+export debug=1
 [[ "$debug" == "1" ]] && set -x
 
 . ${TESTSROOTDIR}/tools/write_prompt.sh
@@ -14,7 +14,7 @@ export truncaters=20
 
 function failexit
 {
-    touch $sotpfile
+    touch $stopfile
     echo "Failed $1"
     exit -1
 }
@@ -67,7 +67,7 @@ function verify_up
 
 function run_test
 {
-    typeset mastime=600
+    typeset maxtime=600
     typeset now=$(date +%s)
     typeset endtime=$(( now + maxtime ))
 
@@ -86,6 +86,7 @@ function run_test
             node=$(localhost)
             verify_up $node
         fi
+        sleep 1
     done
 
     [[ -f "$stopfile" ]] && failexit "testcase failed"
@@ -93,6 +94,7 @@ function run_test
     wait
 }
 
+rm $stopfile >/dev/null 2>&1
 setup
 run_test
 echo "Success!"
