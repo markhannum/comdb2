@@ -4303,6 +4303,9 @@ deadlock_again:
                         LOGMSG_DEBUG,
                         "dbp->open %s type=%d dbp=%p txn=%p rc %d flags=0x%X\n",
                         tmpname, dbp->type, dbp, tid, rc, dbp->flags);
+                    if (rc != 0 && rc != DB_LOCK_DEADLOCK) {
+                        abort();
+                    }
                 } while ((tid == NULL) && iter++ < 100 &&
                          rc == DB_LOCK_DEADLOCK);
 
