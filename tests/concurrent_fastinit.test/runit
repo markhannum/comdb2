@@ -77,7 +77,7 @@ function run_test
         let i=i+1
     done
 
-    while [[ ! -f $stopfile && "$(date +%x)" -lt $endtime ]]; do
+    while [[ ! -f $stopfile && "$(date +%s)" -lt $endtime ]]; do
         if [[ -n "$CLUSTER" ]]; then
             for node in $CLUSTER ; do
                 verify_up $node
