@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+#export debug=1
+[[ "$debug" == "1" ]] && set -x
+
+. ${TESTSROOTDIR}/tools/write_prompt.sh
+. ${TESTSROOTDIR}/tools/ddl.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export stopfile=./stopfile.txt
+export tablecount=20
+export truncaters=20
+
+function failexit
+{
+    touch $sotpfile
+    echo "Failed $1"
+    exit -1
+}
+
+function setup
+{
+    i=0
+    while [[ $i -lt $tablecount ]]; do
+        drop_table t${i}
+        let i=i+1
+    done
+
+    i=0
+    while [[ $i -lt $tablecount ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table if not exists t${i}(a int)"
+        let i=i+1
+    done
+}
+
+function randomtable
+{
+    typeset table=$(( RANDOM % tablecount ))
+    echo "t$table"
+}
+
+function truncate_thread
+{
+    while [[ ! -f $stopfile ]]; do
+        table=$(randomtable)
+        $CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "truncate $table"
+    done
+}
+
+function verify_up
+{
+    [[ $debug == "1" ]] && set -x
+    typeset func="verify_up"
+    write_prompt $func "Running $func"
+    typeset node=$1
+    typeset count=0
+    typeset r=1
+    while [[ "$r" -ne "0" && "$count" -lt 2000 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
+        r=$?
+        [[ $r != 0 ]] && sleep 1
+        let count=count+1
+    done
+    [[ $r != 0 ]] && failexit "node $node did not recover in time"
+}
+
+function run_test
+{
+    typeset mastime=600
+    typeset now=$(date +%s)
+    typeset endtime=$(( now + maxtime ))
+
+    i=0
+    while [[ "$i" -lt "$truncaters" ]]; do
+        truncate_thread &
+        let i=i+1
+    done
+
+    while [[ ! -f $stopfile && "$(date +%x)" -lt $endtime ]]; do
+        if [[ -n "$CLUSTER" ]]; then
+            for node in $CLUSTER ; do
+                verify_up $node
+            done
+        else
+            node=$(localhost)
+            verify_up $node
+        fi
+    done
+
+    [[ -f "$stopfile" ]] && failexit "testcase failed"
+    touch "$stopfile"
+    wait
+}
+
+setup
+run_test
+echo "Success!"
