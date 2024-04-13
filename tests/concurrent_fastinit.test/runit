@@ -44,7 +44,6 @@ function truncate_thread
 {
     while [[ ! -f $stopfile ]]; do
         table=$(randomtable)
-        #table=t1
         $CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "truncate $table"
     done
 }
@@ -57,7 +56,7 @@ function verify_up
     typeset node=$1
     typeset count=0
     typeset r=1
-    while [[ "$r" -ne "0" && "$count" -lt 2000 ]]; do
+    while [[ "$r" -ne "0" && "$count" -lt 5 ]]; do
         $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1" >/dev/null 2>&1
         r=$?
         [[ $r != 0 ]] && sleep 1
@@ -84,7 +83,7 @@ function run_test
                 verify_up $node
             done
         else
-            node=$(localhost)
+            node=$(hostname)
             verify_up $node
         fi
         sleep 1
