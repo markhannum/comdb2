@@ -1305,7 +1305,7 @@ int bdb_cput_pack(bdb_state_type *bdb_state, int is_blob, DBC *dbcp, DBT *key,
 }
 
 void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
-                               int compression, int persistseq)
+                               int compression, int persistseq, int stable)
 {
     print(bdb_state,
           "BDB queue options set: ODH %d compression %d "
@@ -1314,6 +1314,10 @@ void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
     bdb_state->ondisk_header = odh;
     bdb_state->compress = compression;
     bdb_state->persistent_seq = persistseq;
+    bdb_state->stable_queue = stable;
+    if (bdb_state->bdbtype == BDBTYPE_QUEUEDB && stable) {
+        bdb_trigger_set_stable(bdb_state);
+    }
 }
 
 void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,

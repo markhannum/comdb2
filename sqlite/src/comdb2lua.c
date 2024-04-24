@@ -131,7 +131,7 @@ Cdb2TrigTables *comdb2AddTriggerTable(Parse *parse, Cdb2TrigTables *tables, SrcL
     return tmp;
 }
 
-void comdb2CreateTrigger(Parse *parse, int consumer, int seq, Token *proc, Cdb2TrigTables *tbl)
+void comdb2CreateTrigger(Parse *parse, int consumer, int seq, int sync, Token *proc, Cdb2TrigTables *tbl)
 {
     if (comdb2IsPrepareOnly(parse))
         return;
@@ -226,6 +226,7 @@ void comdb2CreateTrigger(Parse *parse, int consumer, int seq, Token *proc, Cdb2T
     struct schema_change_type *sc = new_schemachange_type();
     sc->kind = SC_ADD_TRIGGER;
     sc->persistent_seq = seq;
+    sc->stable_queue = sync;
     strcpy(sc->tablename, qname);
     struct dest *d = malloc(sizeof(struct dest));
     d->dest = strdup(method);

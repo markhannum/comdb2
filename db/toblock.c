@@ -2344,6 +2344,8 @@ static int toblock_outer(struct ireq *iq, block_state_t *blkstate)
 
         if (gotlk)
             Pthread_rwlock_unlock(&gbl_block_qconsume_lock);
+
+        bdb_trigger_reset_master();
     }
 
     if (!gaveaway)

@@ -2020,6 +2020,8 @@ int bdb_tran_commit_with_seqnum_int(bdb_state_type *bdb_state, tran_type *tran,
             seqnum->generation = generation;
         }
 
+        bdb_trigger_commit_master(lsn.file, lsn.offset, generation);
+
         if (out_txnsize && gbl_rowlocks) {
             *out_txnsize = tran->logbytes;
         }

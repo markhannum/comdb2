@@ -59,5 +59,10 @@ int bdb_trigger_close(bdb_state_type *);
 int bdb_trigger_ispaused(bdb_state_type *);
 int bdb_trigger_pause(bdb_state_type *);
 int bdb_trigger_unpause(bdb_state_type *);
+int bdb_trigger_set_stable(bdb_state_type *);
+int bdb_trigger_clear_stable(bdb_state_type *);
+int bdb_trigger_register_queue_callback(bdb_state_type *);
+int bdb_trigger_commit_master(int file, int offset, uint32_t commit_gen);
+int bdb_trigger_reset_master(void);
 
 #endif

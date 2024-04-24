@@ -165,6 +165,7 @@ struct schema_change_type {
     int compress;       /* new compression algorithm or -1 for no change */
     int compress_blobs; /* new blob com algorithm or -1 for no change */
     int persistent_seq; /* init queue with persistent sequence */
+    int stable_queue;   /* init queue with replicated reads */
     int ip_updates;     /* inplace updates or -1 for no change */
     int instant_sc;     /* 1 is enable, 0 disable, or -1 for no change */
     int preempted;

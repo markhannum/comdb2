@@ -164,6 +164,9 @@ __db_ditem(dbc, pagep, indx, nbytes)
 	return (0);
 }
 
+extern __thread DB_LSN td_commit_lsn;
+extern __thread uint32_t td_commit_gen;
+
 /*
  * __db_pitem_opcode --
  *  Put an item on a page.
@@ -192,8 +195,19 @@ __db_pitem_opcode(dbc, pagep, indx, nbytes, hdr, data, opcode)
 
 	/* If there is an active Lua trigger/consumer, wake it up. */
 	struct __db_trigger_subscription *t = dbp->trigger_subscription;
-	if (t && t->active && (indx & 1)) {
-		Pthread_cond_signal(&t->cond);
+	if (t && t->active && TYPE(pagep) == P_LBTREE) {
+		if (indx & 1) {
+			Pthread_cond_signal(&t->cond);
+		} else if (t->flags & STABLE_TRIGGER && data != NULL && td_commit_lsn.file > 0) {
+			assert(data->size == 12);
+			uint64_t genid;
+            /*
+			uint8_t *c = ((uint8_t *)data->data);
+			memcpy(&genid, &c[4], sizeof(uint64_t));
+            */
+			memcpy(&genid, &((uint8_t *)data->data)[4], sizeof(uint64_t));
+			__db_trigger_enqueued_data(td_commit_lsn, td_commit_gen, genid);
+		}
 	}
 
 	/*

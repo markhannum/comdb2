@@ -102,6 +102,9 @@ static int __dbenv_trigger_pause __P((DB_ENV *, const char *));
 static int __dbenv_trigger_unpause __P((DB_ENV *, const char *));
 static int __dbenv_trigger_pause_all __P((DB_ENV *));
 static int __dbenv_trigger_unpause_all __P((DB_ENV *));
+static int __dbenv_trigger_set_stable __P((DB_ENV *, const char *));
+static int __dbenv_trigger_clear_stable __P((DB_ENV *, const char *));
+static int __dbenv_trigger_register_enqueue_callback __P((DB_ENV *, trigger_enqueue_callback_func));
 int __dbenv_apply_log __P((DB_ENV *, unsigned int, unsigned int, int64_t,
             void*, int));
 size_t __dbenv_get_log_header_size __P((DB_ENV*)); 
@@ -353,6 +356,9 @@ __dbenv_init(dbenv)
 	dbenv->trigger_unpause = __dbenv_trigger_unpause;
 	dbenv->trigger_pause_all = __dbenv_trigger_pause_all;
 	dbenv->trigger_unpause_all = __dbenv_trigger_unpause_all;
+	dbenv->trigger_set_stable = __dbenv_trigger_set_stable;
+	dbenv->trigger_clear_stable = __dbenv_trigger_clear_stable;
+    dbenv->trigger_register_enqueue_callback = __dbenv_trigger_register_enqueue_callback;
 
 	Pthread_mutex_init(&dbenv->utxnid_lock, NULL);
 	dbenv->next_utxnid = 0;
@@ -1421,13 +1427,40 @@ __dbenv_trigger_unpause_all(dbenv)
 }
 
 static int
+__dbenv_trigger_register_enqueue_callback(dbenv, cb)
+	DB_ENV *dbenv;
+	trigger_enqueue_callback_func cb;
+{
+	__db_trigger_register_enqueue_callback(cb);
+	return 0;
+}
+
+static int
+__dbenv_trigger_clear_stable(dbenv, name)
+	DB_ENV *dbenv;
+	const char *name;
+{
+	__db_trigger_clear_stable(name);
+	return 0;
+}
+
+static int
+__dbenv_trigger_set_stable(dbenv, name)
+	DB_ENV *dbenv;
+	const char *name;
+{
+	__db_trigger_set_stable(name);
+	return 0;
+}
+
+static int
 __dbenv_trigger_subscribe(dbenv, fname, cond, lock, status, hndl)
 	DB_ENV *dbenv;
 	const char *fname;
 	pthread_cond_t **cond;
 	pthread_mutex_t **lock;
 	const uint8_t **status;
-    struct __db_trigger_subscription **hndl;
+	struct __db_trigger_subscription **hndl;
 {
 	int rc = 1;
 	struct __db_trigger_subscription *t;

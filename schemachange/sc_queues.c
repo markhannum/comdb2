@@ -202,6 +202,7 @@ int perform_trigger_update_replicant(tran_type *tran, const char *queue_name, sc
     int ndests;
     int compr;
     int persist;
+    int stable;
     char **dests;
     int bdberr;
 
@@ -341,15 +342,16 @@ int perform_trigger_update_replicant(tran_type *tran, const char *queue_name, sc
         goto done;
     }
 
-    compr = persist = 0;
+    stable = compr = persist = 0;
     if (type != llmeta_queue_drop) {
+        get_db_queue_stable_tran(db, &stable, tran);
         if (get_db_queue_odh_tran(db, &db->odh, tran) != 0 || db->odh == 0) {
             db->odh = 0;
         } else {
             get_db_queue_compress_tran(db, &compr, tran);
             get_db_queue_persistent_seq_tran(db, &persist, tran);
         }
-        bdb_set_queue_odh_options(db->handle, db->odh, compr, persist);
+        bdb_set_queue_odh_options(db->handle, db->odh, compr, persist, stable);
     }
 
 done:
@@ -366,6 +368,8 @@ static inline void set_empty_queue_options(struct schema_change_type *s)
         s->compress = gbl_init_with_queue_compr;
     if (s->persistent_seq == -1)
         s->persistent_seq = gbl_init_with_queue_persistent_seq;
+    if (s->stable_queue == -1)
+        s->stable_queue = gbl_init_with_queue_stable;
     if (s->compress_blobs == -1)
         s->compress_blobs = 0;
     if (s->ip_updates == -1)
@@ -557,7 +561,7 @@ static int perform_trigger_update_int(struct schema_change_type *sc)
         }
 
         db->odh = sc->headers;
-        bdb_set_queue_odh_options(db->handle, sc->headers, sc->compress, sc->persistent_seq);
+        bdb_set_queue_odh_options(db->handle, sc->headers, sc->compress, sc->persistent_seq, sc->stable_queue);
 
         /* create a procedure (needs to go away, badly) */
         rc = javasp_do_procedure_op(JAVASP_OP_LOAD, sc->tablename, NULL, config);

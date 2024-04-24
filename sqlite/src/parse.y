@@ -321,7 +321,7 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
   EACH END EXCLUSIVE EXPLAIN FAIL FOR
   IGNORE IMMEDIATE INITIALLY INSTEAD LIKE_KW MATCH NO PLAN
   QUERY KEY OF OFFSET PRAGMA RAISE RECURSIVE RELEASE REPLACE RESTRICT ROW ROWS
-  ROLLBACK SAVEPOINT SEQUENCE TEMP TRIGGER VACUUM VIEW VIRTUAL WITH WITHOUT
+  ROLLBACK SAVEPOINT SEQUENCE SYNC TEMP TRIGGER VACUUM VIEW VIRTUAL WITH WITHOUT
 %ifdef SQLITE_OMIT_COMPOUND_SELECT
   EXCEPT INTERSECT UNION
 %endif SQLITE_OMIT_COMPOUND_SELECT
@@ -2557,8 +2557,8 @@ cmd ::= dryrun CREATE LUA AGGREGATE FUNCTION nm(Q). {
 	comdb2CreateAggFunc(pParse, &Q);
 }
 
-cmd ::= dryrun CREATE trigger(T) nm(Q) withsequence(S) ON table_trigger_event(E). {
-  comdb2CreateTrigger(pParse,T,S,&Q,E);
+cmd ::= dryrun CREATE trigger(T) nm(Q) withsequence(S) withsync(U) ON table_trigger_event(E). {
+  comdb2CreateTrigger(pParse,T,S,U,&Q,E);
 }
 
 %type trigger {int}
@@ -2578,6 +2578,10 @@ table_trigger_event(A) ::= LP TABLE fullname(T) FOR trigger_events(B) RP. {
 withsequence(A) ::= .                   { A = -1; }
 withsequence(A) ::= WITHOUT SEQUENCE.   { A = 0; }
 withsequence(A) ::= WITH SEQUENCE.      { A = 1; }
+
+%type withsync {int}
+withsync(A) ::= .                       { A = -1; }
+withsync(A) ::= SYNC.                   { A = 1; }
 
 %type table_trigger_event {Cdb2TrigTables*}
 %destructor table_trigger_event {sqlite3DbFree(pParse->db, $$);}

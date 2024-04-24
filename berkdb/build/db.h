@@ -57,6 +57,7 @@
 #include <stdio.h>
 
 #include "tunables.h"
+#include "build/db_lsn.h"
 #include "dbinc/trigger_subscription.h"
 #include <dbinc/maxstackframes.h>
 
@@ -137,7 +138,6 @@ struct __db_lockreq;	typedef struct __db_lockreq DB_LOCKREQ;
 struct __db_log_cursor_stat; typedef struct __db_log_cursor_stat DB_LOGC_STAT;
 struct __db_log_cursor;	typedef struct __db_log_cursor DB_LOGC;
 struct __db_log_stat;	typedef struct __db_log_stat DB_LOG_STAT;
-struct __db_lsn;	typedef struct __db_lsn DB_LSN;
 struct __db_ltran; typedef struct __db_ltran DB_LTRAN;
 struct __db_mpool;	typedef struct __db_mpool DB_MPOOL;
 struct __db_mpool_fstat;typedef struct __db_mpool_fstat DB_MPOOL_FSTAT;
@@ -616,10 +616,6 @@ struct __db_lockreq {
  * to a new log file before the maximum length imposed by an unsigned 4-byte
  * offset is reached.
  */
-struct __db_lsn {
-	u_int32_t	file;		/* File ID. */
-	u_int32_t	offset;		/* File offset. */
-};
 
 struct __db_ltran {
 	u_int64_t   tranid;
@@ -2826,6 +2822,9 @@ struct __db_env {
 	int(*trigger_unpause) __P((DB_ENV *, const char *));
 	int(*trigger_pause_all) __P((DB_ENV *));
 	int(*trigger_unpause_all) __P((DB_ENV *));
+	int(*trigger_set_stable) __P((DB_ENV *, const char *));
+	int(*trigger_clear_stable) __P((DB_ENV *, const char *));
+	int(*trigger_register_enqueue_callback) __P((DB_ENV *, trigger_enqueue_callback_func));
 
 	int (*pgin[DB_TYPE_MAX]) __P((DB_ENV *, db_pgno_t, void *, DBT *));
 	int (*pgout[DB_TYPE_MAX]) __P((DB_ENV *, db_pgno_t, void *, DBT *));
@@ -3170,6 +3169,7 @@ struct __recovery_queue {
 
 struct __recovery_processor {
 	DB_LSN commit_lsn;
+	u_int32_t commit_gen;
 	DB_LSN prev_commit_lsn;
 	DB_ENV *dbenv;
 	pthread_mutex_t lk;

@@ -305,13 +305,13 @@ REGISTER_TUNABLE("dont_init_with_ondisk_header",
                  "Disables 'init_with_ondisk_header'", TUNABLE_BOOLEAN,
                  &gbl_init_with_odh, INVERSE_VALUE | READONLY | NOARG, NULL,
                  NULL, NULL, NULL);
-REGISTER_TUNABLE("dont_init_queue_with_persistent_sequence",
-                 "Disables 'init_queue_with_persistent_sequence'",
+REGISTER_TUNABLE("dont_init_with_queue_persistent_sequence",
+                 "Disables 'init_with_queue_persistent_sequence'",
                  TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("dont_init_with_queue_persistent_sequence",
-                 "Disables 'dont_init_with_queue_ondisk_header'",
-                 TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
+REGISTER_TUNABLE("dont_init_with_queue_stable",
+                 "Disables 'init_with_queue_stable'",
+                 TUNABLE_BOOLEAN, &gbl_init_with_queue_stable,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("dont_optimize_repdb_truncate",
                  "Disable 'optimize_repdb_truncate'", TUNABLE_BOOLEAN,
@@ -569,6 +569,10 @@ REGISTER_TUNABLE("init_with_queue_persistent_sequence",
                  "Initialize queues with persistent sequence numbers. "
                  "(Default: on)",
                  TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
+                 READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("init_with_queue_stable",
+                 "Initialize queues to return only replicated records.  (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_init_with_queue_stable,
                  READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("init_with_rowlocks",
                  "Enables row-locks for the database. (Default: 0)",
@@ -1438,6 +1442,8 @@ REGISTER_TUNABLE("rep_badgen_trace", "Trace on rep mismatched generations.",
 REGISTER_TUNABLE("dump_zero_coherency_ts", "Enable zero-coherency-ts trace.",
                  TUNABLE_BOOLEAN, &gbl_dump_zero_coherency_timestamp,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("cohlease_rep", "Enable extended coherency lease.  (Default: on)", 
+                 TUNABLE_BOOLEAN, &gbl_cohlease_rep, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("allow_incoherent_sql", "Enable sql against incoherent nodes.",
                  TUNABLE_BOOLEAN, &gbl_allow_incoherent_sql,
                  EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);

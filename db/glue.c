@@ -616,11 +616,12 @@ static const char *sync_to_str(int sync)
 static int trans_wait_for_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
                                      struct ireq *iq, char *source_node,
                                      int timeoutms, int adaptive,
-                                     db_seqnum_type *ss)
+                                     db_seqnum_type *in_ss)
 {
     int rc = 0;
     int sync;
     int start_ms, end_ms;
+    seqnum_type *ss = (seqnum_type *)in_ss;
 
     if (iq->sc_pending) {
         sync = REP_SYNC_FULL;
@@ -646,11 +647,11 @@ static int trans_wait_for_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
         struct interned_string *source_node_interned = intern_ptr(source_node);
 
         if (timeoutms == -1)
-            rc = bdb_wait_for_seqnum_from_node(bdb_handle, (seqnum_type *)ss,
+            rc = bdb_wait_for_seqnum_from_node(bdb_handle, ss,
                                                source_node_interned);
         else
             rc = bdb_wait_for_seqnum_from_node_timeout(
-                bdb_handle, (seqnum_type *)ss, source_node_interned, timeoutms);
+                bdb_handle, ss, source_node_interned, timeoutms);
 
         iq->gluewhere = "bdb_wait_for_seqnum_from_node done";
         if (rc != 0) {
@@ -663,12 +664,12 @@ static int trans_wait_for_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
         iq->gluewhere = "bdb_wait_for_seqnum_from_all";
         if (adaptive)
             rc = bdb_wait_for_seqnum_from_all_adaptive_newcoh(
-                bdb_handle, (seqnum_type *)ss, iq->txnsize, &iq->timeoutms);
+                bdb_handle, ss, iq->txnsize, &iq->timeoutms);
         else if (timeoutms == -1)
-            rc = bdb_wait_for_seqnum_from_all(bdb_handle, (seqnum_type *)ss);
+            rc = bdb_wait_for_seqnum_from_all(bdb_handle, ss);
         else
             rc = bdb_wait_for_seqnum_from_all_timeout(
-                bdb_handle, (seqnum_type *)ss, timeoutms);
+                bdb_handle, ss, timeoutms);
         iq->gluewhere = "bdb_wait_for_seqnum_from_all done";
         if (rc != 0) {
             logmsg(LOGMSG_ERROR, "*WARNING* bdb_wait_seqnum:error syncing all nodes rc %d\n",
@@ -687,7 +688,7 @@ static int trans_wait_for_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
 
     case REP_SYNC_ROOM:
         iq->gluewhere = "bdb_wait_for_seqnum_from_room";
-        rc = bdb_wait_for_seqnum_from_room(bdb_handle, (seqnum_type *)ss);
+        rc = bdb_wait_for_seqnum_from_room(bdb_handle, ss);
         iq->gluewhere = "bdb_wait_for_seqnum_from_room done";
         if (rc != 0) {
             logmsg(LOGMSG_ERROR, "*WARNING* bdb_wait_seqnum:error syncing all nodes rc %d\n",
@@ -696,19 +697,21 @@ static int trans_wait_for_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
         break;
 
     case REP_SYNC_N:
-        rc = bdb_wait_for_seqnum_from_n(bdb_handle, (seqnum_type *)ss,
+        rc = bdb_wait_for_seqnum_from_n(bdb_handle, ss,
                                         thedb->wait_for_N_nodes);
         break;
     }
 
-    if (bdb_attr_get(dbenv->bdb_attr, BDB_ATTR_COHERENCY_LEASE)) {
-        uint64_t now = gettimeofday_ms(), next_commit = next_commit_timestamp();
-        if (next_commit > now)
-            poll(0, 0, next_commit - now);
-    }
+    uint64_t now = gettimeofday_ms(), next_commit = next_commit_timestamp();
+    if (next_commit > now)
+        poll(0, 0, next_commit - now);
 
     end_ms = comdb2_time_epochms();
     iq->reptimems += (end_ms - start_ms);
+
+    /* Commit has replicated completely.  Replicants either have it, or have been marked 
+     * incoherent.  Update the replicated-commit-lsn. */
+    bdb_update_replicated_lsn(ss);
 
     return rc;
 }
@@ -3830,7 +3833,7 @@ static int init_odh_lrl(struct dbtable *d, int *compr, int *compr_blobs,
 }
 
 static int init_queue_odh_lrl(struct dbtable *d, int *compr,
-                              int *persistent_seq)
+                              int *persistent_seq, int *stable)
 {
     if (gbl_init_with_queue_odh == 0) {
         gbl_init_with_queue_compr = 0;
@@ -3847,15 +3850,20 @@ static int init_queue_odh_lrl(struct dbtable *d, int *compr,
         put_db_queue_sequence(d, NULL, 0) != 0) {
         return -1;
     }
+    if (put_db_queue_stable(d, NULL, gbl_init_with_queue_stable) != 0)
+        return -1;
     d->odh = gbl_init_with_queue_odh;
     *compr = gbl_init_with_queue_compr;
     *persistent_seq = gbl_init_with_queue_persistent_seq;
+    *stable = gbl_init_with_queue_stable;
     return 0;
 }
 
 static int init_queue_odh_llmeta(struct dbtable *d, int *compr, int *persist,
-                                 tran_type *tran)
+                                 int *stable, tran_type *tran)
 {
+    get_db_queue_stable_tran(d, stable, tran);
+
     if (get_db_queue_odh_tran(d, &d->odh, tran) != 0 || d->odh == 0) {
         d->odh = 0;
         *compr = 0;
@@ -3972,6 +3980,7 @@ int backend_open_tran(struct dbenv *dbenv, tran_type *tran, uint32_t flags)
             return -1;
         }
     }
+
     /* open queues */
     for (ii = 0; ii < dbenv->num_qdbs; ii++) {
         int pagesize;
@@ -4047,19 +4056,20 @@ int backend_open_tran(struct dbenv *dbenv, tran_type *tran, uint32_t flags)
         struct dbtable *queue = dbenv->qdbs[ii];
         int compress;
         int persist;
+        int stable;
         if (gbl_create_mode) {
-            if (init_queue_odh_lrl(queue, &compress, &persist) != 0) {
+            if (init_queue_odh_lrl(queue, &compress, &persist, &stable) != 0) {
                 logmsg(LOGMSG_ERROR, "save queue odh to llmeta failed\n");
                 return -1;
             }
         } else {
-            if (init_queue_odh_llmeta(queue, &compress, &persist, tran) != 0) {
+            if (init_queue_odh_llmeta(queue, &compress, &persist, &stable, tran) != 0) {
                 logmsg(LOGMSG_ERROR, "fetch queue odh from llmeta failed\n");
                 return -1;
             }
         }
 
-        set_bdb_queue_option_flags(queue, queue->odh, compress, persist);
+        set_bdb_queue_option_flags(queue, queue->odh, compress, persist, stable);
     }
 
     for (ii = 0; ii < dbenv->num_dbs; ii++) {
@@ -4576,6 +4586,9 @@ get_put_db(queue_odh, META_QUEUE_ODH)
 
 // get_db_queue_compress, get_db_queue_compress_tran, put_db_queue_compress
 get_put_db(queue_compress, META_QUEUE_COMPRESS)
+
+// get_db_queue_stable, get_db_queue_stable_tran, put_db_queue_stable
+get_put_db(queue_stable, META_QUEUE_STABLE)
 
 // get_db_bthash, get_db_bthash_tran, put_db_bthash
 get_put_db(bthash, META_BTHASH)

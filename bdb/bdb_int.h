@@ -991,6 +991,7 @@ struct bdb_state_tag {
     signed char compress;      /* boolean: compress data? */
     signed char compress_blobs; /*boolean: compress blobs? */
     signed char persistent_seq; /* boolean: persistent seq for queue? */
+    signed char stable_queue;   /* boolean: only return replicated data */
 
     signed char got_gblcontext;
     signed char need_to_upgrade;
@@ -1105,6 +1106,24 @@ const uint8_t *colease_type_get(colease_t *p_colease_type, const uint8_t *p_buf,
 
 uint8_t *colease_type_put(const colease_t *p_colease_type, uint8_t *p_buf,
                           uint8_t *p_buf_end);
+
+typedef struct colease_rep {
+    u_int64_t issue_time;
+    u_int32_t lease_ms;
+    int32_t replicated_file;
+    int32_t replicated_offset;
+    u_int32_t replicated_gen;
+} colease_rep_t;
+
+enum { COLEASE_REP_TYPE_LEN = 8 + 4 + 4 + 4 + 4 };
+
+BB_COMPILE_TIME_ASSERT(colease_rep_type_len, sizeof(colease_rep_t) == COLEASE_REP_TYPE_LEN);
+
+const uint8_t *colease_rep_type_get(colease_rep_t *p_colease_rep_type, const uint8_t *p_buf,
+                                    const uint8_t *p_buf_end);
+
+uint8_t *colease_rep_type_put(const colease_rep_t *p_colease_rep_type, uint8_t *p_buf,
+                              uint8_t *p_buf_end);
 
 /* Each data item fragment has this header. */
 struct bdb_queue_header {

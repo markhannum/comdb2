@@ -35,6 +35,7 @@
 #include "lockmacros.h"
 #include <sys/poll.h>
 #include "debug_switches.h"
+#include <gettimeofday_ms.h>
 
 extern int gbl_maxretries;
 extern int gbl_disable_access_controls;
@@ -2982,7 +2983,7 @@ retry:
         goto fail;
     }
 
-    seqnum_type ss;
+    seqnum_type ss = {0};
     rc = bdb_tran_commit_with_seqnum_size(llmeta_bdb_state, tran, &ss, NULL,
                                           &bdberr);
 
@@ -2990,8 +2991,13 @@ retry:
         int timeoutms;
         rc = bdb_wait_for_seqnum_from_all_adaptive_newcoh(
                 llmeta_bdb_state->parent, &ss, 0, &timeoutms);
+
+        uint64_t now = gettimeofday_ms(), next_commit = next_commit_timestamp();
+        if (next_commit > now)
+            poll(0, 0, next_commit - now);
+
+        bdb_update_replicated_lsn(&ss);
     }
-    // rc = bdb_tran_commit(llmeta_bdb_state, tran, &bdberr);
     if (rc && bdberr != BDBERR_NOERROR) {
         logmsg(LOGMSG_ERROR, "%s bdb_tran_commit rc: %d bdberr: %d\n", __func__, rc,
                 bdberr);

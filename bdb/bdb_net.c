@@ -612,9 +612,10 @@ static void udp_reader(int fd, short what, void *arg)
     }
 
     case USER_TYPE_COHERENCY_LEASE:
+    case USER_TYPE_COHLEASE_REP:
         data = ack_info_data(info);
         receive_coherency_lease(NULL, bdb_state, from, from_interned,
-                                USER_TYPE_COHERENCY_LEASE, data, info->len, 0);
+                                type, data, info->len, 0);
         break;
 
     case USER_TYPE_PAGE_COMPACT:
@@ -768,18 +769,30 @@ int send_myseqnum_to_master_udp(bdb_state_type *bdb_state)
 
 int gbl_verbose_send_coherency_lease;
 
+/* New coherency leases send most recently replicated LSN */
+int gbl_cohlease_rep = 1;
+
 void send_coherency_leases(bdb_state_type *bdb_state, int lease_time,
                            int *inc_wait)
 {
     int count, comcount, i, do_send, use_udp, master_is_coherent;
-    uint8_t *p_buf, *p_buf_end, buf[COLEASE_TYPE_LEN];
+    uint8_t *p_buf, *p_buf_end, buf[COLEASE_REP_TYPE_LEN];
     struct interned_string *hostlist[REPMAX];
     struct interned_string *comlist[REPMAX];
     colease_t colease;
+    colease_rep_t colease_rep;
     static int last_count = 0;
+    int cl_rep = gbl_cohlease_rep ? 1 : 0;
 
-    colease.issue_time = gettimeofday_ms();
-    colease.lease_ms = lease_time;
+    if (cl_rep) {
+        colease_rep.issue_time = gettimeofday_ms();
+        colease_rep.lease_ms = lease_time;
+        bdb_retrieve_replicated_lsn(&colease_rep.replicated_file, &colease_rep.replicated_offset,
+                                    &colease_rep.replicated_gen);
+    } else {
+        colease.issue_time = gettimeofday_ms();
+        colease.lease_ms = lease_time;
+    }
 
     if (bdb_state->attr->leasebase_trace) {
         static time_t lastpr = 0;
@@ -794,11 +807,19 @@ void send_coherency_leases(bdb_state_type *bdb_state, int lease_time,
     use_udp = bdb_state->attr->coherency_lease_udp;
 
     if (!use_udp) {
-        p_buf = buf;
-        p_buf_end = buf + COLEASE_TYPE_LEN;
+        if (cl_rep) {
+            p_buf = buf;
+            p_buf_end = buf + COLEASE_REP_TYPE_LEN;
 
-        if (!(colease_type_put(&colease, p_buf, p_buf_end)))
-            abort();
+            if (!(colease_rep_type_put(&colease_rep, p_buf, p_buf_end)))
+                abort();
+        } else {
+            p_buf = buf;
+            p_buf_end = buf + COLEASE_TYPE_LEN;
+
+            if (!(colease_type_put(&colease, p_buf, p_buf_end)))
+                abort();
+        }
     }
 
     count = net_get_all_nodes_connected_interned(bdb_state->repinfo->netinfo, hostlist);
@@ -855,25 +876,29 @@ void send_coherency_leases(bdb_state_type *bdb_state, int lease_time,
         Pthread_mutex_unlock(&(bdb_state->coherent_state_lock));
 
         if (do_send) {
+            int len = cl_rep ? COLEASE_REP_TYPE_LEN : COLEASE_TYPE_LEN;
+            int type = cl_rep ? USER_TYPE_COHLEASE_REP : USER_TYPE_COHERENCY_LEASE;
             if (use_udp) {
                 ack_info *info;
-                new_ack_info(info, COLEASE_TYPE_LEN,
-                        bdb_state->repinfo->myhost);
+                new_ack_info(info, len, bdb_state->repinfo->myhost);
                 p_buf = ack_info_data(info);
-                p_buf_end = p_buf + COLEASE_TYPE_LEN;
-                if (!(colease_type_put(&colease, p_buf, p_buf_end)))
-                    abort();
-
+                p_buf_end = p_buf + len;
+                if (cl_rep) {
+                    if (!(colease_rep_type_put(&colease_rep, p_buf, p_buf_end)))
+                        abort();
+                } else {
+                    if (!(colease_type_put(&colease, p_buf, p_buf_end)))
+                        abort();
+                }
                 info->from = 0;
                 info->to = 0;
-                info->type = USER_TYPE_COHERENCY_LEASE;
-                info->len = COLEASE_TYPE_LEN;
+                info->type = type;
+                info->len = len;
 
                 udp_send(bdb_state, info, hostlist[i]->str);
             } else {
                 net_send_message(bdb_state->repinfo->netinfo, hostlist[i]->str,
-                                 USER_TYPE_COHERENCY_LEASE, buf,
-                                 COLEASE_TYPE_LEN, 0, 0);
+                                 type, buf, len, 0, 0);
             }
         } else {
             static time_t lastpr = 0;

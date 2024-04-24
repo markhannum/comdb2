@@ -413,7 +413,8 @@ enum DB_METADATA {
     META_QUEUE_ODH = -14,
     META_QUEUE_COMPRESS = -15,
     META_QUEUE_PERSISTENT_SEQ = -16,
-    META_QUEUE_SEQ = -17
+    META_QUEUE_SEQ = -17,
+    META_QUEUE_STABLE = -18
 };
 
 enum CONSTRAINT_FLAGS {
@@ -1750,6 +1751,7 @@ extern int gbl_init_with_genid48;
 extern int gbl_init_with_odh;
 extern int gbl_init_with_queue_odh;
 extern int gbl_init_with_queue_persistent_seq;
+extern int gbl_init_with_queue_stable;
 extern int gbl_init_with_ipu;
 extern int gbl_init_with_instant_sc;
 extern int gbl_init_with_compr;
@@ -2449,6 +2451,9 @@ int get_db_queue_persistent_seq_tran(struct dbtable *, int *persist,
 int put_db_queue_sequence(struct dbtable *db, tran_type *, long long seq);
 int get_db_queue_sequence(struct dbtable *db, long long *seq);
 int get_db_queue_sequence_tran(struct dbtable *, long long *seq, tran_type *);
+int put_db_queue_stable(struct dbtable *db, tran_type *, int stable);
+int get_db_queue_stable(struct dbtable *db, int *stable);
+int get_db_queue_stable_tran(struct dbtable *db, int *stable, tran_type *);
 int put_db_compress(struct dbtable *db, tran_type *, int compress);
 int get_db_compress(struct dbtable *db, int *compress);
 int get_db_compress_tran(struct dbtable *, int *compress, tran_type *);
@@ -3468,7 +3473,7 @@ int rename_table_sequences(tran_type *tran, struct dbtable *, const char *newnam
 int alter_table_sequences(struct ireq *iq, tran_type *tran, struct dbtable *old, struct dbtable *new);
 
 void set_bdb_queue_option_flags(struct dbtable *, int odh, int compr,
-                                int persist);
+                                int persist, int stable);
 
 extern int gbl_debug_temptables;
 

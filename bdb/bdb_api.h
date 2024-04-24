@@ -968,6 +968,15 @@ int bdb_queue_consume(bdb_state_type *bdb_state, tran_type *tran, int consumer,
 /* work out the best page size to use for the given average item size */
 int bdb_queue_best_pagesize(int avg_item_sz);
 
+/* update the most recent replicated seqnum */
+void bdb_update_replicated_lsn(seqnum_type *seqnum);
+
+/* retrieve the most recent replicated seqnum */
+void bdb_retrieve_replicated_lsn(int *file, int *offset, uint32_t *generation);
+
+/* block until master has completed replicating this lsn */
+int bdb_replicated_lsn_wait(bdb_state_type *bdb_state, int file, int offset, uint32_t generation, int timeoutms);
+
 /* Get info about a previously found item. */
 void bdb_queue_get_found_info(const void *fnd, size_t *dtaoff, size_t *dtalen);
 
@@ -1140,7 +1149,7 @@ void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
                          int blob_compression);
 
 void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
-                               int compression, int persistseq);
+                               int compression, int persistseq, int stable);
 
 void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *compr,
                          int *blob_compr);

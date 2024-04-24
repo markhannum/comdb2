@@ -67,6 +67,18 @@ enum { QUEUEDB_KEY_LEN = 4 + 8 };
 
 int gbl_debug_queuedb = 0;
 
+struct genid_commit_lsn
+{
+    DB_LSN commit_lsn;
+    uint32_t generation;
+    uint64_t genid;
+    LINKC_T (struct genid_commit_lsn)lnk;
+};
+
+LISTC_T(struct genid_commit_lsn) genid_list;
+static pthread_mutex_t genid_list_lk = PTHREAD_MUTEX_INITIALIZER;
+static int track_queues = 0;
+
 static uint8_t *queuedb_key_get(struct queuedb_key *p_queuedb_key,
                                 uint8_t *p_buf, uint8_t *p_buf_end)
 {
@@ -318,6 +330,9 @@ int bdb_queuedb_best_pagesize(int avg_item_sz)
     return calc_pagesize(4096, avg_item_sz);
 }
 
+/* on master we don't have commit-lsn yet- just store the highest genid */
+static __thread uint64_t highest_genid;
+
 /* add to queue */
 int bdb_queuedb_add(bdb_state_type *bdb_state, tran_type *tran, const void *dta,
                     size_t dtalen, int *bdberr, unsigned long long *out_genid)
@@ -403,7 +418,7 @@ int bdb_queuedb_add(bdb_state_type *bdb_state, tran_type *tran, const void *dta,
 
     /* DB_RMW holds a writelock on rightmost btree page */
     if (bdb_state->ondisk_header) {
-        genid = qfnd_odh.genid = get_genid(bdb_state, 0);
+        highest_genid = genid = qfnd_odh.genid = get_genid(bdb_state, 0);
         qfnd_odh.data_len = dtalen;
         qfnd_odh.data_offset = sizeof(struct bdb_queue_found_seq);
         qfnd_odh.trans.tid = tran->tid->txnid;
@@ -1432,6 +1447,65 @@ int bdb_trigger_unpause(bdb_state_type *bdb_state)
 {
     DB_ENV *dbenv = bdb_state->dbenv;
     return dbenv->trigger_unpause(dbenv, bdb_state->name);
+}
+
+int bdb_trigger_set_stable(bdb_state_type *bdb_state)
+{
+    DB_ENV *dbenv = bdb_state->dbenv;
+    bdb_state->stable_queue = 1;
+    return dbenv->trigger_set_stable(dbenv, bdb_state->name);
+}
+
+int bdb_trigger_clear_stable(bdb_state_type *bdb_state)
+{
+    DB_ENV *dbenv = bdb_state->dbenv;
+    bdb_state->stable_queue = 0;
+    return dbenv->trigger_clear_stable(dbenv, bdb_state->name);
+}
+
+static int queue_callback(DB_LSN commit_lsn, uint32_t commit_gen, uint64_t genid)
+{
+    int cmp, cnt = 0;
+    Pthread_mutex_lock(&genid_list_lk);
+    struct genid_commit_lsn *g = LISTC_BOT(&genid_list);
+    while (g && (cmp = log_compare(&commit_lsn, &g->commit_lsn) < 0)) {
+        cnt++;
+        g = g->lnk.prev;
+    }
+    if (g) {
+        if (cmp == 0) {
+            if (memcmp(&g->genid, &genid, sizeof(genid)) > 0)
+                g->genid = genid;
+        }
+    }
+    Pthread_mutex_unlock(&genid_list_lk);
+    logmsg(LOGMSG_USER, "genid %" PRIx64 " enqueued with commit-lsn [%d:%d] generation %u\n", genid, commit_lsn.file, commit_lsn.offset, commit_gen);
+    return 0;
+}
+
+int bdb_trigger_commit_master(int file, int offset, uint32_t commit_gen)
+{
+    DB_LSN commit_lsn = {.file = file, .offset = offset};
+    if (!track_queues || !highest_genid)
+        return 0;
+    int rc = queue_callback(commit_lsn, commit_gen, highest_genid);
+    highest_genid = 0;
+    return rc;
+}
+
+int bdb_trigger_reset_master(void)
+{
+    highest_genid = 0;
+    return 0;
+}
+
+int bdb_trigger_register_queue_callback(bdb_state_type *bdb_state)
+{
+    DB_ENV *dbenv = bdb_state->dbenv;
+    listc_init(&genid_list, offsetof(struct genid_commit_lsn, lnk));
+    track_queues = 1;
+    dbenv->trigger_register_enqueue_callback(dbenv, queue_callback);
+    return 0;
 }
 
 int bdb_queuedb_has_seq(bdb_state_type *bdb_state)

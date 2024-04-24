@@ -118,6 +118,8 @@ static int reset_recovery_processor(struct __recovery_processor *rp);
 
 #endif
 
+__thread DB_LSN td_commit_lsn;
+__thread int32_t td_commit_gen;
 
 extern int bdb_purge_logical_transactions(void *statearg, DB_LSN *trunclsn);
 extern int set_commit_context(unsigned long long context, uint32_t *generation,
@@ -4025,6 +4027,9 @@ worker_thd(struct thdpool *pool, void *work, void *thddata, int op)
 	rp = rq->processor;
 	dbenv = rq->processor->dbenv;
 
+	td_commit_lsn = rp->commit_lsn;
+	td_commit_gen = rp->commit_gen;
+
 	rr = listc_rtl(&rq->records);
 
 	while (rr) {
@@ -4207,6 +4212,8 @@ processor_thd(struct thdpool *pool, void *work, void *thddata, int op)
 	REP *rep;
 
 	rp = (struct __recovery_processor *)work;
+	td_commit_lsn = rp->commit_lsn;
+	td_commit_gen = rp->commit_gen;
 	listc_init(&queues, offsetof(struct __recovery_queue, lnk));
 	dbenv = rp->dbenv;
 	db_rep = dbenv->rep_handle;
@@ -5193,6 +5200,9 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 	}
 #endif
 
+
+	td_commit_lsn = maxlsn;
+	td_commit_gen = *commit_gen;
 
 	/*
 	 * The set of records for a transaction may include dbreg_register
@@ -6188,6 +6198,7 @@ bad_resize:	;
 	rp->utxnid = utxnid;
 	rp->txninfo = txninfo;
 	rp->commit_lsn = ctrllsn;
+	rp->commit_gen = *commit_gen;
 	rp->has_logical_commit = 0;
 	rp->has_schema_lock = 0;
 	if (rp->ltrans) {

@@ -370,6 +370,7 @@ int gbl_init_with_odh = 1;
 int gbl_init_with_queue_odh = 1;
 int gbl_init_with_queue_compr = BDB_COMPRESS_LZ4;
 int gbl_init_with_queue_persistent_seq = 0;
+int gbl_init_with_queue_stable = 0;
 int gbl_init_with_ipu = 1;
 int gbl_init_with_instant_sc = 1;
 int gbl_init_with_compr = BDB_COMPRESS_CRLE;
@@ -4186,6 +4187,7 @@ static int init(int argc, char **argv)
             logmsg(LOGMSG_FATAL, "failed to initialize osql_blkseq hash\n");
             return -1;
         }
+        bdb_trigger_register_queue_callback(thedb->bdb_env);
     }
 
     if (!gbl_exit && !gbl_create_mode && (thedb->nsiblings == 1 || thedb->master == gbl_myhostname)) {

@@ -2743,6 +2743,9 @@ static DB_ENV *dbenv_open(bdb_state_type *bdb_state)
     net_register_handler(bdb_state->repinfo->netinfo, USER_TYPE_ANALYZED_TBL,
                          "analyzed_tbl", berkdb_receive_msg);
 
+    net_register_handler(bdb_state->repinfo->netinfo, USER_TYPE_COHLEASE_REP,
+                         "cohlease_rep", receive_coherency_lease);
+
     net_register_handler(bdb_state->repinfo->netinfo, USER_TYPE_COHERENCY_LEASE,
                          "coherency_lease", receive_coherency_lease);
 

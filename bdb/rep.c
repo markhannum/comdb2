@@ -492,6 +492,69 @@ char *coherent_state_to_str(int state)
     }
 }
 
+static pthread_mutex_t replicated_lsn_lk = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t replicated_lsn_cd = PTHREAD_COND_INITIALIZER;
+static DB_LSN replicated_lsn = {0};
+static uint32_t replicated_gen = 0;
+
+int bdb_replicated_lsn_wait(bdb_state_type *bdb_state, int file, int offset, uint32_t generation, int timeoutms)
+{
+    DB_LSN lsn = {.file = file, .offset = offset };
+    int start = comdb2_time_epochms(), rtn = -1;
+    Pthread_mutex_lock(&replicated_lsn_lk);
+    while ((replicated_gen == generation) && (log_compare(&lsn, &replicated_lsn) < 0) && (timeoutms != 0)) {
+
+        struct timespec waittime;
+        int elapsed = comdb2_time_epochms() - start;
+        if (elapsed > 2000) {
+            logmsg(LOGMSG_INFO, "%s: polled %d ms for [%d:%d] generation %u to replicate\n", __func__,
+                elapsed, lsn.file, lsn.offset, generation);
+        }
+
+        if (timeoutms < 0 || timeoutms >= 1000) {
+            setup_waittime(&waittime, 1000);
+            if (timeoutms >= 1000) {
+                timeoutms -= 1000;
+            }
+        } else {
+            setup_waittime(&waittime, timeoutms);
+            timeoutms = 0;
+        }
+        pthread_cond_timedwait(&replicated_lsn_cd, &replicated_lsn_lk, &waittime);
+    }
+    if (replicated_gen == generation && log_compare(&lsn, &replicated_lsn) >= 0) {
+        rtn = 0;
+    }
+    Pthread_mutex_unlock(&replicated_lsn_lk);
+    return rtn;
+}
+
+void bdb_update_replicated_lsn(seqnum_type *seqnum)
+{
+    int do_broadcast = 0;
+    Pthread_mutex_lock(&replicated_lsn_lk);
+    if (seqnum->generation > replicated_gen) {
+        replicated_lsn = seqnum->lsn;
+        replicated_gen = seqnum->generation;
+        do_broadcast = 1;
+    } else if (log_compare(&seqnum->lsn, &replicated_lsn) >= 0){
+        replicated_lsn = seqnum->lsn;
+        do_broadcast = 1;
+    }
+    if (do_broadcast)
+        Pthread_cond_broadcast(&replicated_lsn_cd);
+    Pthread_mutex_unlock(&replicated_lsn_lk);
+}
+
+void bdb_retrieve_replicated_lsn(int *file, int *offset, uint32_t *generation)
+{
+    Pthread_mutex_lock(&replicated_lsn_lk);
+    *file = replicated_lsn.file;
+    *offset = replicated_lsn.offset;
+    *generation = replicated_gen;
+    Pthread_mutex_unlock(&replicated_lsn_lk);
+}
+
 /* You should have the lock */
 static inline void set_coherent_state(bdb_state_type *bdb_state,
                                       struct interned_string *host, int state,
@@ -3461,6 +3524,8 @@ done_wait:
         }
     }
 
+    bdb_update_replicated_lsn(seqnum);
+
     return outrc;
 }
 
@@ -4293,6 +4358,42 @@ uint8_t *colease_type_put(const colease_t *p_colease_type, uint8_t *p_buf,
     return p_buf;
 }
 
+const uint8_t *colease_rep_type_get(colease_rep_t *p_colease_rep_type, const uint8_t *p_buf,
+                                   const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || COLEASE_REP_TYPE_LEN > p_buf_end - p_buf)
+        return NULL;
+    p_buf = buf_get(&(p_colease_rep_type->issue_time),
+                    sizeof(p_colease_rep_type->issue_time), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_colease_rep_type->lease_ms),
+                    sizeof(p_colease_rep_type->lease_ms), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_colease_rep_type->replicated_file),
+                    sizeof(p_colease_rep_type->replicated_file), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_colease_rep_type->replicated_offset),
+                    sizeof(p_colease_rep_type->replicated_offset), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_colease_rep_type->replicated_gen),
+                    sizeof(p_colease_rep_type->replicated_gen), p_buf, p_buf_end);
+    return p_buf;
+}
+
+uint8_t *colease_rep_type_put(const colease_rep_t *p_colease_rep_type, uint8_t *p_buf,
+                              uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || COLEASE_REP_TYPE_LEN > p_buf_end - p_buf)
+        return NULL;
+    p_buf = buf_put(&(p_colease_rep_type->issue_time),
+                    sizeof(p_colease_rep_type->issue_time), p_buf, p_buf_end);
+    p_buf = buf_put(&(p_colease_rep_type->lease_ms),
+                    sizeof(p_colease_rep_type->lease_ms), p_buf, p_buf_end);
+    p_buf = buf_put(&(p_colease_rep_type->replicated_file),
+                    sizeof(p_colease_rep_type->replicated_file), p_buf, p_buf_end);
+    p_buf = buf_put(&(p_colease_rep_type->replicated_offset),
+                    sizeof(p_colease_rep_type->replicated_offset), p_buf, p_buf_end);
+    p_buf = buf_put(&(p_colease_rep_type->replicated_gen),
+                    sizeof(p_colease_rep_type->replicated_gen), p_buf, p_buf_end);
+    return p_buf;
+}
+
 uint64_t get_coherency_timestamp(void)
 {
     uint64_t x = coherency_timestamp;
@@ -4421,17 +4522,41 @@ void receive_coherency_lease(void *ack_handle, void *usr_ptr, char *from_host,
     uint64_t base_ts;
     char *master_host;
     int receive_trace;
+    int64_t issue_time = 0;
+    int lease_ms = 0;
     bdb_state_type *bdb_state;
     colease_t colease = {0};
+    colease_rep_t colease_rep = {0};
 
-    assert(usertype == USER_TYPE_COHERENCY_LEASE);
+    assert(usertype == USER_TYPE_COHERENCY_LEASE || usertype == USER_TYPE_COHLEASE_REP);
+    int cl_rep = (usertype == USER_TYPE_COHLEASE_REP);
     p_buf = (uint8_t *)dta;
     p_buf_end = (uint8_t *)(dta + dtalen);
 
-    if (!(colease_type_get(&colease, p_buf, p_buf_end))) {
-        logmsg(LOGMSG_ERROR, "%s: corrupt colease packet from %s, len=%d\n",
-                __func__, from_host, dtalen);
-        return;
+    if (cl_rep) {
+        if (!(colease_rep_type_get(&colease_rep, p_buf, p_buf_end))) {
+            logmsg(LOGMSG_ERROR, "%s: corrupt colease packet from %s, len=%d\n",
+                    __func__, from_host, dtalen);
+            return;
+        }
+        issue_time = colease_rep.issue_time;
+        lease_ms = colease_rep.lease_ms;
+        seqnum_type ss = { .lsn.file = colease_rep.replicated_file,
+                           .lsn.offset = colease_rep.replicated_offset,
+                           .generation = colease_rep.replicated_gen };
+
+        logmsg(LOGMSG_USER, "%s issue-time=%ld issuems=%d file=%d offset=%d gen=%d\n", 
+            __func__, issue_time, lease_ms, ss.lsn.file, ss.lsn.offset, ss.generation);
+
+        bdb_update_replicated_lsn(&ss);
+    } else {
+        if (!(colease_type_get(&colease, p_buf, p_buf_end))) {
+            logmsg(LOGMSG_ERROR, "%s: corrupt colease packet from %s, len=%d\n",
+                    __func__, from_host, dtalen);
+            return;
+        }
+        issue_time = colease.issue_time;
+        lease_ms = colease.lease_ms;
     }
 
     bdb_state = usr_ptr;
@@ -4458,10 +4583,10 @@ void receive_coherency_lease(void *ack_handle, void *usr_ptr, char *from_host,
 
     /* Choose most conservative possible expiration: the lessor of
      * 'mytime + leasetime' and 'mastertime + leasetime' */
-    if ((base_ts = gettimeofday_ms()) < colease.issue_time)
-        coherency_timestamp = base_ts + colease.lease_ms;
+    if ((base_ts = gettimeofday_ms()) < issue_time)
+        coherency_timestamp = base_ts + lease_ms;
     else
-        coherency_timestamp = colease.issue_time + colease.lease_ms;
+        coherency_timestamp = issue_time + lease_ms;
 
     if (coherency_timestamp < base_ts) {
         static uint64_t no_lease_count = 0;
