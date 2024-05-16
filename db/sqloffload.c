@@ -682,7 +682,6 @@ static void osql_scdone_commit_callback(struct ireq *iq)
             int rc = 0;
             sc_next = iq->sc->sc_next;
             if (iq->sc->db) {
-                int rc;
                 tran_type *lock_trans = NULL;
                 if ((rc = trans_start(iq, NULL, &lock_trans)) == 0) {
                     bdb_lock_tablename_read(thedb->bdb_env, iq->sc->tablename,
