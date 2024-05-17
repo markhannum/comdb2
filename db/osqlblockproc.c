@@ -1338,11 +1338,23 @@ int get_schema_change_txns(struct ireq *iq, tran_type **logi,
         if (trans_start_logical_sc(iq, logi))
             return -__LINE__;
 
-    if ((*ptran = bdb_get_physical_tran(*logi)) == NULL)
-        return -__LINE__;
+    if (gbl_rowlocks) {
 
-    if (trans_start(iq, *ptran, tran))
-        return -__LINE__;
+        if ((*ptran = bdb_get_sc_parent_tran(*logi)) == NULL)
+            return -__LINE__;
+
+        if (trans_start_sc(iq, *ptran, tran))
+            return -__LINE__;
+
+    } else {
+
+        if ((*ptran = bdb_get_physical_tran(*logi)) == NULL)
+            return -__LINE__;
+
+        if (trans_start(iq, *ptran, tran))
+            return -__LINE__;
+
+    }
 
     return 0;
 }

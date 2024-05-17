@@ -788,6 +788,7 @@ static void delete_thread_lock_info(bdb_state_type *bdb_state)
     }
 
     if (lk->lockref != 0) {
+        bdb_state->dbenv->log_flush(bdb_state->dbenv, NULL);
         logmsg(LOGMSG_FATAL, "%s: exiting thread holding lock!\n", __func__);
         logmsg(LOGMSG_FATAL, "%s: %s %s lockref=%u\n", __func__,
                locktype2str(lk->locktype), lk->ident ? lk->ident : "?",
