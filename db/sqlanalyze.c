@@ -885,9 +885,12 @@ error:
     goto cleanup;
 }
 
+__thread int is_analyze = 0;
+
 /* spawn thread to analyze a table */
 static void *table_thread(void *arg)
 {
+    is_analyze = 1;
     comdb2_name_thread(__func__);
     int rc;
     table_descriptor_t *td = (table_descriptor_t *)arg;

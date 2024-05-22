@@ -399,8 +399,7 @@ void *auto_analyze_main(void *unused)
     rdlock_schema_lk();
     // for each table update the counters
     for (int i = 0; i < thedb->num_dbs; i++) {
-        if (thedb->master != gbl_myhostname ||
-            get_schema_change_in_progress(__func__, __LINE__))
+        if (thedb->master != gbl_myhostname)
             break;
 
         struct dbtable *tbl = thedb->dbs[i];
@@ -431,8 +430,9 @@ void *auto_analyze_main(void *unused)
         /* if there is enough change, run analyze
          * only one analyze at a time is allowed to run (auto_analyze_running)
          * we should not auto analyze if analyze_is_running (manually) */
+
+        /* Allow analyze to run concurrent with a schema-change of a different table */
         if (!auto_analyze_running && !analyze_is_running() &&
-            !get_schema_change_in_progress(__func__, __LINE__) &&
             ((newautoanalyze_counter > min_ops && now - lastepoch > min_time) ||
              (min_percent > 0 && new_aa_percnt > min_percent))) {
 
