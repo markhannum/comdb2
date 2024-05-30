@@ -66,24 +66,32 @@ int do_drop_table(struct ireq *iq, struct schema_change_type *s,
 int finalize_drop_table(struct ireq *iq, struct schema_change_type *s,
                         tran_type *tran)
 {
-    struct dbtable *db = s->db;
+    //struct dbtable *db = s->db;
     int rc = 0;
     int bdberr = 0;
 
-    if (db->n_rev_constraints > 0 && !self_referenced_only(db)) {
-        sc_client_error(s, "Can't drop a table referenced by a foreign key");
-        return ERR_SC;
-    }
 
     /* Before this handle is closed, lets wait for all the db reads to finish */
-    if ((rc = bdb_lock_tablename_write(db->handle, "comdb2_tables", tran)) != 0) {
+    if ((rc = bdb_lock_tablename_write(thedb->bdb_env, "comdb2_tables", tran)) != 0) {
         sc_errf(s, "%s: failed to lock comdb2_tables rc: %d\n", __func__, rc);
         return rc;
     }
 
-    if ((rc = bdb_lock_table_write(db->handle, tran)) != 0) {
+    //if ((rc = bdb_lock_table_write(db->handle, tran)) != 0) {
+    if ((rc = bdb_lock_tablename_write(thedb->bdb_env, s->tablename, tran)) != 0) {
         sc_errf(s, "%s: failed to lock table rc: %d\n", __func__, rc);
         return rc;
+    }
+
+    struct dbtable *db = get_dbtable_by_name(s->tablename);
+    if (!db) {
+        sc_errf(s, "Table doesn't exist\n");
+        return SC_TABLE_DOESNOT_EXIST;
+    }
+
+    if (db->n_rev_constraints > 0 && !self_referenced_only(db)) {
+        sc_client_error(s, "Can't drop a table referenced by a foreign key");
+        return ERR_SC;
     }
 
     /* at this point if a backup is going on, it will be bad */

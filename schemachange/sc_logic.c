@@ -1583,23 +1583,32 @@ int backout_schema_changes(struct ireq *iq, tran_type *tran)
         while (s->logical_livesc) {
             poll(NULL, 0, 100);
         }
-        if (s->kind == SC_ADDTABLE) {
-            if (s->already_finalized) {
-                rem_dbtable_from_thedb_dbs(s->db);
-            }
-            if (s->newdb) {
-                backout_schemas(s->newdb->tablename);
-            }
-        } else if (s->db) {
-            if (s->already_finalized)
-                reload_db_tran(s->db, tran);
-            else if (s->newdb) {
-                backout_constraint_pointers(s->newdb, s->db);
-            }
-            change_schemas_recover(s->db->tablename);
+        
+        struct dbtable *db;
+        bdb_lock_tablename_read(thedb->bdb_env, s->tablename, tran); 
+        if (is_tablename_queue(s->tablename)) {
+            db = getqueuebyname(s->tablename);
+        } else {
+            db = get_dbtable_by_name(s->tablename);
         }
-        /* TODO: (NC) Also delete view? */
-        sc_del_unused_files_tran(s->db, tran);
+        if (db && db == s->db) {
+            if (s->kind == SC_ADDTABLE) {
+                if (s->already_finalized) {
+                    rem_dbtable_from_thedb_dbs(s->db);
+                }
+                if (s->newdb) {
+                    backout_schemas(s->newdb->tablename);
+                }
+            } else if (s->db) {
+                if (s->already_finalized)
+                    reload_db_tran(s->db, tran);
+                else if (s->newdb) {
+                    backout_constraint_pointers(s->newdb, s->db);
+                }
+                change_schemas_recover(s->db->tablename);
+            }
+            sc_del_unused_files_tran(s->db, tran);
+        }
         s = iq->sc = s->sc_next;
     }
     if (iq->sc_pending) {

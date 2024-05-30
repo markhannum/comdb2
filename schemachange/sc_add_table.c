@@ -197,19 +197,27 @@ int do_add_table(struct ireq *iq, struct schema_change_type *s,
     if ((rc = check_option_coherency(s, NULL, NULL))) {
         return rc;
     }
+
+    int local_lock = 0;
+    if (!iq->sc_locked) {
+        wrlock_schema_lk();
+        local_lock = 1;
+    }
+
+    assert_wrlock_schema_lk();
+
     if (is_tablename_queue(s->tablename)) {
         sc_errf(s, "bad tablename:%s\n", s->tablename);
+        if (local_lock)
+            unlock_schema_lk();
         return SC_INVALID_OPTIONS;
     }
 
     if ((db = get_dbtable_by_name(s->tablename))) {
         sc_errf(s, "Table %s already exists\n", s->tablename);
+        if (local_lock)
+            unlock_schema_lk();
         return SC_TABLE_ALREADY_EXIST;
-    }
-    int local_lock = 0;
-    if (!iq->sc_locked) {
-        wrlock_schema_lk();
-        local_lock = 1;
     }
     Pthread_mutex_lock(&csc2_subsystem_mtx);
     rc = add_table_to_environment(s->tablename, s->newcsc2, s, iq, trans,

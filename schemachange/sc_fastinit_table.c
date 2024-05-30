@@ -62,21 +62,30 @@ int do_fastinit(struct ireq *iq, struct schema_change_type *s, tran_type *tran)
     struct scinfo scinfo;
     struct errstat err = {0};
 
+    int local_lock = 0;
+    if (!iq->sc_locked) {
+        local_lock = 1;
+        wrlock_schema_lk();
+    }
+
     iq->usedb = db = s->db = get_dbtable_by_name(s->tablename);
     if (db == NULL) {
-        sc_errf(s, "Table doesn't exists\n");
-        reqerrstr(iq, ERR_SC, "Table doesn't exists");
+        sc_errf(s, "Table doesn't exist\n");
+        reqerrstr(iq, ERR_SC, "Table doesn't exist");
+        if (local_lock)
+            unlock_schema_lk();
         return SC_TABLE_DOESNOT_EXIST;
     }
 
     if ((!iq || iq->tranddl <= 1) && db->n_rev_constraints > 0 &&
         !self_referenced_only(db)) {
         sc_client_error(s, "Can't truncate a table referenced by a foreign key");
+        if (local_lock)
+            unlock_schema_lk();
         return -1;
     }
 
     set_schemachange_options_tran(s, db, &scinfo, tran);
-
 
     Pthread_mutex_lock(&csc2_subsystem_mtx);
 
@@ -89,6 +98,8 @@ int do_fastinit(struct ireq *iq, struct schema_change_type *s, tran_type *tran)
     if (!newdb) {
         sc_client_error(s, "%s", err.errstr);
         Pthread_mutex_unlock(&csc2_subsystem_mtx);
+        if (local_lock)
+            unlock_schema_lk();
         return SC_INTERNAL_ERROR;
     }
 
@@ -114,11 +125,6 @@ int do_fastinit(struct ireq *iq, struct schema_change_type *s, tran_type *tran)
      * truncated prefix anyway */
     bdb_get_new_prefix(new_prefix, sizeof(new_prefix), &bdberr);
 
-    int local_lock = 0;
-    if (!iq->sc_locked) {
-        local_lock = 1;
-        wrlock_schema_lk();
-    }
     rc = open_temp_db_resume(iq, newdb, new_prefix, 0, 0, tran);
     if (local_lock)
         unlock_schema_lk();
@@ -157,7 +163,23 @@ int finalize_fastinit_table(struct ireq *iq, struct schema_change_type *s,
                             tran_type *tran)
 {
     int rc = 0;
-    struct dbtable *db = s->db;
+
+    if ((rc = bdb_lock_tablename_write(thedb->bdb_env, "comdb2_tables", tran)) != 0) {
+        sc_errf(s, "Error getting comdb2_tables lock: %d\n", rc);
+        return ERR_SC;
+    }
+
+    if ((rc = bdb_lock_tablename_write(thedb->bdb_env, s->tablename, tran)) != 0) {
+        sc_errf(s, "Error getting tablelock: %d\n", rc);
+        return ERR_SC;
+    }
+
+    struct dbtable *db = get_dbtable_by_name(s->tablename);
+    if (db == NULL) {
+        sc_errf(s, "Table doesn't exist\n");
+        return ERR_SC;
+    }
+
     if (db->n_rev_constraints > 0 && !self_referenced_only(db)) {
         int i;
         struct schema_change_type *sc_pending;

@@ -530,7 +530,9 @@ struct dbenv *thedb;              /*handles 1 db for now*/
 
 int gbl_exclusive_blockop_qconsume = 0;
 pthread_rwlock_t gbl_block_qconsume_lock = PTHREAD_RWLOCK_INITIALIZER;
-pthread_rwlock_t thedb_lock = PTHREAD_RWLOCK_INITIALIZER;
+static pthread_rwlock_t thedb_lock = PTHREAD_RWLOCK_INITIALIZER;
+static __thread int have_thedb_readlock = 0;
+static __thread int have_thedb_writelock = 0;
 
 int gbl_malloc_regions = 1;
 int gbl_rowlocks = 0;
@@ -851,25 +853,45 @@ inline int getdatsize(const dbtable *tbl)
     return tbl->lrl;
 }
 
+void thedb_readlock(void)
+{
+    Pthread_rwlock_rdlock(&thedb_lock);
+    have_thedb_readlock = 1;
+}
+
+void thedb_writelock(void)
+{
+    Pthread_rwlock_wrlock(&thedb_lock);
+    have_thedb_writelock = 1;
+}
+
+void thedb_unlock(void)
+{
+    assert(have_thedb_readlock || have_thedb_writelock);
+    Pthread_rwlock_unlock(&thedb_lock);
+    have_thedb_readlock = have_thedb_writelock = 0;
+}
+
 /*lookup dbs..*/
 dbtable *getdbbynum(int num)
 {
     int ii;
     dbtable *p_db = NULL;
-    Pthread_rwlock_rdlock(&thedb_lock);
+    thedb_readlock();
     for (ii = 0; ii < thedb->num_dbs; ii++) {
         if (thedb->dbs[ii]->dbnum == num) {
             p_db = thedb->dbs[ii];
             break;
         }
     }
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
     return p_db;
 }
 
 static inline dbtable *_db_hash_find(const char *p_name)
 {
     dbtable *tbl;
+    assert(have_thedb_readlock || have_thedb_writelock);
     tbl = hash_find_readonly(thedb->db_hash, &p_name);
     if (!tbl)
         tbl = hash_find_readonly(thedb->sqlalias_hash, &p_name);
@@ -878,6 +900,7 @@ static inline dbtable *_db_hash_find(const char *p_name)
 
 static inline void _db_hash_add(dbtable *tbl)
 {
+    assert(have_thedb_writelock);
     hash_add(thedb->db_hash, tbl);
     if (tbl->sqlaliasname)
         hash_add(thedb->sqlalias_hash, tbl);
@@ -885,6 +908,7 @@ static inline void _db_hash_add(dbtable *tbl)
 
 static inline void _db_hash_del(dbtable *tbl)
 {
+    assert(have_thedb_writelock);
     hash_del(thedb->db_hash, tbl);
 
     if (tbl->sqlaliasname)
@@ -906,9 +930,9 @@ dbtable *get_dbtable_by_name(const char *p_name)
 {
     dbtable *p_db = NULL;
 
-    Pthread_rwlock_rdlock(&thedb_lock);
+    thedb_readlock();
     p_db = _db_hash_find(p_name);
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
     if (!p_db && !strcmp(p_name, COMDB2_STATIC_TABLE))
         p_db = &thedb->static_table;
 
@@ -2354,8 +2378,12 @@ static int llmeta_load_tables(struct dbenv *dbenv, void *tran)
         /* add to env */
         tbl->dbs_idx = i;
         dbenv->dbs[i] = tbl;
+
+        thedb_writelock();
         /* Add table to the hash. */
         _db_hash_add(tbl);
+
+        thedb_unlock();
     }
 
     /* we have to do this after all the meta table lookups so that the hack in
@@ -3322,8 +3350,12 @@ static int init_sqlite_tables(struct dbenv *dbenv)
             return -1;
         }
 
+        thedb_writelock();
+
         /* Add table to the hash. */
         _db_hash_add(tbl);
+
+        thedb_unlock();
 
         /* Add table to thedb->dbs */
         dbenv->dbs =
@@ -5811,30 +5843,32 @@ int main(int argc, char **argv)
 
 int add_dbtable_to_thedb_dbs(dbtable *table)
 {
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
 
     if (_db_hash_find(table->tablename) != 0) {
-        Pthread_rwlock_unlock(&thedb_lock);
+        thedb_unlock();
         return -1;
     }
 
     thedb->dbs = realloc(thedb->dbs, (thedb->num_dbs + 1) * sizeof(dbtable *));
     table->dbs_idx = thedb->num_dbs;
     thedb->dbs[thedb->num_dbs++] = table;
+    logmsg(LOGMSG_INFO, "adding %p table %s to thedb->dbs index %d\n", table, table->tablename, table->dbs_idx);
 
     /* Add table to the hash. */
     _db_hash_add(table);
 
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
     return 0;
 }
 
 void rem_dbtable_from_thedb_dbs(dbtable *table)
 {
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
     /* Remove the table from hash. */
     _db_hash_del(table);
 
+    logmsg(LOGMSG_INFO, "removing %p table %s from thedb->dbs index %d\n", table, table->tablename, table->dbs_idx);
     for (int i = table->dbs_idx; i < (thedb->num_dbs - 1); i++) {
         thedb->dbs[i] = thedb->dbs[i + 1];
         thedb->dbs[i]->dbs_idx = i;
@@ -5842,18 +5876,18 @@ void rem_dbtable_from_thedb_dbs(dbtable *table)
 
     thedb->num_dbs -= 1;
     thedb->dbs[thedb->num_dbs] = NULL;
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
 }
 
 static void add_sqlalias_db(dbtable *tbl, char *newname)
 {
     char *name;
 
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
     name = tbl->sqlaliasname;
     tbl->sqlaliasname = newname;
     hash_add(thedb->sqlalias_hash, tbl);
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
 
     free(name);
 }
@@ -5862,13 +5896,13 @@ static void delete_sqlalias_db(dbtable *tbl)
 {
     char *name;
 
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
     name = tbl->sqlaliasname;
     if (name) {
         hash_del(thedb->sqlalias_hash, tbl);
         tbl->sqlaliasname = NULL;
     }
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
 
     free(name);
 }
@@ -5892,7 +5926,7 @@ int rename_db(dbtable *db, const char *newname)
     if (!tag_name || !bdb_name)
         return -1;
 
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
 
     /* tags */
     rename_schema(db->tablename, tag_name);
@@ -5905,7 +5939,7 @@ int rename_db(dbtable *db, const char *newname)
     db->tablename = (char *)newname;
     _db_hash_add(db);
 
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
     return 0;
 }
 
@@ -5919,7 +5953,7 @@ void re_add_dbtable_to_thedb_dbs(dbtable *table)
 {
     int move = 0;
     int idx = table->dbs_idx;
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
 
     if (idx < 0 || idx >= thedb->num_dbs ||
         strcasecmp(thedb->dbs[idx]->tablename, table->tablename) != 0) {
@@ -5935,8 +5969,11 @@ void re_add_dbtable_to_thedb_dbs(dbtable *table)
         thedb->dbs[i]->dbs_idx = i;
     }
 
-    if (!move) table->dbnum = thedb->dbs[idx]->dbnum;
+    if (!move) {
+        table->dbnum = thedb->dbs[idx]->dbnum;
+    }
 
+    logmsg(LOGMSG_INFO, "re_adding %p table %s from thedb->dbs index %d\n", table, table->tablename, table->dbs_idx);
     thedb->dbs[idx] = table;
 
     /* Add table to the hash. */
@@ -5944,47 +5981,47 @@ void re_add_dbtable_to_thedb_dbs(dbtable *table)
         _db_hash_add(table);
     }
 
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
 }
 
 struct dbview *get_view_by_name(const char *view_name)
 {
     struct dbview *view;
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
     view = hash_find_readonly(thedb->view_hash, &view_name);
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
     return view;
 }
 
 int count_views()
 {
     int count = 0;
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
     count = hash_get_num_entries(thedb->view_hash);
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
     return count;
 }
 
 int add_view(struct dbview *view)
 {
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
 
     if (hash_find_readonly(thedb->view_hash, &view->view_name) != 0) {
-        Pthread_rwlock_unlock(&thedb_lock);
+        thedb_unlock();
         return -1;
     }
 
     /* Add view to the hash. */
     hash_add(thedb->view_hash, view);
 
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
     return 0;
 }
 
 void delete_view(char *view_name)
 {
     struct dbview *view;
-    Pthread_rwlock_wrlock(&thedb_lock);
+    thedb_writelock();
 
     view = hash_find_readonly(thedb->view_hash, &view_name);
     if (view) {
@@ -5996,7 +6033,7 @@ void delete_view(char *view_name)
         free(view);
     }
 
-    Pthread_rwlock_unlock(&thedb_lock);
+    thedb_unlock();
 }
 
 void epoch2a(int epoch, char *buf, size_t buflen)

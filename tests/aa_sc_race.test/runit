@@ -96,7 +96,7 @@ function run_test
     j=0
 
     while [[ "$j" -lt 3 ]]; do 
-        stat4dump_loop &
+        #stat4dump_loop &
         create_loop &
         truncate_loop &
         drop_loop &

@@ -884,28 +884,36 @@ int finalize_alter_table(struct ireq *iq, struct schema_change_type *s,
                          tran_type *transac)
 {
     int rc, bdberr;
-    struct dbtable *db = s->db;
-    struct dbtable *newdb = s->newdb;
     void *old_bdb_handle, *new_bdb_handle;
     int olddb_bthashsz;
 
     if (s->partition.type == PARTITION_MERGE)
         return finalize_merge_table(iq, s, transac);
 
+    if ((rc = bdb_lock_tablename_write(thedb->bdb_env, "comdb2_tables", transac)) != 0) {
+        sc_errf(s, "Error getting comdb2_tables lock: %d\n", rc);
+        BACKOUT;
+    }
+
+    if ((rc = bdb_lock_tablename_write(thedb->bdb_env, s->tablename, transac)) != 0) {
+        sc_errf(s, "Error getting tablelock: %d\n", rc);
+        BACKOUT;
+    }
+
+    struct dbtable *db = get_dbtable_by_name(iq->sc->tablename);
+    struct dbtable *newdb = s->newdb;
+
+    /* This table could have been dropped during the alter */
+    if (!db) {
+        sc_errf(s, "Table not found:%s\n", s->tablename);
+        return SC_TABLE_DOESNOT_EXIST;
+    }
+
     iq->usedb = db;
 
     new_bdb_handle = newdb->handle;
     old_bdb_handle = db->handle;
 
-    if ((rc = bdb_lock_tablename_write(db->handle, "comdb2_tables", transac)) != 0) {
-        sc_errf(s, "Error getting comdb2_tables lock: %d\n", rc);
-        BACKOUT;
-    }
-
-    if ((rc = bdb_lock_table_write(db->handle, transac)) != 0) {
-        sc_errf(s, "Error getting tablelock: %d\n", rc);
-        BACKOUT;
-    }
 
     if (iq && iq->tranddl > 1 &&
         verify_constraints_exist(NULL, newdb, newdb, s) != 0) {

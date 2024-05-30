@@ -6108,12 +6108,16 @@ void freedb_int(dbtable *db, dbtable *replace)
     }
 
     if (replace) {
+        assert_wrlock_schema_lk();
+        logmsg(LOGMSG_INFO, "replacing %p with %p\n", db, replace);
         memcpy(db, replace, sizeof(dbtable));
         db->dbs_idx = dbs_idx;
         db->sqlaliasname = sqlaliasname;
         db->timepartition_name = timepartition_name;
-    } else
+    } else {
+        logmsg(LOGMSG_INFO, "freeing %p\n", db);
         free(db);
+    }
 }
 
 void free_db_and_replace(dbtable *db, dbtable *newdb)
@@ -6266,6 +6270,7 @@ static int load_new_ondisk(dbtable *db, tran_type *tran)
     set_odh_options_tran(newdb, tran);
     transfer_db_settings(db, newdb);
     restore_constraint_pointers(db, newdb);
+
     free_db_and_replace(db, newdb);
 
     bdb_close_only(old_bdb_handle, &bdberr);
