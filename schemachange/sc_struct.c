@@ -746,6 +746,40 @@ void *buf_get_schemachange_v2(struct schema_change_type *s,
     return p_buf;
 }
 
+char *buf_extract_tablename_v1(const void *p_buf, const void *p_buf_end, int *type)
+{
+    struct schema_change_type s = {0};
+    if (p_buf >= p_buf_end)
+        return NULL;
+    p_buf = (uint8_t *)buf_get(&s.rqid, sizeof(s.rqid), p_buf, p_buf_end);
+    p_buf = (uint8_t *)buf_no_net_get(&s.uuid, sizeof(s.uuid), p_buf, p_buf_end);
+    p_buf = (uint8_t *)buf_get(type, sizeof(type), p_buf, p_buf_end);
+    p_buf = (uint8_t *)buf_get(&s.tablename_len, sizeof(s.tablename_len), p_buf, p_buf_end);
+
+    if (s.tablename_len != strlen((const char *)p_buf) + 1 || s.tablename_len == 1)
+        return NULL;
+
+    char *tablename = (char *)calloc(1, s.tablename_len);
+    p_buf = (uint8_t *)buf_no_net_get(tablename, s.tablename_len, p_buf, p_buf_end);
+    return tablename;
+}
+
+char *buf_extract_tablename_v2(const void *p_buf, const void *p_buf_end, int *type)
+{
+    struct schema_change_type s = {0};
+    if (p_buf >= p_buf_end)
+        return NULL;
+    p_buf = (uint8_t *)buf_get(type, sizeof(s.kind), p_buf, p_buf_end);
+    p_buf = (uint8_t *)buf_get(&s.rqid, sizeof(s.rqid), p_buf, p_buf_end);
+    p_buf = (uint8_t *)buf_no_net_get(&s.uuid, sizeof(s.uuid), p_buf, p_buf_end);
+    p_buf = (uint8_t *)buf_get(&s.tablename_len, sizeof(s.tablename_len), p_buf, p_buf_end);
+    if (s.tablename_len != strlen((const char *)p_buf) + 1 || s.tablename_len == 1)
+        return NULL;
+    char *tablename = (char *)calloc(1, s.tablename_len);
+    p_buf = (uint8_t *)buf_no_net_get(tablename, s.tablename_len, p_buf, p_buf_end);
+    return tablename;
+}
+
 /*********************************************************************************/
 
 /* Packs a schema_change_type struct into an opaque binary buffer so that it can

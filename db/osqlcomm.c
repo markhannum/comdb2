@@ -804,6 +804,11 @@ static uint8_t *osqlcomm_schemachange_type_get(struct schema_change_type *sc,
     return tmp_buf;
 }
 
+static char *osqlcomm_schemachange_tablename(const uint8_t *p_buf, const uint8_t *p_buf_end, int *type)
+{
+    return buf_get_schemachange_tablename(p_buf, p_buf_end, type);
+}
+
 static uint8_t *
 osqlcomm_schemachange_rpl_type_put(osql_rpl_t *hd,
                                    struct schema_change_type *sc,
@@ -6200,6 +6205,43 @@ static const uint8_t *_get_txn_info(char *msg, unsigned long long rqid,
     return p_buf;
 }
 
+/**
+ * Collect all schema-change tables
+ *
+ */
+int osql_collect_schemachange_tables(struct ireq *iq, unsigned long long rqid, uuid_t uuid, void *trans, char **pmsg,
+                                     int msglen, int *flags, int **updCols, blob_buffer_t blobs[MAXBLOBS], int step,
+                                     struct block_err *err, int *receivedrows)
+{
+    const uint8_t *p_buf;
+    const uint8_t *p_buf_end;
+
+    int type, sctype;
+    char *msg = *pmsg;
+
+    p_buf = _get_txn_info(msg, rqid, uuid, &type);
+
+    if (type != OSQL_SCHEMACHANGE)
+        return 0;
+
+    p_buf_end = p_buf + msglen;
+
+    char *tablename = osqlcomm_schemachange_tablename(p_buf, p_buf_end, &sctype);
+    if (!tablename || !strlen(tablename))
+        return 0;
+
+    if (!iq->sc_tables) {
+        iq->sc_tables = hash_init_str(0);
+    }
+
+    if (hash_find(iq->sc_tables, tablename) == NULL) {
+        hash_add(iq->sc_tables, tablename);
+    } else {
+        free(tablename);
+    }
+
+    return 0;
+}
 
 /**
  * Handles each packet and start schema change
@@ -6248,6 +6290,9 @@ int osql_process_schemachange(struct ireq *iq, unsigned long long rqid,
     else
         sc->nothrevent = 1;
     sc->finalize = 0;
+
+    if (sc->tablename && strlen(sc->tablename) > 0)
+        assert(iq->sc_tables && (hash_find(iq->sc_tables, sc->tablename)) != NULL);
 
     iq->sc = sc;
     sc->iq = iq;
