@@ -2740,6 +2740,12 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd,
     accept_info_new(netinfo_ptr, (struct sockaddr_in *)addr, fd, 0);
 }
 
+/* TODO */
+static void accept_reverse(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len,
+                           void *data)
+{
+}
+
 static void accept_secure(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len,
                           void *data)
 {
@@ -2785,7 +2791,7 @@ static void reopen_unix(int fd, struct net_info *n)
      (m)->cmsg_level == SOL_SOCKET && (m)->cmsg_type == SCM_RIGHTS)
 #endif
 
-static int recvfd(int pmux_fd, int *secure)
+static int recvfd(int pmux_fd, int *secure, int *reverse)
 {
     int newfd = -1;
     char buf[sizeof("pmux") - 1];
@@ -2839,13 +2845,15 @@ static int recvfd(int pmux_fd, int *secure)
     }
     newfd = *(int *)CMSG_DATA(m);
 #   endif
-    if (memcmp(buf, "pmux", sizeof(buf)) != 0 && memcmp(buf, "spmu", sizeof(buf)) != 0) {
+    if (memcmp(buf, "pmux", sizeof(buf)) != 0 && memcmp(buf, "spmu", sizeof(buf)) != 0 &&
+        memcmp(buf, "xump", sizeof(buf)) != 0){
         shutdown_close(newfd);
         logmsg(LOGMSG_ERROR, "%s:recvmsg pmux_fd:%d unexpected msg:%.*s\n", __func__,
                pmux_fd, (int)sizeof(buf), buf);
         return -1;
     }
     *secure = (memcmp(buf, "spmu", sizeof(buf)) == 0);
+    *reverse = (memcmp(buf, "xump", sizeof(buf)) == 0);
     return newfd;
 }
 
@@ -2853,8 +2861,8 @@ static void do_recvfd(int pmux_fd, short what, void *data)
 {
     check_base_thd();
     struct net_info *n = data;
-    int secure;
-    int newfd = recvfd(pmux_fd, &secure);
+    int secure, reverse;
+    int newfd = recvfd(pmux_fd, &secure, &reverse);
     switch (newfd) {
     case 0: return;
     case -1: reopen_unix(pmux_fd, n); return;
@@ -2873,6 +2881,8 @@ static void do_recvfd(int pmux_fd, short what, void *data)
     getpeername(newfd, addr, &addrlen);
     if (!secure)
         accept_cb(NULL, newfd, addr, addrlen, n);
+    else if (reverse)
+        accept_reverse(NULL, newfd, addr, addrlen, n);
     else
         accept_secure(NULL, newfd, addr, addrlen, n);
 }

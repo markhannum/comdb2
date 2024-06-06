@@ -178,6 +178,7 @@ static int alloc_port(const char *svc)
 
 static void readcb(int, short, void *);
 static void routefd(int serverfd, short what, void *arg);
+static void revroutefd(int serverfd, short what, void *arg);
 static void writecb(int, short, void *);
 
 /* accept_list is the list of accepted connections which don't "reg"ister with
@@ -294,6 +295,15 @@ struct connection {
         debug_log("no newline in %zu bytes\n", len);
         delete this;
         return -1;
+    }
+    void revroute(int dest)
+    {
+        event_del(&ev);
+        event_assign(&ev, base, dest, EV_WRITE | EV_TIMEOUT, revroutefd, this);
+        struct timeval timeout;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 10 * 1000; //10ms
+        event_add(&ev, &timeout);
     }
     void route(int dest)
     {
@@ -414,13 +424,13 @@ static void make_socket_blocking(int fd)
     }
 }
 
-static void routefd(int serverfd, short what, void *arg)
+static void routefd_int(int serverfd, short what, void *arg, char *pr, size_t sz)
 {
     connection *c = (connection *)(arg);
     int clientfd = c->fd;
     make_socket_blocking(clientfd);
     debug_log("%s send fd:%d to fd:%d\n", __func__, clientfd, serverfd);
-    iovec iov = {.iov_base = c->protocol, .iov_len = sizeof(c->protocol)};
+    iovec iov = {.iov_base = pr, .iov_len = sz};
     msghdr msg = {0};
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
@@ -449,6 +459,18 @@ static void routefd(int serverfd, short what, void *arg)
         }
     }
     delete c;
+}
+
+static void revroutefd(int serverfd, short what, void *arg)
+{
+    char protocol[4] = {'x', 'u', 'm', 'p'};
+    return routefd_int(serverfd, what, arg, protocol, sizeof(protocol));
+}
+
+static void routefd(int serverfd, short what, void *arg)
+{
+    connection *c = (connection *)(arg);
+    return routefd_int(serverfd, what, arg, c->protocol, sizeof(c->protocol));
 }
 
 static int check_active(const char *svc)
@@ -530,6 +552,20 @@ static int run_cmd(char *cmd, connection *c)
         c->svc = svc;
         c->route(dest);
         return -1;
+    } else if (strcmp(cmd, "revrte") == 0) {
+        char *svc = strtok_r(nullptr, " ", &sav);
+        if (svc == nullptr) {
+            c->reply("-1\n");
+            return 0;
+        }
+        int dest = get_fd(svc);
+        if (dest <= 0) {
+            c->reply("-1\n");
+            return 0;
+        }
+        c->svc = svc;
+        c->revroute(dest);
+        return -1;
     } else if (strcmp(cmd, "del") == 0) {
         if (c->is_remote()) {
             c->reply_not_permitted();
@@ -600,6 +636,7 @@ static int run_cmd(char *cmd, connection *c)
                  "range               : print port range which this pmux can assign\n"
                  "reg service         : obtain/discover port for new service\n"
                  "rte                 : get route to instance service/port\n"
+                 "revrte              : get rev-route to instance service/port\n"
                  "stat                : dump some stats\n"
                  "use service port    : set specific port registration for service\n"
                  "used (or list)      : dump active port assignments\n");
