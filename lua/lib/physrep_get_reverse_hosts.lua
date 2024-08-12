@@ -2,7 +2,7 @@
 --
 -- This procedure would return a list of nodes that the specified node should
 -- attempt to connect to for them to allow querying it back. (see reversesql)
-local function main(dbname, hostname)
+local function main(dbname, hostname, tier, cluster)
     db:begin()
 
     -- Check whether 'comdb2_physrep_sources' table exists
@@ -14,9 +14,14 @@ local function main(dbname, hostname)
     end
 
     local rs, rc = db:exec("SELECT dbname, host FROM comdb2_physrep_sources WHERE " ..
-                           "source_dbname = '" ..  dbname .. "' AND source_host = '" .. hostname .. "'")
+                           "source_dbname = '" ..  dbname ..
+                           "' AND ( source_host = '" .. hostname .. 
+                           "' OR source_host = '" .. tier ..
+                           "' OR source_host = '" .. cluster .. "')")
     local row = rs:fetch()
     while row do
+        -- target 'host' can be a tier, a cluster, or host
+        -- the caller will handle
         db:emit(row)
         row = rs:fetch()
     end

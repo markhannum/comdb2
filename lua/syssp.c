@@ -527,7 +527,6 @@ static int db_comdb_delete_sc_history(Lua L)
 }
 
 extern int gbl_physrep_fanout;
-extern int gbl_physrep_max_pending_replicants;
 extern int gbl_physrep_max_candidates;
 
 static int db_comdb_physrep_tunables(Lua L)
@@ -552,10 +551,6 @@ static int db_comdb_physrep_tunables(Lua L)
 
     lua_pushstring(L, "physrep_max_candidates");
     lua_pushinteger(L, gbl_physrep_max_candidates);
-    lua_settable(L, -3);
-
-    lua_pushstring(L, "physrep_max_pending_replicants");
-    lua_pushinteger(L, gbl_physrep_max_pending_replicants);
     lua_settable(L, -3);
 
     return 1;

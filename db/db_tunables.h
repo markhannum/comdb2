@@ -1800,16 +1800,9 @@ REGISTER_TUNABLE("physrep_keepalive_freq_sec",
 REGISTER_TUNABLE("physrep_max_candidates",
                  "Maximum number of candidates that should be returned to a "
                  "new physical replicant during registration. (Default: 6)",
-                 TUNABLE_INTEGER, &gbl_physrep_max_candidates, 0, NULL,
-                 NULL, NULL, NULL);
-REGISTER_TUNABLE("physrep_max_pending_replicants",
-                 "There can be no more than this many physical replicants in "
-                 "pending state. (Default: 10)",
-                 TUNABLE_INTEGER, &gbl_physrep_max_pending_replicants, 0, NULL,
-                 NULL, NULL, NULL);
-REGISTER_TUNABLE("physrep_metadb_host", "List of physical replication metadb cluster hosts.",
-                 TUNABLE_STRING, &gbl_physrep_metadb_host, READONLY, NULL, NULL, NULL,
-                 NULL);
+                 TUNABLE_INTEGER, &gbl_physrep_max_candidates, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("physrep_metadb_host", "List of physical replication metadb cluster hosts.", TUNABLE_STRING,
+                 &gbl_physrep_metadb_host, READONLY, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("physrep_metadb_name", "Physical replication metadb cluster name.",
                  TUNABLE_STRING, &gbl_physrep_metadb_name, READONLY, NULL, NULL, NULL,
                  NULL);
@@ -1863,11 +1856,13 @@ REGISTER_TUNABLE("revsql_host_refresh_freq_sec", "The frequency at which the "
                  TUNABLE_INTEGER, &gbl_revsql_host_refresh_freq_sec, EXPERIMENTAL | INTERNAL,
                  NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("gbl_class_machs_refresh", "Requery-time for class-machine lookup.  (Default: 300s)", TUNABLE_INTEGER,
+                 &gbl_class_machs_refresh, 0, NULL, NULL, NULL, NULL);
+
 REGISTER_TUNABLE("logdelete_lock_trace",
                  "Print trace getting and releasing the logdelete lock.  "
                  "(Default: off)",
-                 TUNABLE_BOOLEAN, &gbl_logdelete_lock_trace,
-                 EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+                 TUNABLE_BOOLEAN, &gbl_logdelete_lock_trace, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
 REGISTER_TUNABLE("flush_log_at_checkpoint",
                  "Replicants flush the log at checkpoint records.  "

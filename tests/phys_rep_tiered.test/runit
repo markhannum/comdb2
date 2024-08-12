@@ -38,7 +38,7 @@ function downgradeonce()
     local dbname=$1
     local mnode=`getmaster`
     echo "== downgrading $mnode"
-    cdb2sql ${CDB2_OPTIONS} --host $mnode $dbname "exec procedure sys.cmd.send('downgrade')"
+    $CDB2SQL_EXE ${CDB2_OPTIONS} --host $mnode $dbname "exec procedure sys.cmd.send('downgrade')"
 }
 
 function downgrade()
@@ -49,7 +49,7 @@ function downgrade()
         sleep $sleepamount
         local mnode=`getmaster`
         echo "== downgrading $mnode"
-        cdb2sql ${CDB2_OPTIONS} --host $mnode $dbname "exec procedure sys.cmd.send('downgrade')"
+        $CDB2SQL_EXE ${CDB2_OPTIONS} --host $mnode $dbname "exec procedure sys.cmd.send('downgrade')"
     done
 }
 
@@ -129,12 +129,12 @@ function create_physrep_tables()
     local repl_metadb_name=$1
     local repl_metadb_host=$2
 
-    cdb2sql ${CDB2_OPTIONS} --host $repl_metadb_host $repl_metadb_name "CREATE TABLE comdb2_physreps(dbname CSTRING(60), host CSTRING(120), file INT, offset INT, last_keepalive DATETIME, state CSTRING(60), UNIQUE (dbname, host))"
+    $CDB2SQL_EXE ${CDB2_OPTIONS} --host $repl_metadb_host $repl_metadb_name "CREATE TABLE comdb2_physreps(dbname CSTRING(60), host CSTRING(120), file INT, offset INT, last_keepalive DATETIME, state CSTRING(60), UNIQUE (dbname, host))"
     if [ $? -ne 0 ]; then
         cleanFailExit "failed to create table on $repl_metadb_name@$repl_metadb_host"
     fi
 
-    cdb2sql ${CDB2_OPTIONS} --host $repl_metadb_host $repl_metadb_name "CREATE TABLE comdb2_physrep_connections(dbname CSTRING(60), host CSTRING(120), source_dbname CSTRING(60), source_host CSTRING(120), UNIQUE (dbname, host, source_dbname, source_host), FOREIGN KEY(dbname, host) REFERENCES comdb2_physreps(dbname, host) ON DELETE CASCADE)"
+    $CDB2SQL_EXE ${CDB2_OPTIONS} --host $repl_metadb_host $repl_metadb_name "CREATE TABLE comdb2_physrep_connections(dbname CSTRING(60), host CSTRING(120), source_dbname CSTRING(60), source_host CSTRING(120), UNIQUE (dbname, host, source_dbname, source_host), FOREIGN KEY(dbname, host) REFERENCES comdb2_physreps(dbname, host) ON DELETE CASCADE)"
     if [ $? -ne 0 ]; then
         cleanFailExit "failed to create table on $repl_metadb_name@$repl_metadb_host"
     fi
@@ -221,10 +221,10 @@ function restart_source_nodes()
 
         for node in $CLUSTER ; do
             echo "$DBNAME: waiting until ready"
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${DBNAME} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${DBNAME} 'select 1' 2>/dev/null)
             while [[ "$out" != "1" ]]; do
                 sleep $SLEEP_BETWEEN_CHECKS
-                out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${DBNAME}  'select 1' 2>/dev/null)
+                out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${DBNAME}  'select 1' 2>/dev/null)
             done
         done
 
@@ -235,10 +235,10 @@ function restart_source_nodes()
         $COMDB2_EXE ${DBNAME} ${PARAMS} &> $LOGDIR/${DBNAME}.db &
 
         echo "$DBNAME: waiting until ready"
-        out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${DBNAME} 'select 1' 2>/dev/null)
+        out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${DBNAME} 'select 1' 2>/dev/null)
         while [[ "$out" != "1" ]]; do
             sleep $SLEEP_BETWEEN_CHECKS
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${DBNAME} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${DBNAME} 'select 1' 2>/dev/null)
         done
     fi
     popd
@@ -477,13 +477,13 @@ END
         $COMDB2_EXE ${_dbname} --create --lrl ${_dbdir}/${_dbname}.lrl --pidfile ${_dbdir}/${_dbname}.pid >> ${logFile} 2>&1
         $COMDB2_EXE ${_dbname} --lrl ${_dbdir}/${_dbname}.lrl --pidfile ${_dbdir}/${_dbname}.pid >> ${logFile} 2>&1 &
  
-        out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+        out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
 
         # wait until we can query it
         echo "${_dbname}: waiting until ready"
         while [[ "$out" != "1" ]]; do
             sleep $SLEEP_BETWEEN_CHECKS
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
         done
 
         PIDs="${PIDs} $(cat ${_dbdir}/${_dbname}.pid)"
@@ -538,13 +538,13 @@ END
 
         # 3. Wait for instances to come online
         for node in $CLUSTER ; do
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
 
             # wait until we can query it
             echo "${_dbname}: waiting until ready"
             while [[ "$out" != "1" ]]; do
                 sleep $SLEEP_BETWEEN_CHECKS
-                out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+                out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
             done
         done
 
@@ -573,13 +573,13 @@ function fix_lrl_and_restart_source_nodes()
         kill_restart_node $node $KILL_WAIT_TIME &
         sleep $KILL_WAIT_TIME
 
-        out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname} 'select 1' 2>/dev/null)
+        out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname} 'select 1' 2>/dev/null)
 
         # wait until we can query it
         echo "${_source_dbname}: waiting until ready"
         while [[ "$out" != "1" ]]; do
             sleep $SLEEP_BETWEEN_CHECKS
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname} 'select 1' 2>/dev/null)
         done
     else
 
@@ -594,12 +594,12 @@ function fix_lrl_and_restart_source_nodes()
 
         # select 1 all nodes
         for node in $CLUSTER ; do
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname} 'select 1' 2>/dev/null)
             # wait until we can query it
             echo "$DBNAME: waiting until ready"
             while [[ "$out" != "1" ]]; do
                 sleep $SLEEP_BETWEEN_CHECKS
-                out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname}  'select 1' 2>/dev/null)
+                out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $node ${_source_dbname}  'select 1' 2>/dev/null)
             done
         done
     fi
@@ -633,13 +633,13 @@ function setup_physrep_cluster()
 
         $COMDB2_EXE ${_dbname} --lrl ${_dbdir}/${_dbname}.lrl ${_dbdir}/${_dbname}.lrl --pidfile ${_dbdir}/${_dbname}.pid >> ${logFile} 2>&1 &
  
-        out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+        out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
 
         # wait until we can query it
         echo "${_dbname}: waiting until ready"
         while [[ "$out" != "1" ]]; do
             sleep $SLEEP_BETWEEN_CHECKS
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
         done
 
         PIDs="${PIDs} $(cat ${_dbdir}/${_dbname}.pid)"
@@ -677,13 +677,13 @@ function setup_physrep_cluster()
 
         # 3. Wait for instances to come online
         for node in $CLUSTER ; do
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
 
             # wait until we can query it
             echo "${_dbname}: waiting until ready"
             while [[ "$out" != "1" ]]; do
                 sleep $SLEEP_BETWEEN_CHECKS
-                out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
+                out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_dbname} 'select 1' 2>/dev/null)
             done
         done
     fi
@@ -724,13 +724,13 @@ function setup_physrep_replicants()
 
         $COMDB2_EXE ${_repl_dbname} --lrl ${_repl_dbdir}/${_repl_dbname}.lrl --pidfile ${_repl_dbdir}/${_repl_dbname}.pid >> ${logFile} 2>&1 &
 
-        out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
+        out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
 
         # Wait until we can query it
         echo "${_repl_dbname}: waiting until ready"
         while [[ "$out" != "1" ]]; do
             sleep $SLEEP_BETWEEN_CHECKS
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
         done
 
         PIDs="${PIDs} $(cat ${_repl_dbdir}/${_repl_dbname}.pid)"
@@ -758,13 +758,13 @@ function setup_physrep_replicants()
             PIDs="${PIDs} $!"
 
             # Wait for the node to start
-            out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
 
             # wait until we can query it
             echo "${_repl_dbname}: waiting until ready"
             while [[ "$out" != "1" ]]; do
                 sleep $SLEEP_BETWEEN_CHECKS
-                out=$(cdb2sql ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
+                out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${_repl_dbname} 'select 1' 2>/dev/null)
             done
 
         done
@@ -782,7 +782,7 @@ function verify_blkseq_dbname_node()
     local _repl_dbname=$1
     local _repl_host=$2
 
-    x=$(cdb2sql --tabs ${CDB2_OPTIONS} $_repl_dbname --host $_repl_host  "select * from comdb2_blkseq")
+    x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} $_repl_dbname --host $_repl_host  "select * from comdb2_blkseq")
     if [[ -n "$x" ]]; then
         echo "physrep $_repl_dbname node $_repl_host had blkseqs"
         echo "$x"
@@ -796,7 +796,7 @@ function verify_blkseq()
 
     if [[ -n "$CLUSTER" ]]; then
         for node in $CLUSTER ; do 
-            x=$(cdb2sql --tabs ${CDB2_OPTIONS} $DBNAME --host $node  "select * from comdb2_blkseq")
+            x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} $DBNAME --host $node  "select * from comdb2_blkseq")
             wc=$(echo "$x" | wc -l)
             echo "node $node, blkseq $x"
             if [[ -z "$x" || "$wc" -lt 5 ]]; then
@@ -807,7 +807,7 @@ function verify_blkseq()
         done
     else
         node=$(hostname)
-        x=$(cdb2sql --tabs ${CDB2_OPTIONS} $DBNAME --ndoe $node "select * from comdb2_blkseq")
+        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} $DBNAME --ndoe $node "select * from comdb2_blkseq")
         wc=$(echo "$x" | wc -l)
         echo "blkseq is $x"
         if [[ -z "$x" || "$wc" -lt 5 ]]; then

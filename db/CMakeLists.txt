@@ -5,6 +5,7 @@ set(src
   autoanalyze.c
   block_internal.c
   bpfunc.c
+  machcache.c
   clienthost.c
   comdb2.c
   comdb2uuid.c

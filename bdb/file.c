@@ -3827,7 +3827,7 @@ low_headroom:
 
             /* If we have private blkseqs, make sure we don't delete logs that
              * contain blkseqs newer than our threshold.  */
-            if (bdb_state->attr->private_blkseq_enabled &&
+            if (!gbl_is_physical_replicant && bdb_state->attr->private_blkseq_enabled &&
                 !bdb_blkseq_can_delete_log(bdb_state, filenum)) {
                 if (bdb_state->attr->debug_log_deletion) {
                     logmsg(LOGMSG_USER, "skipping log %s filenm %d because it has recent blkseqs\n",
@@ -4724,7 +4724,7 @@ deadlock_again:
 
             if (gbl_is_physical_replicant && physrep_ignore_table(bdb_state->name)) {
                 char new[PATH_MAX];
-                print(bdb_state, "truncating ignored queue %s\n", bdb_trans(tmpname, new));
+                print(bdb_state, "truncating ignored table %s\n", bdb_trans(tmpname, new));
                 rc = truncate(bdb_trans(tmpname, new), pagesize * 2);
                 if (rc != 0) {
                     logmsg(LOGMSG_ERROR, "truncate %s error %d\n", bdb_trans(tmpname, new), errno);

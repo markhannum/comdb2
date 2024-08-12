@@ -471,7 +471,6 @@ extern int gbl_physrep_update_registry_interval;
 extern int gbl_physrep_i_am_metadb;
 extern int gbl_physrep_keepalive_freq_sec;
 extern int gbl_physrep_max_candidates;
-extern int gbl_physrep_max_pending_replicants;
 extern int gbl_physrep_reconnect_penalty;
 extern int gbl_physrep_register_interval;
 extern int gbl_physrep_shuffle_host_list;
@@ -488,6 +487,9 @@ extern char *gbl_physrep_metadb_host;
 /* repl-name / host is the active connection */
 extern char *gbl_physrep_repl_name;
 extern char *gbl_physrep_repl_host;
+
+/* class-mach cache */
+extern int gbl_class_machs_refresh;
 
 /* Reversql connection/sql */
 extern int gbl_revsql_allow_command_exec;

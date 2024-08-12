@@ -36,6 +36,7 @@
 #include "reverse_conn.h"
 
 #include <parse_lsn.h>
+#include <machcache.h>
 #include <logmsg.h>
 
 /* internal implementation */
@@ -60,7 +61,6 @@ int gbl_physrep_reconnect_penalty = 0;
 int gbl_blocking_physrep = 1;
 int gbl_physrep_fanout = 8;
 int gbl_physrep_max_candidates = 6;
-int gbl_physrep_max_pending_replicants = 10;
 int gbl_deferred_phys_flag = 0;
 int gbl_physrep_source_nodes_refresh_freq_sec = 10;
 int gbl_physrep_slow_replicant_check_freq_sec = 10;
@@ -1115,7 +1115,7 @@ static int update_min_logfile(void) {
     if (rc == CDB2_OK) {
         while ((rc = cdb2_next_record(repl_metadb)) == CDB2_OK) {
             int64_t *minfile = (int64_t *)cdb2_column_value(repl_metadb, 0);
-            physrep_min_logfile = (unsigned int) *minfile;
+            physrep_min_logfile = minfile ? (unsigned int)*minfile : 0;
         }
         if (rc == CDB2_OK_DONE)
             rc = 0;

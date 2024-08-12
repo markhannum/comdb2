@@ -1043,6 +1043,21 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
             tok = segtok(line, len, &st, &ltok);
             classval++;
         }
+    } else if (tokcmp(tok, ltok, "machine_cluster") == 0) {
+        /* machine_cluster <machine-name> <cluster-name> */
+        tok = segtok(line, len, &st, &ltok);
+        if (!ltok) {
+            logmsg(LOGMSG_WARN, "machine_cluster requires host & cluster name\n");
+            return -1;
+        }
+        char *host = tok;
+        tok = segtok(line, len, &st, &ltok);
+        if (!ltok) {
+            logmsg(LOGMSG_WARN, "machine_cluster requires host & cluster name\n");
+            return -1;
+        }
+        char *cluster = tok;
+        mach_addcluster(host, cluster);
     } else if (tokcmp(tok, ltok, "pagesize") == 0) {
         tok = segtok(line, len, &st, &ltok);
         if (ltok == 0) {
@@ -1227,10 +1242,8 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
             logmsg(LOGMSG_ERROR, "Invalid table option\n");
             return -1;
         }
-    } else if (tokcmp(tok, ltok, "allow") == 0 ||
-               tokcmp(tok, ltok, "disallow") == 0 ||
-               tokcmp(tok, ltok, "clrpol") == 0 ||
-               tokcmp(tok, ltok, "setclass") == 0) {
+    } else if (tokcmp(tok, ltok, "allow") == 0 || tokcmp(tok, ltok, "disallow") == 0 ||
+               tokcmp(tok, ltok, "clrpol") == 0 || tokcmp(tok, ltok, "setclass") == 0) {
         if (dbenv->num_allow_lines >= dbenv->max_allow_lines) {
             dbenv->max_allow_lines += 1;
             dbenv->allow_lines = realloc(
@@ -1314,8 +1327,7 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
         logmsg(LOGMSG_INFO, "Enabled logical logging\n");
     } else if (tokcmp(tok, ltok, "enable_snapshot_isolation") == 0) {
         enable_snapshot(dbenv);
-    } else if (tokcmp(tok, ltok, "enable_new_snapshot") == 0 ||
-               tokcmp(tok, ltok, "enable_new_snapshot_asof") == 0) {
+    } else if (tokcmp(tok, ltok, "enable_new_snapshot") == 0 || tokcmp(tok, ltok, "enable_new_snapshot_asof") == 0) {
         set_snapshot_impl(SNAP_IMPL_NEW);
         enable_snapshot(dbenv);
     } else if (tokcmp(tok, ltok, "enable_new_snapshot_logging") == 0) {
