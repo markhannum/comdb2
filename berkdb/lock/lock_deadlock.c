@@ -82,6 +82,8 @@ static int __dd_build __P((DB_ENV *,
 	locker_info **, int **, int *, int));
 static int __dd_find __P((DB_ENV *, u_int32_t *, sparse_map_t *, locker_info *,
 	u_int32_t, u_int32_t, u_int32_t ***, u_int32_t **, int *));
+static int __dd_find_and_abort_timestamp __P((DB_ENV *, u_int32_t *, sparse_map_t *, locker_info *,
+    u_int32_t, u_int32_t, int *, int));
 static int __dd_find_timestamp __P((DB_ENV *, u_int32_t *, sparse_map_t *, locker_info *,
 	u_int32_t, u_int32_t, int *, int));
 static int __dd_abort_timestamp __P((DB_ENV *, u_int32_t *, sparse_map_t *, locker_info *,
@@ -521,6 +523,9 @@ __lock_detect(dbenv, atype, abortp)
 /* Verify that we can relibly reproduce "compound" distributed deadlocks */
 int gbl_debug_disable_waitdie_deadlock_detection = 0;
 
+/* Incremental waitdie detection */
+int gbl_incremental_waitdie_deadlock_detection = 1;
+
 static int
 __lock_detect_int(dbenv, atype, abortp, can_retry)
 	DB_ENV *dbenv;
@@ -636,13 +641,18 @@ __lock_detect_int(dbenv, atype, abortp, can_retry)
 
 	/* Find & abort waitdie dependencies then rebuild map */
 	if (tscnt > 0 && !gbl_debug_disable_waitdie_deadlock_detection) {
-		__dd_find_timestamp(dbenv, bitmap, sparse_map, idmap, nlockers, nalloc, tslst, tscnt);
-        __dd_abort_timestamp(dbenv, bitmap, sparse_map, idmap, nlockers, nalloc, tslst, tscnt);
-		lock_lockers(region);
-		ret = __dd_build(dbenv, atype, &bitmap, &sparse_map, &nlockers, &nalloc,
-			&idmap, NULL, NULL, is_client);
-		lock_max = region->stat.st_cur_maxid;
-		unlock_lockers(region);
+        if (gbl_incremental_waitdie_deadlock_detection) {
+            __dd_find_and_abort_timestamp(dbenv, bitmap, sparse_map, idmap, nlockers, nalloc, tslst, tscnt);
+        }  else {
+            __dd_find_timestamp(dbenv, bitmap, sparse_map, idmap, nlockers, nalloc, tslst, tscnt);
+            __dd_abort_timestamp(dbenv, bitmap, sparse_map, idmap, nlockers, nalloc, tslst, tscnt);
+        }
+
+        lock_lockers(region);
+        ret = __dd_build(dbenv, atype, &bitmap, &sparse_map, &nlockers, &nalloc,
+                &idmap, NULL, NULL, is_client);
+        lock_max = region->stat.st_cur_maxid;
+        unlock_lockers(region);
 	}
 	/* If no timestamps then just use map we've already built */
 
@@ -1684,7 +1694,7 @@ __dd_abort_timestamp(dbenv, bmp, sparse_map, idmap, nlockers, nalloc, tslst, tsc
 		int aborted = 0;
 		for (l = 0; !aborted && l < tscnt; l++) {
 			j = tslst[l];
-			if (!ISSET_MAP(mymap, j)) {
+			if (j == i || !ISSET_MAP(mymap, j)) {
 				continue;
 			}
 			otherts = idmap[j].timestamp;
@@ -1698,6 +1708,44 @@ __dd_abort_timestamp(dbenv, bmp, sparse_map, idmap, nlockers, nalloc, tslst, tsc
 			}
 		}
 	}
+	return 0;
+}
+
+static int
+__dd_find_and_abort_timestamp(dbenv, bmp, sparse_map, idmap, nlockers, nalloc, tslst, tscnt)
+	DB_ENV *dbenv;
+	u_int32_t *bmp, nlockers, nalloc;
+	sparse_map_t *sparse_map;
+	locker_info *idmap;
+	int *tslst;
+	int tscnt;
+{
+	/* New algorithm: 
+     *
+	 * 1) Sort the list of timestamp lockers in order of youngest transaction (highest timestamp)
+     * 2) Zero-fill an 'aborted' map to keep track of the lockids we have aborted
+     *
+     * In a FOR-EACH-LOCKID loop (which traverses the reordered-timestamp list):
+     *    3) Assert that initial dependencies don't have timestamps for sanity
+     *       Begin a 'wait-for-bitmap-to-not-change' loop:
+	 *       4) For each bit lit in its waitsfor map:
+     *          AND the owners bitmap against the NOT of the aborted map
+     *          OR our map against this map
+	 *       5) If our map hasn't changed, break out & this lockid survives
+	 *       6) If new map contains younger timestamps, abort-self & add id to aborted-map
+     *
+     * Also each bitmap doesn't change 'in-place' so the dependencies of a transaction
+     * which is later aborted arn't considered.
+     */
+
+	u_int32_t *tmpmap, *cpymap = NULL, *mymap;
+	int ret, i, j, k, nlocker_iters = 0, iter_cnt, max_iter_cnt = 0;
+
+	if ((ret = __os_malloc(dbenv, sizeof(u_int32_t) * nalloc, &cpymap))!=0) {
+		goto err;
+	}
+
+
 	return 0;
 }
 
@@ -1715,7 +1763,8 @@ __dd_find_timestamp(dbenv, bmp, sparse_map, idmap, nlockers, nalloc, tslst, tscn
 	int ret, i, j, k, nlocker_iters = 0, iter_cnt, max_iter_cnt = 0;
 
 	if ((ret = __os_malloc(dbenv, sizeof(u_int32_t) * nalloc, &cpymap))!=0) {
-		goto err;
+		logmsg(LOGMSG_FATAL, "%s:%d malloc failed\n", __FILE__, __LINE__);
+		abort();
 	}
 
 	/* Iterate through timestamp lockids */
