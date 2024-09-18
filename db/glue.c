@@ -96,6 +96,7 @@
 #include "txn_properties.h"
 #include <comdb2_atomic.h>
 #include <bbhrtime.h>
+#include "schema_lk.h"
 
 int (*comdb2_ipc_master_set)(char *host) = 0;
 
@@ -4226,7 +4227,15 @@ int backend_open_tran(struct dbenv *dbenv, tran_type *tran, uint32_t flags)
 
 int backend_open(struct dbenv *dbenv)
 {
-    return backend_open_tran(dbenv, NULL, 0);
+    int rc;
+    bdb_state_type *bdb_state = thedb->bdb_env;
+    BDB_READLOCK("backend_open");
+    wrlock_schema_lk();
+    rc = backend_open_tran(dbenv, NULL, 0);
+    unlock_schema_lk();
+    BDB_RELLOCK();
+    return rc;
+    //return backend_open_tran(dbenv, NULL, 0);
 }
 
 void fix_blobstripe_genids(tran_type *tran)

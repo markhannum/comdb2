@@ -32,6 +32,8 @@
 #include "locks.h"
 #include "sys_wrap.h"
 #include "logmsg.h"
+#include "assert.h"
+#include "schema_lk.h"
 
 extern int gbl_rowlocks;
 extern pthread_t gbl_invalid_tid;
@@ -366,6 +368,8 @@ static inline void bdb_get_writelock_int(bdb_state_type *bdb_state,
         abort();
     }
 
+    assert_no_schema_lk();
+
     /* If we're upgrading from read lock to write lock, remember the
      * ref count for our old read lock. */
     if (lk->locktype == READLOCK && lk->lockref > 0) {
@@ -505,6 +509,9 @@ int bdb_get_readlock(bdb_state_type *bdb_state, int trylock, const char *idstr, 
     }
 
     if (lk->lockref == 0) {
+        if (!trylock) 
+            assert_no_schema_lk();
+
 #ifdef _SUN_SOURCE
         if (!lk->initpri) {
             init_thd_priority();

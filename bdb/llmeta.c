@@ -36,6 +36,7 @@
 #include <sys/poll.h>
 #include "debug_switches.h"
 #include "alias.h"
+#include "schema_lk.h"
 extern int gbl_maxretries;
 extern int gbl_disable_access_controls;
 extern int get_csc2_version_tran(const char *table, tran_type *tran);
@@ -1277,8 +1278,10 @@ int bdb_llmeta_open(char name[], char dir[], bdb_state_type *parent_bdb_handle,
         return 0;
     }
 
+    wrlock_schema_lk();
     llmeta_bdb_state = bdb_open_more_lite(
             name, dir, 0, LLMETA_IXLEN, 0, parent_bdb_handle, NULL, 0, bdberr);
+    unlock_schema_lk();
 
     BDB_RELLOCK();
 
