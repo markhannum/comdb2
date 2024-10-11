@@ -3890,6 +3890,8 @@ int bdb_get_in_schema_change(
     struct llmeta_schema_change_type schema_change;
     uint8_t *p_buf, *p_buf_start, *p_buf_end;
 
+    logmsg(LOGMSG_DEBUG, "%s:%d checking %s\n", __func__, __LINE__, db_name);
+
     /*stop here if the db isn't open*/
     if (!llmeta_bdb_state) {
         *bdberr = BDBERR_DBEMPTY;
@@ -3900,12 +3902,14 @@ int bdb_get_in_schema_change(
         logmsg(LOGMSG_ERROR, "%s: NULL argument\n", __func__);
         if (bdberr)
             *bdberr = BDBERR_BADARGS;
+        logmsg(LOGMSG_DEBUG, "%s:%d returning -1\n", __func__, __LINE__);
         return -1;
     }
 
     if (bdb_get_type(llmeta_bdb_state) != BDBTYPE_LITE) {
         logmsg(LOGMSG_ERROR, "%s: llmeta db not lite\n", __func__);
         *bdberr = BDBERR_BADARGS;
+        logmsg(LOGMSG_DEBUG, "%s:%d returning -1\n", __func__, __LINE__);
         return -1;
     }
 
@@ -3925,6 +3929,7 @@ int bdb_get_in_schema_change(
                 __func__);
         logmsg(LOGMSG_ERROR, "%s: check the length of db_name\n", __func__);
         *bdberr = BDBERR_MISC;
+        logmsg(LOGMSG_DEBUG, "%s:%d returning -1\n", __func__, __LINE__);
         return -1;
     }
 
@@ -3951,13 +3956,16 @@ retry:
         }
 
         /* it's ok if no data was found, fail on all other errors*/
-        if (*bdberr != BDBERR_FETCH_DTA)
+        if (*bdberr != BDBERR_FETCH_DTA) {
+            logmsg(LOGMSG_DEBUG, "%s:%d returning -1\n", __func__, __LINE__);
             return -1;
+        }
     }
 
     *schema_change_data_len = datalen;
 
     *bdberr = BDBERR_NOERROR;
+    logmsg(LOGMSG_DEBUG, "%s:%d returning 0, datalen=%d\n", __func__, __LINE__, datalen);
     return 0;
 }
 

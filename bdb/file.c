@@ -8129,6 +8129,9 @@ int bdb_check_files_on_disk(bdb_state_type *bdb_state, const char *tblname, int 
         if (!file_version)
             continue;
 
+        logmsg(LOGMSG_DEBUG, "%s checking tblname %s version %llu\n",
+                __func__, tblname, file_version);
+
         /* brute force scan to find any files on disk that we aren't
          * actually using */
         int found_in_llmeta = 0;
@@ -8138,6 +8141,7 @@ int bdb_check_files_on_disk(bdb_state_type *bdb_state, const char *tblname, int 
          */
         rc = bdb_is_new_sc_file(bdb_state, NULL, tblname, file_version, bdberr);
         if (rc == 1) {
+            logmsg(LOGMSG_DEBUG, "%s: bdb_is_new_sc_file returns true for %s version %llu\n", __func__, tblname, file_version);
             found_in_llmeta = 1;
             rc = 0;
         } else if (rc) {
@@ -8151,6 +8155,7 @@ int bdb_check_files_on_disk(bdb_state_type *bdb_state, const char *tblname, int 
             rc = bdb_process_each_table_dta_entry(bdb_state, NULL, tblname,
                                                   file_version, bdberr);
             if (rc == 1) {
+                logmsg(LOGMSG_DEBUG, "%s: bdb_process_each_dta returns true for %s version %llu\n", __func__, tblname, file_version);
                 found_in_llmeta = 1;
                 rc = 0;
             } else if (rc) {
@@ -8165,6 +8170,7 @@ int bdb_check_files_on_disk(bdb_state_type *bdb_state, const char *tblname, int 
             rc = bdb_process_each_table_idx_entry(bdb_state, NULL, tblname,
                                                   file_version, bdberr);
             if (rc == 1) {
+                logmsg(LOGMSG_DEBUG, "%s: bdb_process_each_idx returns true for %s version %llu\n", __func__, tblname, file_version);
                 found_in_llmeta = 1;
                 rc = 0;
             } else if (rc) {
@@ -8200,6 +8206,9 @@ int bdb_check_files_on_disk(bdb_state_type *bdb_state, const char *tblname, int 
             if (lognum < 0)
                 return -1;
         }
+
+        logmsg(LOGMSG_DEBUG, "%s: %s version %llu adding to oldfiles\n",
+                    __func__, tblname, file_version);
 
         if (oldfile_add(munged_name, lognum, __func__, __LINE__, spew_debug)) {
             print(bdb_state, "failed to add old file to hash: %s\n", ent->d_name);

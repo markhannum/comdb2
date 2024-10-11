@@ -1,0 +1,3 @@
+setattr SC_RESTART_SEC 5
+setattr SC_FORCE_DELAY 1
+SCDELAY 500
