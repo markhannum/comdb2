@@ -36,10 +36,12 @@ function bounce_cluster()
     for node in $CLUSTER; do
         if [[ $node != $master ]]; then
             kill_restart_node $node 1
+            force_delay_sc
             sleep 10
         fi
     done
     kill_restart_node $master 1
+    force_delay_sc
     sleep 10
     allup=0
     while [[ "$allup" -eq 0 ]]; do
@@ -80,7 +82,12 @@ setup
 force_delay_sc
 add_index &
 pid=$!
-sleep 10
-bounce_cluster
-check_oldfile
+echo "Sleeping 30 to verify oldfile behavior before bounce"
+j=0
+while [[ $j -lt 5 ]]; do
+sleep 30
+    bounce_cluster
+    check_oldfile
+    j=$((j+1))
+done
 echo "Success!"
