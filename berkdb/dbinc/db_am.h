@@ -43,6 +43,7 @@
  * Standard initialization and shutdown macros for all recovery functions.
  */
 #define	REC_INTRO(func, inc_count) do {					\
+    void *log_trigger = NULL; \
 	argp = NULL;							\
 	dbc = NULL;							\
 	file_dbp = NULL;						\
@@ -53,7 +54,7 @@
 	}								   \
 	if (argp->type > 3000 || (argp->type > 1000 && argp->type < 2000)) { \
 		if ((ret = __ufid_to_db(dbenv, argp->txnid, &file_dbp, \
-						argp->ufid_fileid, lsnp)) != 0) { \
+						argp->ufid_fileid, &log_trigger, lsnp)) != 0) { \
 			if (ret	== DB_DELETED || ret == DB_IGNORED) { \
 				ret = 0; \
 				goto done; \
@@ -62,6 +63,11 @@
 			fflush(stderr); \
 			CHECK_ABORT				 \
 			goto out;						\
+		} \
+		if (log_trigger != NULL && dbenv->rep_log_trigger_cb) { \
+			char *fname = NULL; \
+			__ufid_to_fname(dbenv, &fname, argp->ufid_fileid); \
+			dbenv->rep_log_trigger_cb(log_trigger, lsnp, &commit_lsn, fname, argp->type, argp); \
 		} \
 	} else { \
 		if ((ret = __dbreg_id_to_db(dbenv, argp->txnid,			\
@@ -75,7 +81,7 @@
 		} \
 	} \
 	if ((ret = __db_cursor(file_dbp, NULL, &dbc, 0)) != 0) {	\
-        CHECK_ABORT                     \
+		CHECK_ABORT					 \
 		goto out;						\
 	}										   \
 	F_SET(dbc, DBC_RECOVER);					\
@@ -91,7 +97,9 @@ extern void __bb_dbreg_print_dblist_stdout(DB_ENV *dbenv);
 	  * deleted file, and we are not in the middle of recovery */
 
 int __log_flush(DB_ENV *dbenv, const DB_LSN *);
+extern __thread DB_LSN commit_lsn;
 #define	REC_INTRO_PANIC(func, inc_count) do {				\
+    void *log_trigger = NULL; \
 	argp = NULL;							\
 	dbc = NULL;							\
 	file_dbp = NULL;						\
@@ -102,7 +110,7 @@ int __log_flush(DB_ENV *dbenv, const DB_LSN *);
 	}								\
 	if ((argp->type > 1000 && argp->type < 2000) || (argp->type > 3000)) {					\
 		ret = __ufid_to_db(dbenv, argp->txnid, &file_dbp,	\
-			argp->ufid_fileid, lsnp);			\
+			argp->ufid_fileid, &log_trigger, lsnp);			\
 	}								\
 	else {								\
 		ret = __dbreg_id_to_db(dbenv, argp->txnid,		\
@@ -119,6 +127,11 @@ int __log_flush(DB_ENV *dbenv, const DB_LSN *);
 		__db_panic(dbenv, DB_RUNRECOVERY);			\
 		abort();						\
 	}								\
+	if (log_trigger != NULL && dbenv->rep_log_trigger_cb) { \
+		char *fname = NULL; \
+		__ufid_to_fname(dbenv, &fname, argp->ufid_fileid); \
+		dbenv->rep_log_trigger_cb(log_trigger, lsnp, &commit_lsn, fname, argp->type, argp); \
+	} \
 	if ((ret = __db_cursor(file_dbp, NULL, &dbc, 0)) != 0) {	\
 		__log_flush(dbenv, NULL);				\
 		abort();						\

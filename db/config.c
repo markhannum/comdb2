@@ -37,6 +37,7 @@
 #include "config.h"
 #include "phys_rep.h"
 #include "phys_rep_lsn.h"
+#include "log_trigger.h"
 #include "macc_glue.h"
 #include "disttxn.h"
 
@@ -1450,6 +1451,12 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
          * marked as READEARLY) */
         read_legacy_defaults(dbenv, options);
 
+    } else if (tokcmp(tok, ltok, "logtrigger") == 0) {
+        while ((tok = segtok(line, len, &st, &ltok)) != NULL && ltok > 0) {
+            char *table = tokdup(tok, ltok);
+            logmsg(LOGMSG_INFO, "log-trigger for %s\n", table);
+            log_trigger_add_table(table);
+        }
     } else if (tokcmp(tok, ltok, "replicate_from") == 0) {
         /* 'replicate_from <dbname> <prod|beta|alpha|dev|host|@hst1,hst2,hst3..>' */
         tok = segtok(line, len, &st, &ltok);

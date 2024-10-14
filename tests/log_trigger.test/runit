@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+
+#set -x
+
+source ${TESTSROOTDIR}/tools/runit_common.sh
+export stopfile=./stopfile.txt
+
+function failexit
+{
+    touch $stopfile
+    echo "Failed: $1"
+    exit -1
+}
+
+function create_tables
+{
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int, b blob)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index t1a on t1(a)"
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table xxx(a int, b blob)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index xxxa on xxx(a)"
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<EOF
+create procedure const1 version 'v1' {$(cat consumer.lua)}\$\$
+create lua consumer const1 on (table xxx for insert and update and delete)
+EOF
+}
+
+function insert_records
+{
+    j=0
+    while [[ $j -lt 10 ]]; do
+
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 select *, randomblob(16384) from generate_series(1, 10)"
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into xxx select *, randomblob(16384) from generate_series(1, 10)"
+        let j=j+1
+    done
+}
+
+function find_trace_node
+{
+    typeset node=$1
+    typeset trace=$2
+    log=$TESTDIR/logs/logtrigger${TESTID}.${node}.db
+    egrep log_trigger_callback $log | egrep $trace
+}
+
+# looking for trace for tables xxx __qconst1
+function find_trigger_trace
+{
+    found=0
+    for node in $CLUSTER ; do
+        find_trace_node $node xxx
+        find_trace_node $node __qconst1
+    done
+}
+
+function check_trigger_trace
+{
+    x=$(find_trigger_trace)
+    if [[ -z $x ]]; then
+        failexit "Trigger did not fire"
+    fi
+    echo "Found trigger trace"
+    echo "$x"
+}
+
+function run_test
+{
+    rm $stopfile 2>/dev/null
+    create_tables
+    insert_records
+    check_trigger_trace
+}
+
+if [[ -z $CLUSTER ]]; then
+    failexit "This test requires a cluster"
+fi
+
+run_test
+if [[ -f "$stopfile" ]]; then
+    echo "Testcase failed"
+    exit 1
+else
+    echo "Success"    
+    exit 0
+fi
