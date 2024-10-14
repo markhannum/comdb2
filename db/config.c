@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <log_queue_trigger.h>
 
 #include "fdb_whitelist.h"
 #include "sqliteInt.h"
@@ -37,6 +38,7 @@
 #include "config.h"
 #include "phys_rep.h"
 #include "phys_rep_lsn.h"
+#include "log_trigger.h"
 #include "macc_glue.h"
 #include "disttxn.h"
 
@@ -803,6 +805,12 @@ static void enable_snapshot(struct dbenv *dbenv) {
         pfx##funcs[i] = NULL;                                                                                          \
     } while (0)
 
+static bdb_state_type *queuehndl(const char *name)
+{
+    struct dbtable *db = getqueuebyname(name);
+    return db ? db->handle : NULL;
+}
+
 static int read_lrl_option(struct dbenv *dbenv, char *line,
                            struct read_lrl_option_type *options, int len,
                            int *is_table)
@@ -1450,6 +1458,21 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
          * marked as READEARLY) */
         read_legacy_defaults(dbenv, options);
 
+    } else if (tokcmp(tok, ltok, "logtrigger") == 0) {
+        while ((tok = segtok(line, len, &st, &ltok)) != NULL && ltok > 0) {
+            char *table = tokdup(tok, ltok);
+            logmsg(LOGMSG_INFO, "log-trigger for %s\n", table);
+            log_trigger_add_table(table);
+        }
+    } else if (tokcmp(tok, ltok, "queuetrigger") == 0) {
+        while ((tok = segtok(line, len, &st, &ltok)) != NULL && ltok > 0) {
+            char *queue = alloca(ltok + 1);
+            tokcpy(tok, ltok, queue);
+            char *bdbq = alloca(ltok + 4);
+            sprintf(bdbq, "__q%s", queue);
+            logmsg(LOGMSG_INFO, "Adding dump-queue-trigger for %s\n", bdbq);
+            register_dump_qtrigger(bdbq, queuehndl);
+        }
     } else if (tokcmp(tok, ltok, "replicate_from") == 0) {
         /* 'replicate_from <dbname> <prod|beta|alpha|dev|host|@hst1,hst2,hst3..>' */
         tok = segtok(line, len, &st, &ltok);
