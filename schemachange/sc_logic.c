@@ -1333,6 +1333,8 @@ int open_temp_db_resume(struct ireq *iq, struct dbtable *db, char *prefix, int r
     tmpname = malloc(nbytes);
     snprintf(tmpname, nbytes, "%s%s", prefix, db->tablename);
 
+    logmsg(LOGMSG_USER, "%s opening temp db %s\n", __func__, tmpname);
+
     db->handle = NULL;
 
     /* open existing temp db if it's there (ie we're resuming after a master

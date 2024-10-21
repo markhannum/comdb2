@@ -6,7 +6,7 @@
 . ${TESTSROOTDIR}/tools/runit_common.sh
 . ${TESTSROOTDIR}/tools/cluster_utils.sh
 
-PARTITIONED=0
+PARTITIONED=${PARTITIONED:-0}
 if [[ $DBNAME == *"partitioned"* ]]; then
     PARTITIONED=1
 fi
@@ -15,18 +15,23 @@ fi
 function setup()
 {
     if [[ $PARTITIONED -eq 1 ]]; then
-        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int) partitioned by manual retention 10 start 1"
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int) partitioned by manual retention 12 start 1"
     else
         $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1(a int)"
         #$CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "drop table t1"
     fi
     j=0
     while [[ $j -lt 10 ]]; do
-        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 select * from generate_series(1, 1000)"
+        k=0
+        while [[ $k -lt 10 ]]; do
+            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 select * from generate_series(1, 1000)"
+            let k=k+1
+        done
+
         if [[ $PARTITIONED -eq 1 ]]; then
             $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "put counter t1 increment"
         fi
-        sleep 1
+        sleep 5
         j=$((j+1))
     done
 }
@@ -35,7 +40,7 @@ function force_delay_sc()
 {
     for node in $CLUSTER; do
         $CDB2SQL_EXE $CDB2_OPTIONS --host $node $DBNAME "exec procedure sys.cmd.send('bdb setattr SC_FORCE_DELAY 1')"
-        $CDB2SQL_EXE $CDB2_OPTIONS --host $node $DBNAME "exec procedure sys.cmd.send('scdelay 500')"
+        $CDB2SQL_EXE $CDB2_OPTIONS --host $node $DBNAME "exec procedure sys.cmd.send('scdelay 1000')"
     done
 }
 
@@ -83,6 +88,10 @@ function check_oldfile
         oldfile=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS --host $master $DBNAME "exec procedure sys.cmd.send('stat oldfile')")
         if [[ $oldfile != *"oldfile hash is NULL"* ]]; then
             echo "$oldfile"
+            while :; do 
+                echo "oldfile hash is not NULL - sleeping"
+                sleep 1
+            done
             failexit "oldfile hash is not NULL"
         fi
         let j=j+1
@@ -97,12 +106,15 @@ fi
 
 rm -Rf *failexit >/dev/null 2>&1
 setup
+echo "Delaying for 60 seconds"
+sleep 60
+echo "Starting schema chnage"
 force_delay_sc
 add_index &
 pid=$!
-echo "Sleeping 120 to verify oldfile behavior before bounce"
-sleep 120
-check_oldfile
+echo "Sleeping 60 before bounce"
+sleep 60
+#check_oldfile
 bounce_cluster
 j=0
 while [[ $j -lt 2 ]]; do

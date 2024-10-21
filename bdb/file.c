@@ -5676,6 +5676,7 @@ static bdb_state_type *bdb_open_int(int envonly, const char name[], const char d
     pthread_t dummy_tid;
     const char *tmp;
     extern unsigned gbl_blob_sz_thresh_bytes;
+    logmsg(LOGMSG_USER, "%s name %s\n", __func__, name);
 
     pthread_once(&ONCE_LOCK, run_once);
 
