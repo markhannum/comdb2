@@ -1,0 +1,601 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+set -x
+
+source ${TESTSROOTDIR}/tools/runit_common.sh
+source ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export comdb2ar=${COMDB2AR_EXE}
+export FIGLET=$(which figlet)
+export META_DBNAME=metadb
+export PHYSREP=physrep
+export PIDLIST=""
+export FIRSTNODE=""
+export FIGLET=$(which figlet)
+
+# Stats
+declare -A master_base
+declare -A master_stats
+
+declare -A physrep_base
+declare -A physrep_stats
+
+declare -A master_diff
+declare -A physrep_diff
+
+function announce
+{
+    typeset text=$1
+    echo "$text"
+    [[ -z "$FIGLET" ]] && figlet -f banner $text
+}
+
+function testcase_preamble
+{
+    typeset testcase=$1
+    announce "Running $testcase"
+}
+
+function testcase_finish
+{
+    typeset testcase=$1
+    announce "Finished $testcase"
+}
+
+function cleanup_internal()
+{
+    local METADIR=${DBDIR}/$META_DBNAME
+    typeset sig=$1
+    echo "Killing pids $PIDLIST"
+    kill -$sig $PIDLIST
+
+    if [[ -n "$CLUSTER" ]]; then
+        for node in $CLUSTER; do
+            pid=$(ssh $node "cat ${METADIR}/${META_DBNAME}.pid")
+            ssh $node "kill -$sig $$pid" < /dev/null
+        done
+
+        pid=$(ssh $FIRSTNODE "cat ${DBDIR}/${PHYSREP}/${PHYSREP}.pid")
+        ssh $FIRSTNODE "kill -$sig $$pid" < /dev/null
+    else
+        node=$(hostname)
+        kill -$sig $(cat ${METADIR}/${META_DBNAME}.pid)
+        kill -$sig $(cat ${DBDIR}/${PHYSREP}/${PHYSREP}.pid)
+    fi
+}
+
+function cleanup()
+{
+    cleanup_internal 9
+}
+
+function cleanupabort()
+{
+    cleanup_internal 15
+}
+
+function cleanfailexit()
+{
+    cleanup
+    failexit $@
+}
+
+function gather_metric
+{
+    local dbname=$1
+    local host=$2
+    local metric=$3
+    x=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${host} ${dbname} "select value from comdb2_metrics where name='${metric}'")
+    echo "$x"
+}
+
+function compare_metric
+{
+    local metric=$1
+    local threshold=$2
+    local master=$3
+    local physrep=$4
+
+    # We 'pass' if the physrep is less than threshold% above the master
+    local upper=$(( master + ( (master * threshold) / 100 ) ))
+    if [[ $physrep -gt $upper ]]; then
+        echo "$metric: FAILED, more than $threshold% above master"
+        cleanfailexit
+    else
+        echo "$metric: PASSED master: $master physrep: $physrep within $threshold%"
+    fi
+}
+
+function print_master_diff
+{
+    echo "Master page reads: ${master_diff["page_reads"]}"
+    echo "Master page writes: ${master_diff["page_writes"]}"
+    echo "Master fsyncs: ${master_diff["fsyncs"]}"
+    echo "Master mempgets: ${master_diff["mempgets"]}"
+    echo "Master page bytes read: ${master_diff["page_bytes_read"]}"
+    echo "Master page bytes written: ${master_diff["page_bytes_written"]}"
+}
+
+function print_physrep_diff
+{
+    echo "Physrep page reads: ${physrep_diff["page_reads"]}"
+    echo "Physrep page writes: ${physrep_diff["page_writes"]}"
+    echo "Physrep fsyncs: ${physrep_diff["fsyncs"]}"
+    echo "Physrep mempgets: ${physrep_diff["mempgets"]}"
+    echo "Physrep page bytes read: ${physrep_diff["page_bytes_read"]}"
+    echo "Physrep page bytes written: ${physrep_diff["page_bytes_written"]}"
+}
+
+function dump_metric()
+{
+    local mode=$1
+    local metric=$2
+    local master=$3
+    local physrep=$4
+
+    printf "%-7s | %-18s | %-17s | %-17s |\n" "$mode" "$metric" "Master: $master" "Physrep: $physrep"
+}
+
+function compare_dump()
+{
+    set +x
+    typeset mode=$1
+    echo "Dumping data for mode $mode"
+    echo "---------------------------"
+    dump_metric $mode "Page reads" ${master_diff["page_reads"]} ${physrep_diff["page_reads"]}
+    dump_metric $mode "Page writes" ${master_diff["page_writes"]} ${physrep_diff["page_writes"]}
+    dump_metric $mode "Fsyncs" ${master_diff["fsyncs"]} ${physrep_diff["fsyncs"]}
+    dump_metric $mode "Mempgets" ${master_diff["mempgets"]} ${physrep_diff["mempgets"]}
+    dump_metric $mode "Page bytes read" ${master_diff["page_bytes_read"]} ${physrep_diff["page_bytes_read"]}
+    dump_metric $mode "Page bytes written" ${master_diff["page_bytes_written"]} ${physrep_diff["page_bytes_written"]}
+    echo "---------------------------"
+    set -x
+}
+
+function compare_metrics()
+{
+    typeset mode=$1
+    compare_dump $mode
+    compare_metric "$mode Page reads" 20 ${master_diff["page_reads"]} ${physrep_diff["page_reads"]}
+    compare_metric "$mode Page writes" 20 ${master_diff["page_writes"]} ${physrep_diff["page_writes"]}
+    compare_metric "$mode Fsyncs" 40 ${master_diff["fsyncs"]} ${physrep_diff["fsyncs"]}
+    compare_metric "$mode Mempgets" 20 ${master_diff["mempgets"]} ${physrep_diff["mempgets"]}
+    compare_metric "$mode Page bytes read" 20 ${master_diff["page_bytes_read"]} ${physrep_diff["page_bytes_read"]}
+    compare_metric "$mode Page bytes written" 20 ${master_diff["page_bytes_written"]} ${physrep_diff["page_bytes_written"]}
+}
+
+function calc_master_diff
+{
+    local a
+    local b
+
+    a=${master_stats["page_reads"]}
+    b=${master_base["page_reads"]}
+    master_diff["page_reads"]=$(( a - b ))
+
+    a=${master_stats["page_writes"]}
+    b=${master_base["page_writes"]}
+    master_diff["page_writes"]=$(( a - b ))
+    
+    a=${master_stats["fsyncs"]}
+    b=${master_base["fsyncs"]}
+    master_diff["fsyncs"]=$(( a - b ))
+
+    a=${master_stats["mempgets"]}
+    b=${master_base["mempgets"]}
+    master_diff["mempgets"]=$(( a - b ))
+
+    a=${master_stats["page_bytes_read"]}
+    b=${master_base["page_bytes_read"]}
+    master_diff["page_bytes_read"]=$(( a - b ))
+
+    a=${master_stats["page_bytes_written"]}
+    b=${master_base["page_bytes_written"]}
+    master_diff["page_bytes_written"]=$(( a - b ))
+
+}
+
+function calc_physrep_diff
+{
+    local a
+    local b
+
+    a=${physrep_stats["page_reads"]}
+    b=${physrep_base["page_reads"]}
+    physrep_diff["page_reads"]=$(( a - b ))
+
+    a=${physrep_stats["page_writes"]}
+    b=${physrep_base["page_writes"]}
+    physrep_diff["page_writes"]=$(( a - b ))
+
+    a=${physrep_stats["fsyncs"]}
+    b=${physrep_base["fsyncs"]}
+    physrep_diff["fsyncs"]=$(( a - b ))
+
+    a=${physrep_stats["mempgets"]}
+    b=${physrep_base["mempgets"]}
+    physrep_diff["mempgets"]=$(( a - b ))
+
+    a=${physrep_stats["page_bytes_read"]}
+    b=${physrep_base["page_bytes_read"]}
+    physrep_diff["page_bytes_read"]=$(( a - b ))
+
+    a=${physrep_stats["page_bytes_written"]}
+    b=${physrep_base["page_bytes_written"]}
+    physrep_diff["page_bytes_written"]=$(( a - b ))
+}
+
+function gather_physrep_base
+{
+    physrep_base["page_reads"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_reads")"
+    physrep_base["page_writes"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_writes")"
+    physrep_base["fsyncs"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "fsyncs")"
+    physrep_base["mempgets"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "mempgets")"
+    physrep_base["page_bytes_read"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_bytes_read")"
+    physrep_base["page_bytes_written"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_bytes_written")"
+}
+
+function gather_physrep_stats
+{
+    physrep_stats["page_reads"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_reads")"
+    physrep_stats["page_writes"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_writes")"
+    physrep_stats["fsyncs"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "fsyncs")"
+    physrep_stats["mempgets"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "mempgets")"
+    physrep_stats["page_bytes_read"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_bytes_read")"
+    physrep_stats["page_bytes_written"]="$(gather_metric ${PHYSREP} ${FIRSTNODE} "page_bytes_written")"
+}
+
+function gather_master_base
+{
+    master=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs ${DBNAME} default "select host from comdb2_cluster where is_master='Y'")
+    master_base["page_reads"]=$(gather_metric ${DBNAME} ${master} "page_reads")
+    master_base["page_writes"]=$(gather_metric ${DBNAME} ${master} "page_writes")
+    master_base["fsyncs"]=$(gather_metric ${DBNAME} ${master} "fsyncs")
+    master_base["mempgets"]=$(gather_metric ${DBNAME} ${master} "mempgets")
+    master_base["page_bytes_read"]=$(gather_metric ${DBNAME} ${master} "page_bytes_read")
+    master_base["page_bytes_written"]=$(gather_metric ${DBNAME} ${master} "page_bytes_written")
+}
+
+function gather_master_stats
+{
+    master=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs ${DBNAME} default "select host from comdb2_cluster where is_master='Y'")
+    master_stats["page_reads"]="$(gather_metric ${DBNAME} ${master} "page_reads")"
+    master_stats["page_writes"]="$(gather_metric ${DBNAME} ${master} "page_writes")"
+    master_stats["fsyncs"]="$(gather_metric ${DBNAME} ${master} "fsyncs")"
+    master_stats["mempgets"]="$(gather_metric ${DBNAME} ${master} "mempgets")"
+    master_stats["page_bytes_read"]="$(gather_metric ${DBNAME} ${master} "page_bytes_read")"
+    master_stats["page_bytes_written"]="$(gather_metric ${DBNAME} ${master} "page_bytes_written")"
+}
+
+function create_test_table
+{
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "CREATE TABLE IF NOT EXISTS t1(a INT)"
+    count=0
+    while [[ "$count" == "0" ]]; do
+        count=$($CDB2SQL_EXE $CDB2_OPTIONS --tabs $PHYSREP --host $FIRSTNODE "select count(*) from comdb2_tables where tablename='t1'")
+        sleep 1
+    done
+}
+
+function create_physrep_tables()
+{
+    local host=$1
+    $CDB2SQL_EXE $CDB2_OPTIONS --host $host ${META_DBNAME} "CREATE TABLE comdb2_physreps(dbname CStriNG(60), host CSTRING(120), file INT, offset INT, firstfile INT, last_keepalive DATETIME, state CSTRING(60), UNIQUE(dbname,host))"
+    if [[ $? -ne 0 ]]; then
+        cleanfailexit "Failed to create table comdb2_physreps"
+    fi
+    $CDB2SQL_EXE ${CDB2_OPTIONS} --host $host $META_DBNAME "CREATE TABLE comdb2_physrep_connections(dbname CSTRING(60), host CSTRING(120), source_dbname CSTRING(60), source_host CSTRING(120), UNIQUE (dbname, host, source_dbname, source_host), FOREIGN KEY(dbname, host) REFERENCES comdb2_physreps(dbname, host) ON DELETE CASCADE)"
+    if [[ $? -ne 0 ]]; then
+        cleanfailexit "Failed to create table comdb2_physrep_connections"
+    fi
+
+    $CDB2SQL_EXE ${CDB2_OPTIONS} --host $host $META_DBNAME "CREATE TABLE comdb2_physrep_sources(dbname CSTRING(60), host CSTRING(120), source_dbname CSTRING(60), source_host CSTRING(120), UNIQUE (dbname, host, source_dbname, source_host))"
+
+    if [[ $? -ne 0 ]]; then
+        cleanfailexit "Failed to create table comdb2_physrep_sources"
+    fi
+    echo "Physrep tables created"
+}
+
+function fix_lrl_and_restart_source_nodes
+{
+    if [[ -z "$CLUSTER" ]]; then
+        node=$(hostname)
+        echo "physrep_metadb ${META_DBNAME} $FIRSTNODE" >> ${DBDIR}/${DBNAME}.lrl
+        echo "physrep_debug 1" >> ${DBDIR}/${DBNAME}.lrl
+        kill_restart_node $node 10 &
+        sleep 10
+
+        out=""
+        while [[ "$out" != "1" ]]; do
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${DBNAME} 'select 1' 2>/dev/null)
+            sleep 1
+        done
+
+    else
+        for node in $CLUSTER; do
+            ssh ${node} "echo physrep_metadb ${META_DBNAME} $FIRSTNODE >> ${DBDIR}/${DBNAME}.lrl" < /dev/null
+            ssh ${node} "echo physrep_debug 1 >> ${DBDIR}/${DBNAME}.lrl" < /dev/null
+            echo "physrep_metadb ${META_DBNAME} $FIRSTNODE" >> ${DBDIR}/${DBNAME}.lrl
+            echo "physrep_debug 1" >> ${DBDIR}/${DBNAME}.lrl
+            kill_restart_node $node 10 &
+        done
+        sleep 10
+        for node in $CLUSTER ; do 
+            out=""
+            while [[ "$out" != "1" ]]; do
+                out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${DBNAME} 'select 1' 2>/dev/null)
+                sleep 1
+            done
+        done
+    fi
+}
+
+function setup_physrep_metadb()
+{
+    local METADIR=${DBDIR}/$META_DBNAME
+
+    mkdir -p $METADIR
+    if [[ -z "$CLUSTER" ]]; then
+        node=$(hostname)
+        logfile=$TESTDIR/logs/${META_DBNAME}.${node}.log
+        cat <<END >> $METADIR/${META_DBNAME}.lrl
+name ${META_DBNAME}
+dir ${METADIR}
+physrep_register_interval 10
+revsql_debug 1
+physrep_debug 1
+tranlog_incoherent_timeout 10
+forbid_remote_admin 0
+logmsg level debug
+ctrace_dbdir 1
+allow_lua_print 1
+physrep_update_registry_interval 1
+physrep_keepalive_v2 1
+END
+
+        $COMDB2_EXE ${META_DBNAME} --create --lrl ${METADIR}/${META_DBNAME}.lrl --pidfile ${METADIR}/${META_DBNAME}.pid >> $logfile 2>&1
+        $COMDB2_EXE ${META_DBNAME} --lrl ${METADIR}/${META_DBNAME}.lrl --pidfile ${METADIR}/${META_DBNAME}.pid >> $logfile 2>&1 &
+        echo "$META_DBNAME: waiting until ready"
+        while [[ "$out" != "1" ]]; do
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${META_DBNAME} 'select 1' 2>/dev/null)
+            sleep 1
+        done
+        PIDLIST="${PIDLIST} $(cat ${METADIR}/${META_DBNAME}.pid)"
+        create_physrep_tables ${node}
+    else
+        FIRSTNODE=""
+        for node in $CLUSTER; do
+            logfile=$TESTDIR/logs/${META_DBNAME}.${node}.log
+            ssh ${node} "mkdir -p $METADIR" < /dev/null
+
+            if [[ -z "$FIRSTNODE" ]]; then
+                FIRSTNODE=$node
+                cat <<END >> $METADIR/${META_DBNAME}.lrl
+name ${META_DBNAME}
+dir ${METADIR}
+cluster nodes ${CLUSTER}
+physrep_fanout_override $DBNAME 3
+tranlog_incoherent_timeout 10
+physrep_register_interval 10
+revsql_debug 1
+physrep_debug 1
+forbid_remote_admin 0
+logmsg level debug
+ctrace_dbdir 1
+allow_lua_print 1
+physrep_update_registry_interval 1
+physrep_keepalive_v2 1
+END
+                scp $METADIR/${META_DBNAME}.lrl ${node}:$METADIR/${META_DBNAME}.lrl
+                ssh ${node} "$COMDB2_EXE ${META_DBNAME} --create --lrl ${METADIR}/${META_DBNAME}.lrl --pidfile ${METADIR}/${META_DBNAME}.pid >> $logfile 2>&1" < /dev/null
+            else
+                ssh $node "${COPYCOMDB2_EXE} -x ${COMDB2_EXE} $FIRSTNODE:${METADIR}/${META_DBNAME}.lrl $METADIR/" >> $logfile 2>&1 < /dev/null
+                if [[ ! $? -eq 0 ]]; then
+                    cleanfailexit "copycomdb2 failed for $node"
+                fi
+            fi
+        done
+
+        for node in $CLUSTER; do
+            logfile=$TESTDIR/logs/${META_DBNAME}.${node}.log
+            ssh ${node} "$COMDB2_EXE ${META_DBNAME} --lrl ${METADIR}/${META_DBNAME}.lrl --pidfile ${METADIR}/${META_DBNAME}.pid" >> $logfile 2>&1 < /dev/null &
+            PIDLIST="${PIDLIST} $!"
+        done
+
+        for node in $CLUSTER; do
+            out=""
+            while [[ "$out" != "1" ]]; do
+                out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${META_DBNAME} 'select 1' 2>/dev/null)
+                echo "$META_DBNAME: waiting until ready"
+                sleep 1
+            done
+        done
+
+        create_physrep_tables $FIRSTNODE
+    fi
+    echo "Physrep replication metadb cluster/node started!"
+}
+
+function setup_standalone_physrep()
+{
+    local PHYSDIR=${DBDIR}/$PHYSREP
+    if [[ -z "$CLUSTER" ]]; then
+        node=$(hostname)
+        logfile=$TESTDIR/logs/${PHYSREP}.log
+        ${COPYCOMDB2_EXE} -x ${COMDB2_EXE} -H ${PHYSREP} -y @${FIRSTNODE} ${FIRSTNODE}:${DBDIR}/${DBNAME}.lrl $PHYSDIR $PHYSDIR >> $logfile 2>&1
+        if [[ $? -ne 0 ]]; then
+            cleanfailexit "failed creating physrep for $node"
+        fi
+        $COMDB2_EXE ${PHYSREP} --lrl $PHYSDIR/${PHYSREP}.lrl --pidfile $PHYSDIR/${PHYSREP}.pid >> $logfile 2>&1 &
+        out=""
+        while [[ "$out" != "1" ]]; do
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${PHYSREP} 'select 1' 2>/dev/null)
+            sleep 1
+        done
+    else
+        node=$FIRSTNODE
+        logfile=$TESTDIR/logs/${PHYSREP}.$FIRSTNODE.log
+        ssh ${node} "${COPYCOMDB2_EXE} -x ${COMDB2_EXE} -H ${PHYSREP} -y @${FIRSTNODE} ${FIRSTNODE}:${DBDIR}/${DBNAME}.lrl $PHYSDIR $PHYSDIR" >> $logfile 2>&1 < /dev/null
+        if [[ $? -ne 0 ]]; then
+            cleanfailexit "failed creating physrep for $node"
+        fi
+
+        ssh ${node} "$COMDB2_EXE ${PHYSREP} --lrl $PHYSDIR/${PHYSREP}.lrl --pidfile $PHYSDIR/${PHYSREP}.pid" >> $logfile 2>&1 < /dev/null &
+        PIDLIST="${PIDLIST} $!"
+        out=""
+        while [[ "$out" != "1" ]]; do
+            out=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host ${node} ${PHYSREP} 'select 1' 2>/dev/null)
+            sleep 1
+        done
+
+    fi
+}
+
+function setup()
+{
+    setup_physrep_metadb
+    fix_lrl_and_restart_source_nodes
+    setup_standalone_physrep
+    create_test_table
+}
+
+function announce
+{
+    typeset text=$1
+    echo "$text"
+    [[ -z "$FIGLET" ]] && figlet -f banner $text
+}
+
+function testcase_finish
+{
+    typeset testcase=$1
+    announce "Finished $testcase"
+}
+
+function testcase_preamble
+{
+    typeset testcase=$1
+    announce "Running $testcase"
+}
+
+# Bad .. causes additional pagereads
+function block_physrep_count()
+{
+    local target=$1
+    local count=0
+    while [[ "$count" -ne "$target" ]]; do
+        count=$($CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $FIRSTNODE $PHYSREP "select count(*) from t1")
+        sleep 1
+    done
+}
+
+function block_physrep_sync()
+{
+    s_lsn=$($CDB2SQL_EXE -admin --tabs $CDB2_OPTIONS $DBNAME default "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1" | tr -d {} | cut -f2 -d":")
+    r_lsn=$($CDB2SQL_EXE  $CDB2_OPTIONS --tabs $PHYSREP --host $FIRSTNODE "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1" | tr -d {} | cut -f2 -d":")
+    while [[ "$s_lsn" -ne "$r_lsn" ]]; do
+        sleep 1
+        s_lsn=$($CDB2SQL_EXE -admin --tabs $CDB2_OPTIONS $DBNAME default "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1" | tr -d {} | cut -f2 -d":")
+        r_lsn=$($CDB2SQL_EXE $CDB2_OPTIONS --tabs $PHYSREP --host $FIRSTNODE "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1" | tr -d {} | cut -f2 -d":")
+    done
+}
+
+function load_rows()
+{
+    local rows=$1
+    local iters=$(( rows / 1000 ))
+    local target=$2
+    local i=0
+
+    while [[ $i -lt $iters ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 select * from generate_series(1, 1000)"
+        i=$(( i + 1 ))
+    done
+    block_physrep_sync
+}
+
+function count_revconn()
+{
+    typeset count=0
+    count=$($CDB2SQL_EXE -tabs ${CDB2_OPTIONS} ${PHYSREP} --host $FIRSTNODE "exec procedure sys.cmd.send('stat thr')" | egrep "reversesql" | wc -l)
+    echo $count
+}
+
+function make_physrep_revconn()
+{
+    if [[ -z "$CLUSTER" ]]; then
+        node=$(hostname)
+        $CDB2SQL_EXE ${CDB2_OPTIONS} $META_DBNAME --host $FIRSTNODE "insert into comdb2_physrep_sources values ('${PHYSREP}', '${FIRSTNODE}', '${DBNAME}', '${node}')"
+    else
+        for node in $CLUSTER; do
+            $CDB2SQL_EXE ${CDB2_OPTIONS} $META_DBNAME --host $FIRSTNODE "insert into comdb2_physrep_sources values('${PHYSREP}', '${FIRSTNODE}', '${DBNAME}', '${node}')"
+        done
+    fi
+    local count=0
+
+    while [[ "$count" -eq "0" ]]; do
+        count=$(count_revconn)
+        sleep 1
+    done
+}
+
+function load_rows_5000000()
+{
+    gather_master_base
+    gather_physrep_base
+    j=1
+    while [[ $j -le 5 ]]; do
+        load_rows 1000000 $(( j * 1000000 ))
+        sleep 10
+        let j=j+1
+    done
+    gather_master_stats
+    gather_physrep_stats
+    calc_master_diff
+    calc_physrep_diff
+    print_master_diff
+    print_physrep_diff
+    compare_metrics normal
+    $CDB2SQL_EXE ${CDB2_OPTIONS} $DBNAME default "truncate t1"
+}
+
+function load_rows_5000000_revconn()
+{
+    make_physrep_revconn
+    gather_master_base
+    gather_physrep_base
+    j=1
+    while [[ $j -le 5 ]]; do
+        load_rows 1000000 $(( j * 1000000 ))
+        sleep 10
+        let j=j+1
+    done
+    gather_master_stats
+    gather_physrep_stats
+    calc_master_diff
+    calc_physrep_diff
+    print_master_diff
+    print_physrep_diff
+    compare_metrics revconn
+    $CDB2SQL_EXE ${CDB2_OPTIONS} $DBNAME default "truncate t1"
+}
+
+function run_test()
+{
+    testcase="load_rows_5000000"
+    testcase_preable $testcase
+    load_rows_5000000
+    testcase_finish $testcase
+
+    testcase="load_rows_5000000_revconn"
+    testcase_preable $testcase
+    load_rows_5000000_revconn
+    testcase_finish $testcase
+}
+
+setup
+run_test
+cleanup
+echo "Success!"
