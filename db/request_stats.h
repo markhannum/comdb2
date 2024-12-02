@@ -55,6 +55,15 @@ struct per_request_stats {
     long long writebytes;
 };
 
+struct global_stats {
+    int64_t page_reads;
+    int64_t page_writes;
+    int64_t fsyncs;
+    int64_t mempgets;
+    int64_t page_bytes_read;
+    int64_t page_bytes_written;
+};
+
 void user_request_begin(enum request_type type, int flags);
 struct per_request_stats *user_request_get_stats(void);
 void user_request_end(void);
@@ -62,6 +71,7 @@ void user_request_read_callback(int);
 void user_request_write_callback(int);
 void user_request_memp_callback(void);
 void user_request_init(void);
+void global_request_stats(struct global_stats *stats);
 
 void user_request_on(void);
 void user_request_off(void);

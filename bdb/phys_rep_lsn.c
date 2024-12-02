@@ -506,7 +506,8 @@ LOG_INFO find_match_lsn(void *in_bdb_state, cdb2_hndl_tp *repl_db, LOG_INFO star
                             physrep_logmsg(LOGMSG_FATAL, "Require elect-highest-committed-gen on source- exiting\n");
                             exit(1);
                         }
-                        physrep_logmsg(LOGMSG_ERROR, "Require elect-highest-committed-gen source\n");
+                        physrep_logmsg(LOGMSG_ERROR, "Require elect-highest-committed-gen source {%d:%d}\n", info.file,
+                                       info.offset);
                     } else {
                         info.gen = *gen;
                     }
@@ -564,7 +565,7 @@ int physrep_bdb_wait_for_seqnum(bdb_state_type *bdb_state, DB_LSN *lsn, void *da
         return 0;
     }
 
-    seqnum_type seqnum;
+    seqnum_type seqnum = {0};
     seqnum.lsn.file = lsn->file;
     seqnum.lsn.offset = lsn->offset;
     // seqnum.issue_time = ?
