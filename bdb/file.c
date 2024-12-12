@@ -7179,6 +7179,16 @@ static int bdb_free_int(bdb_state_type *bdb_state, bdb_state_type *replace,
         for (int i = 0; i < child->numix; ++i) {
             free(child->fld_hints_pd[i]);
         }
+        if (child->stable) {
+            struct stable_genids *sg;
+            Pthread_mutex_lock(&child->stable_genids_lk);
+            while ((sg = listc_rtl(&child->stable_genid_list)) != NULL) {
+                free(sg);
+            }
+            Pthread_mutex_unlock(&child->stable_genids_lk);
+            Pthread_mutex_destroy(&child->stable_genids_lk);
+            Pthread_cond_destroy(&child->stable_genids_cd);
+        }
 
         // free bthash
         bdb_handle_dbp_drop_hash(child);
@@ -7453,6 +7463,91 @@ uint64_t bdb_queuedb_size(bdb_state_type *bdb_state)
         totalSize += mystat(bdb_trans(tmpname, tmpnamenew));
     }
     return totalSize;
+}
+
+int bdb_queue_can_read_stable(bdb_state_type *bdb_state, u_int64_t genid)
+{
+    int rtn = 0;
+    Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+    struct stable_genids *ck = (struct stable_genids *)LISTC_TOP(&bdb_state->stable_genid_list);
+    if (!ck || bdb_cmp_genids(genid, ck->genid) < 0) {
+        rtn = 1;
+    }
+    Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+    return rtn;
+}
+
+static void bdb_queue_reset_stable(bdb_state_type *bdb_state)
+{
+    Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+    struct stable_genids *sg;
+    while ((sg = listc_rtl(&bdb_state->stable_genid_list)) != NULL) {
+        free(sg);
+    }
+    sg = calloc(1, sizeof(struct stable_genids));
+    listc_abl(&bdb_state->stable_genid_list, sg);
+    Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+}
+
+static void bdb_queue_notify_stable(bdb_state_type *bdb_state, DB_LSN *lsn)
+{
+    Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+    while (listc_size(&bdb_state->stable_genid_list) > 0) {
+        struct stable_genids *ck = (struct stable_genids *)LISTC_TOP(&bdb_state->stable_genid_list);
+        if (log_compare(&ck->commit_lsn, lsn) > 0) {
+            break;
+        }
+        struct stable_genids *sg = listc_rtl(&bdb_state->stable_genid_list);
+        free(sg);
+    }
+    Pthread_cond_signal(&bdb_state->stable_genids_cd);
+    Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+}
+
+void reset_stable_queues(void)
+{
+    for (int i = 0; i < thedb->num_qdbs && thedb->qdbs[i]->dbtype == DBTYPE_QUEUEDB; i++) {
+        if (thedb->qdbs[i]->handle && thedb->qdbs[i]->handle->stable) {
+            bdb_queue_reset_stable(thedb->qdbs[i]->handle);
+        }
+    }
+}
+
+void notify_stable_queues(DB_LSN *lsn)
+{
+    for (int i = 0; i < thedb->num_qdbs && thedb->qdbs[i]->dbtype == DBTYPE_QUEUEDB; i++) {
+        if (thedb->qdbs[i]->handle && thedb->qdbs[i]->handle->stable) {
+            bdb_queue_notify_stable(thedb->qdbs[i]->handle, lsn);
+        }
+    }
+}
+
+void update_stable_queue(bdb_state_type *bdb_state, const u_int8_t key[12], const DB_LSN *commit_lsn)
+{
+    if (bdb_state->stable) {
+        DB_LSN wait_lsn;
+        retrieve_wait_lsn(&wait_lsn);
+        if (log_compare(&wait_lsn, commit_lsn) >= 0) {
+            return;
+        }
+
+        int cmp = 0;
+        Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+
+        struct stable_genids *sg = LISTC_BOT(&bdb_state->stable_genid_list);
+        if (sg && (cmp = log_compare(&sg->commit_lsn, commit_lsn)) == 0) {
+            Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+            return;
+        }
+
+        assert(!sg || cmp < 0);
+        struct stable_genids *sg_new = malloc(sizeof(struct stable_genids));
+        sg_new->commit_lsn = *commit_lsn;
+        int32_t *kptr = (int32_t *)key;
+        memcpy(&sg_new->genid, &kptr[1], sizeof(int32_t) * 2);
+        listc_abl(&bdb_state->stable_genid_list, sg_new);
+        Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+    }
 }
 
 uint64_t bdb_queue_size(bdb_state_type *bdb_state, unsigned *num_extents)
