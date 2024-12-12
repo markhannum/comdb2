@@ -378,10 +378,10 @@ REGISTER_TUNABLE("dont_init_queue_with_persistent_sequence",
                  "Disables 'init_queue_with_persistent_sequence'",
                  TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("dont_init_with_queue_persistent_sequence",
-                 "Disables 'dont_init_with_queue_ondisk_header'",
-                 TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
-                 INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("dont_init_with_queue_stable",
+                 "DIsables 'init_with_queue_stable'", TUNABLE_BOOLEAN,
+                 &gbl_init_with_queue_stable, INVERSE_VALUE | READONLY | NOARG,
+                 NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("dont_optimize_repdb_truncate",
                  "Disable 'optimize_repdb_truncate'", TUNABLE_BOOLEAN,
                  &gbl_optimize_truncate_repdb,
@@ -631,6 +631,11 @@ REGISTER_TUNABLE("init_with_queue_persistent_sequence",
                  "Initialize queues with persistent sequence numbers. "
                  "(Default: on)",
                  TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
+                 READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("init_with_queue_stable",
+                 "Initialize queues with stable feature.  "
+                 "(Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_init_with_queue_stable,
                  READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("init_with_rowlocks",
                  "Enables row-locks for the database. (Default: 0)",

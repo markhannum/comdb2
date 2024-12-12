@@ -650,6 +650,27 @@ static const char *sync_to_str(int sync)
     }
 }
 
+static pthread_mutex_t wait_lsn_lk = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t wait_lsn_cond = PTHREAD_COND_INITIALIZER;
+
+static DB_LSN wait_lsn = {0};
+
+int retrieve_wait_lsn(DB_LSN *lsn)
+{
+    Pthread_mutex_lock(&wait_lsn_lk);
+    *lsn = wait_lsn;
+    Pthread_mutex_unlock(&wait_lsn_lk);
+    return 0;
+}
+
+void update_wait_lsn(DB_LSN *lsn)
+{
+    Pthread_mutex_lock(&wait_lsn_lk);
+    wait_lsn = *lsn;
+    pthread_cond_broadcast(&wait_lsn_cond);
+    Pthread_mutex_unlock(&wait_lsn_lk);
+}
+
 static int trans_wait_for_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
                                      struct ireq *iq, char *source_node,
                                      int timeoutms, int adaptive,
@@ -743,6 +764,12 @@ static int trans_wait_for_seqnum_int(void *bdb_handle, struct dbenv *dbenv,
         if (next_commit > now)
             poll(0, 0, next_commit - now);
     }
+    DB_LSN commit_lsn = {.file = iq->commit_file, .offset = iq->commit_offset};
+    Pthread_mutex_lock(&wait_lsn_lk);
+    if (log_compare(&commit_lsn, &wait_lsn) > 0) {
+        wait_lsn = commit_lsn;
+    }
+    Pthread_mutex_unlock(&wait_lsn_lk);
 
     end_ms = comdb2_time_epochms();
     iq->reptimems += (end_ms - start_ms);
@@ -3886,7 +3913,7 @@ static int init_odh_lrl(struct dbtable *d, int *compr, int *compr_blobs,
 }
 
 static int init_queue_odh_lrl(struct dbtable *d, int *compr,
-                              int *persistent_seq)
+                              int *persistent_seq, int *stable)
 {
     if (gbl_init_with_queue_odh == 0) {
         gbl_init_with_queue_compr = 0;
@@ -3903,24 +3930,29 @@ static int init_queue_odh_lrl(struct dbtable *d, int *compr,
         put_db_queue_sequence(d, NULL, 0) != 0) {
         return -1;
     }
+    if (put_db_queue_stable(d, NULL, gbl_init_with_queue_stable) != 0)
+        return -1;
     d->odh = gbl_init_with_queue_odh;
     *compr = gbl_init_with_queue_compr;
     *persistent_seq = gbl_init_with_queue_persistent_seq;
+    *stable = gbl_init_with_queue_stable;
     return 0;
 }
 
 static int init_queue_odh_llmeta(struct dbtable *d, int *compr, int *persist,
-                                 tran_type *tran)
+                                 int *stable, tran_type *tran)
 {
     if (get_db_queue_odh_tran(d, &d->odh, tran) != 0 || d->odh == 0) {
         d->odh = 0;
         *compr = 0;
         *persist = 0;
+        *stable = 0;
         return 0;
     }
 
     get_db_queue_compress_tran(d, compr, tran);
     get_db_queue_persistent_seq_tran(d, persist, tran);
+    get_db_queue_stable_tran(d, stable, tran);
     return 0;
 }
 
@@ -4103,19 +4135,20 @@ int backend_open_tran(struct dbenv *dbenv, tran_type *tran, uint32_t flags)
         struct dbtable *queue = dbenv->qdbs[ii];
         int compress;
         int persist;
+        int stable;
         if (gbl_create_mode) {
-            if (init_queue_odh_lrl(queue, &compress, &persist) != 0) {
+            if (init_queue_odh_lrl(queue, &compress, &persist, &stable) != 0) {
                 logmsg(LOGMSG_ERROR, "save queue odh to llmeta failed\n");
                 return -1;
             }
         } else {
-            if (init_queue_odh_llmeta(queue, &compress, &persist, tran) != 0) {
+            if (init_queue_odh_llmeta(queue, &compress, &persist, &stable, tran) != 0) {
                 logmsg(LOGMSG_ERROR, "fetch queue odh from llmeta failed\n");
                 return -1;
             }
         }
 
-        set_bdb_queue_option_flags(queue, queue->odh, compress, persist);
+        set_bdb_queue_option_flags(queue, queue->odh, compress, persist, stable);
     }
 
     for (ii = 0; ii < dbenv->num_dbs; ii++) {
@@ -4639,6 +4672,10 @@ get_put_db(bthash, META_BTHASH)
 // get_db_queue_persistent_seq, get_db_queue_persistent_seq_tran,
 // put_db_queue_persistent_seq
 get_put_db(queue_persistent_seq, META_QUEUE_PERSISTENT_SEQ)
+
+// get_db_queue_stable, get_db_queue_stable_tran,
+// put_db_queue_stable
+get_put_db(queue_stable, META_QUEUE_STABLE)
 
 // get_db_queue_sequence, get_db_queue_sequence_tran,
 // put_db_queue_sequence

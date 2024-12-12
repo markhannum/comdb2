@@ -246,7 +246,32 @@ uint8_t *rep_berkdb_seqnum_type_put(const seqnum_type *p_seqnum_type,
                     sizeof(p_seqnum_type->commit_generation), p_buf, p_buf_end);
     p_buf = buf_put(&(p_seqnum_type->generation),
                     sizeof(p_seqnum_type->generation), p_buf, p_buf_end);
+    p_buf = buf_put(&(p_seqnum_type->wait_lsn.file), sizeof(p_seqnum_type->wait_lsn.file),
+                    p_buf, p_buf_end);
+    p_buf = buf_put(&(p_seqnum_type->wait_lsn.offset), sizeof(p_seqnum_type->wait_lsn.offset),
+                    p_buf, p_buf_end);
+    return p_buf;
+}
 
+static const uint8_t *rep_berkdb_seqnum_type_get_old(seqnum_type *p_seqnum_type,
+                                                 const uint8_t *p_buf,
+                                                 const uint8_t *p_buf_end)
+{
+    if (p_buf_end < p_buf || BDB_SEQNUM_TYPE_LEN > (p_buf_end - p_buf))
+        return NULL;
+
+    p_buf = buf_get(&(p_seqnum_type->lsn.file), sizeof(p_seqnum_type->lsn.file),
+                    p_buf, p_buf_end);
+    p_buf = buf_get(&(p_seqnum_type->lsn.offset),
+                    sizeof(p_seqnum_type->lsn.offset), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_seqnum_type->issue_time),
+                    sizeof(p_seqnum_type->issue_time), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_seqnum_type->lease_ms), sizeof(p_seqnum_type->lease_ms),
+                    p_buf, p_buf_end);
+    p_buf = buf_get(&(p_seqnum_type->commit_generation),
+                    sizeof(p_seqnum_type->commit_generation), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_seqnum_type->generation),
+                    sizeof(p_seqnum_type->generation), p_buf, p_buf_end);
     return p_buf;
 }
 
@@ -269,6 +294,10 @@ static const uint8_t *rep_berkdb_seqnum_type_get(seqnum_type *p_seqnum_type,
                     sizeof(p_seqnum_type->commit_generation), p_buf, p_buf_end);
     p_buf = buf_get(&(p_seqnum_type->generation),
                     sizeof(p_seqnum_type->generation), p_buf, p_buf_end);
+    p_buf = buf_get(&(p_seqnum_type->wait_lsn.file), sizeof(p_seqnum_type->wait_lsn.file),
+                    p_buf, p_buf_end);
+    p_buf = buf_get(&(p_seqnum_type->wait_lsn.offset), sizeof(p_seqnum_type->wait_lsn.offset),
+                    p_buf, p_buf_end);
 
     return p_buf;
 }
@@ -3601,7 +3630,7 @@ int bdb_get_myseqnum(bdb_state_type *bdb_state, seqnum_type *seqnum)
 
 int get_myseqnum(bdb_state_type *bdb_state, uint8_t *p_net_seqnum)
 {
-    seqnum_type seqnum;
+    seqnum_type seqnum = {0};
     DB_LSN our_lsn;
     int rc = 0;
     uint64_t issue_time;
@@ -3628,6 +3657,8 @@ int get_myseqnum(bdb_state_type *bdb_state, uint8_t *p_net_seqnum)
     issue_time = gettimeofday_ms();
     memcpy(&seqnum.issue_time, &issue_time, sizeof(issue_time));
     seqnum.lease_ms = bdb_state->attr->master_lease;
+    int retrieve_wait_lsn(DB_LSN *wait_lsn);
+    retrieve_wait_lsn(&seqnum.wait_lsn);
 
     p_buf = p_net_seqnum;
     p_buf_end = p_net_seqnum + BDB_SEQNUM_TYPE_LEN;
@@ -5105,7 +5136,7 @@ static int berkdb_receive_rtn_int(void *ack_handle, void *usr_ptr,
     int rc;
     int seqnum;
     int outrc = 0;
-    seqnum_type berkdb_seqnum;
+    seqnum_type berkdb_seqnum = {0};
     int filenum = 0;
     unsigned long long master_cmpcontext;
 
@@ -5226,8 +5257,17 @@ static int berkdb_receive_rtn_int(void *ack_handle, void *usr_ptr,
     case USER_TYPE_BERKDB_NEWSEQ:
         p_buf = dta;
         p_buf_end = ((uint8_t *)dta + dtalen);
-        p_buf = (uint8_t *)rep_berkdb_seqnum_type_get(&berkdb_seqnum, p_buf,
+        if (dtalen == BDB_SEQNUM_TYPE_LEN_OLD) {
+            p_buf = (uint8_t *)rep_berkdb_seqnum_type_get_old(&berkdb_seqnum, p_buf,
                                                       p_buf_end);
+        } else {
+            p_buf = (uint8_t *)rep_berkdb_seqnum_type_get(&berkdb_seqnum, p_buf,
+                                                      p_buf_end);
+            if (berkdb_seqnum.wait_lsn.file != 0) {
+                void update_wait_lsn(DB_LSN *lsn);
+                update_wait_lsn(&berkdb_seqnum.wait_lsn);
+            }
+        }
 
         got_new_seqnum_from_node(bdb_state, &berkdb_seqnum, from_node, from_interned, is_tcp);
         break;

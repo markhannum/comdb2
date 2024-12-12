@@ -480,9 +480,14 @@ struct seqnum_t {
     uint32_t lease_ms;
     uint32_t commit_generation;
     uint32_t generation;
+    DB_LSN wait_lsn;
 };
 
-enum { BDB_SEQNUM_TYPE_LEN = 8 + 2 + 2 + 4 + 12 };
+enum { BDB_SEQNUM_TYPE_LEN_OLD = 8 + 2 + 2 + 4 + 12 };
+enum { BDB_SEQNUM_TYPE_LEN = 8 + 2 + 2 + 4 + 12 + 8 };
+
+BB_COMPILE_TIME_ASSERT(bdb_seqnum_type1,
+                       (sizeof(struct seqnum_t) - 8) == BDB_SEQNUM_TYPE_LEN_OLD);
 
 BB_COMPILE_TIME_ASSERT(bdb_seqnum_type,
                        sizeof(struct seqnum_t) == BDB_SEQNUM_TYPE_LEN);
@@ -813,6 +818,12 @@ struct sc_redo_lsn {
     LINKC_T(struct sc_redo_lsn) lnk;
 };
 
+struct stable_genids {
+    unsigned long long lowest_genid;
+    DB_LSN commit_lsn;
+    LINKC_T(struct stable_genids) lnk;
+};
+
 struct bdb_state_tag {
     pthread_attr_t pthread_attr_detach;
     seqnum_info_type *seqnum_info;
@@ -991,6 +1002,12 @@ struct bdb_state_tag {
     signed char compress;      /* boolean: compress data? */
     signed char compress_blobs; /*boolean: compress blobs? */
     signed char persistent_seq; /* boolean: persistent seq for queue? */
+
+    /* Stable-queue */
+    signed char stable : 1;
+    pthread_mutex_t stable_genids_lk;
+    pthread_cond_t stable_genids_cd;
+    LISTC_T(struct stable_genids) stable_genid_list;
 
     signed char got_gblcontext;
     signed char need_to_upgrade;

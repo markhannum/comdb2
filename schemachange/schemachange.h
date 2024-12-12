@@ -289,6 +289,7 @@ struct schema_change_type {
 
     int (*publish)(tran_type *, struct schema_change_type *);
     void (*unpublish)(struct schema_change_type *);
+    unsigned stable_queue : 1;
 };
 
 typedef int (*ddl_t)(struct ireq *, struct schema_change_type *, tran_type *);

@@ -7179,6 +7179,16 @@ static int bdb_free_int(bdb_state_type *bdb_state, bdb_state_type *replace,
         for (int i = 0; i < child->numix; ++i) {
             free(child->fld_hints_pd[i]);
         }
+        if (child->stable) {
+            struct stable_genids *sg;
+            Pthread_mutex_lock(&child->stable_genids_lk);
+            while ((sg = listc_rtl(&child->stable_genid_list)) != NULL) {
+                free(sg);
+            }
+            Pthread_mutex_unlock(&child->stable_genids_lk);
+            Pthread_mutex_destroy(&child->stable_genids_lk);
+            Pthread_cond_destroy(&child->stable_genids_cd);
+        }
 
         // free bthash
         bdb_handle_dbp_drop_hash(child);
