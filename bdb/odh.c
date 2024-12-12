@@ -1304,16 +1304,32 @@ int bdb_cput_pack(bdb_state_type *bdb_state, int is_blob, DBC *dbcp, DBT *key,
     return rc;
 }
 
-void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
-                               int compression, int persistseq)
+#include <stable_queue_trigger.h>
+
+void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh, int compression, int persistseq, int stable)
 {
     print(bdb_state,
           "BDB queue options set: ODH %d compression %d "
-          "persitent_seq %d\n",
-          odh, compression, persistseq);
+          "persitent_seq %d, stable_queue %d\n",
+          odh, compression, persistseq, stable);
     bdb_state->ondisk_header = odh;
     bdb_state->compress = compression;
     bdb_state->persistent_seq = persistseq;
+    bdb_state->stable = stable;
+    if (stable) {
+        Pthread_mutex_init(&bdb_state->stable_genids_lk, NULL);
+        Pthread_cond_init(&bdb_state->stable_genids_cd, NULL);
+        listc_init(&bdb_state->stable_genid_list, offsetof(struct stable_genids, lnk));
+
+        /* Sentinel value prevents reads until we get a seqnum */
+        struct stable_genids *sg = calloc(sizeof(struct stable_genids), 1);
+        listc_abl(&bdb_state->stable_genid_list, sg);
+
+        /* Register for updates */
+        char *qname = alloca(strlen(bdb_state->name) + 4);
+        sprintf(qname, "__q%s", bdb_state->name);
+        register_stable_queue(qname);
+    }
 }
 
 void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,

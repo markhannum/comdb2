@@ -287,6 +287,13 @@ struct checkpoint_list {
     LINKC_T(struct checkpoint_list) lnk;
 };
 
+/* Maintain first genid added to each queue on master */
+struct queue_first_genid {
+    bdb_state_type *queue;
+    unsigned long long first_genid;
+    LINKC_T(struct queue_first_genid) lnk;
+};
+
 struct tran_tag {
     tranclass_type tranclass;
     DB_TXN *tid;
@@ -468,6 +475,9 @@ struct tran_tag {
     hash_t *pglogs_queue_hash;
     u_int32_t flags;
     int is_prepared;
+
+    /* Stable-queue handling on master */
+    LISTC_T(struct queue_first_genid) queue_first_genids;
 };
 
 struct seqnum_t {
@@ -477,9 +487,13 @@ struct seqnum_t {
     uint32_t lease_ms;
     uint32_t commit_generation;
     uint32_t generation;
+    DB_LSN wait_lsn;
 };
 
-enum { BDB_SEQNUM_TYPE_LEN = 8 + 2 + 2 + 4 + 12 };
+enum { BDB_SEQNUM_TYPE_LEN_OLD = 8 + 2 + 2 + 4 + 12 };
+enum { BDB_SEQNUM_TYPE_LEN = 8 + 2 + 2 + 4 + 12 + 8 };
+
+BB_COMPILE_TIME_ASSERT(bdb_seqnum_type1, (sizeof(struct seqnum_t) - 8) == BDB_SEQNUM_TYPE_LEN_OLD);
 
 BB_COMPILE_TIME_ASSERT(bdb_seqnum_type,
                        sizeof(struct seqnum_t) == BDB_SEQNUM_TYPE_LEN);
@@ -816,6 +830,24 @@ struct sc_redo_lsn {
     LINKC_T(struct sc_redo_lsn) lnk;
 };
 
+/* genid->commit_lsn mapping
+ *
+ * When a commit-lsn becomes 'stable', we allow readers to see this genid, the next element on the
+ * list will show the next stable-genid target- meaning clients can de-queue genids below the first
+ * on the list.
+ *
+ * These entries are removed as new sequences inform us the database that lsns have become stable ..
+ * so the client read-code only needs to care about the genid of the first element of this list.  If
+ * the queue-read's genid is less than the genid of the first element, then allow the read.  If it
+ * is greater than or equal to the first element, pretend there is no data */
+
+struct stable_genids {
+    /* Lowest genid in this queue for this commit_lsn */
+    u_int64_t genid;
+    DB_LSN commit_lsn;
+    LINKC_T(struct stable_genids) lnk;
+};
+
 struct bdb_state_tag {
     pthread_attr_t pthread_attr_detach;
     seqnum_info_type *seqnum_info;
@@ -990,10 +1022,17 @@ struct bdb_state_tag {
 
     signed char sanc_ok;
 
-    signed char ondisk_header; /* boolean: give each record an ondisk header? */
-    signed char compress;      /* boolean: compress data? */
+    signed char ondisk_header;  /* boolean: give each record an ondisk header? */
+    signed char compress;       /* boolean: compress data? */
     signed char compress_blobs; /*boolean: compress blobs? */
     signed char persistent_seq; /* boolean: persistent seq for queue? */
+
+    /* Stable-queue */
+    signed char stable : 1;
+    pthread_mutex_t stable_genids_lk;
+    pthread_cond_t stable_genids_cd;
+    LISTC_T(struct stable_genids) stable_genid_list;
+    signed char signal_queue : 1;
 
     signed char got_gblcontext;
     signed char need_to_upgrade;
@@ -1879,11 +1918,34 @@ int bdb_committed_durable(bdb_state_type *bdb_state);
 
 int bdb_list_all_fileids_for_newsi(bdb_state_type *, hash_t *);
 
-int bdb_prepare_put_pack_updateid(bdb_state_type *bdb_state, int is_blob,
-                                  DBT *data, DBT *data2, int updateid,
+int bdb_prepare_put_pack_updateid(bdb_state_type *bdb_state, int is_blob, DBT *data, DBT *data2, int updateid,
                                   void **freeptr, void *stackbuf, int odhready);
 
 int net_get_lsn_rectype(const void *buf, int buflen, DB_LSN *lsn, int *myrectype);
 void pstack_self(void);
+
+/* Copy out most recent replicated lsn */
+int retrieve_wait_lsn(DB_LSN *lsn);
+
+/* Set replicated lsn */
+void update_wait_lsn(DB_LSN *lsn);
+
+/* Reset replicated lsn */
+void clear_wait_lsn(void);
+
+/* Inform queues of new replicated lsn */
+void notify_stable_queues(DB_LSN *lsn);
+
+/* Wake queues modified by new replicated lsn */
+void signal_stable_queues(void);
+
+/* Drain queues & set sentinel value */
+void reset_stable_queues(void);
+
+/* Add commit-lsn / genid mapping to stable queue */
+void update_stable_queue(bdb_state_type *bdb_state, const u_int64_t genid, const DB_LSN *commit_lsn);
+
+/* Returns true if next value has replicated */
+int bdb_queue_can_read_stable(bdb_state_type *bdb_state, u_int64_t genid);
 
 #endif /* __bdb_int_h__ */

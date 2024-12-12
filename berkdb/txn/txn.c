@@ -1607,6 +1607,10 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 
 	Pthread_mutex_unlock(&dbenv->txmap->txmap_mutexp);
 
+	if (!txnp->parent && dbenv->txn_commit_callback != NULL) {
+		dbenv->txn_commit_callback(dbenv, txnp, txnp->last_lsn);
+	}
+
 	remove_td_txn(txnp);
 	if (logbytes) {
 		(*logbytes) = txnp->logbytes;

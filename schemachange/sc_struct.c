@@ -43,6 +43,7 @@ struct schema_change_type *init_schemachange_type(struct schema_change_type *sc)
     sc->ip_updates = -1;
     sc->instant_sc = -1;
     sc->persistent_seq = -1;
+    sc->stable = -1;
     sc->dbnum = -1; /* -1 = not changing, anything else = set value */
     sc->source_node[0] = 0;
     sc->timepartition_name = NULL;
@@ -273,11 +274,8 @@ int pack_schema_change_protobuf(struct schema_change_type *s, void **packed_sc, 
         sc.tpmergeversion = s->partition.u.mergetable.version;
     }
     }
-    /* if (sc_version > 3) {
-     *    sc.has_optional = 1;
-     *    sc.optional = 123;
-     * }
-     */
+    sc.has_stable_queue = 1;
+    sc.stable_queue = s->stable_queue;
 
     size_t psize = cdb2__schemachange__get_packed_size(&sc);
     if (psize == 0) {
@@ -407,6 +405,12 @@ int unpack_schema_change_protobuf(struct schema_change_type *s, void *packed_sc,
         s->partition.u.mergetable.tablename[sizeof(s->partition.u.mergetable.tablename) - 1] = '\0';
         s->partition.u.mergetable.version = sc->tpmergeversion;
     }
+    }
+
+    if (sc->has_stable_queue) {
+        s->stable_queue = sc->stable_queue;
+    } else {
+        s->stable_queue = -1;
     }
 
     return 0;

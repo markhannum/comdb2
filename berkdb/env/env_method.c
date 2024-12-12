@@ -102,6 +102,8 @@ static int __dbenv_trigger_pause __P((DB_ENV *, const char *));
 static int __dbenv_trigger_unpause __P((DB_ENV *, const char *));
 static int __dbenv_trigger_pause_all __P((DB_ENV *));
 static int __dbenv_trigger_unpause_all __P((DB_ENV *));
+static int __dbenv_trigger_signal __P((DB_ENV *, const char *));
+static int __dbenv_set_txn_commit_callback __P((DB_ENV *, void (*)(DB_ENV *, DB_TXN *, DB_LSN)));
 int __dbenv_apply_log __P((DB_ENV *, unsigned int, unsigned int, int64_t,
             void*, int));
 size_t __dbenv_get_log_header_size __P((DB_ENV*)); 
@@ -240,6 +242,7 @@ __dbenv_init(dbenv)
 		dbenv->get_open_flags = __dbenv_get_open_flags;
 		dbenv->set_alloc = __dbenv_set_alloc;
 		dbenv->set_app_dispatch = __dbenv_set_app_dispatch;
+        dbenv->set_txn_commit_callback = __dbenv_set_txn_commit_callback;
 		dbenv->get_data_dirs = __dbenv_get_data_dirs;
 		dbenv->set_data_dir = __dbenv_set_data_dir;
 		dbenv->get_encrypt_flags = __dbenv_get_encrypt_flags;
@@ -351,6 +354,7 @@ __dbenv_init(dbenv)
 	dbenv->trigger_ispaused = __dbenv_trigger_ispaused;
 	dbenv->trigger_pause = __dbenv_trigger_pause;
 	dbenv->trigger_unpause = __dbenv_trigger_unpause;
+	dbenv->trigger_signal = __dbenv_trigger_signal;
 	dbenv->trigger_pause_all = __dbenv_trigger_pause_all;
 	dbenv->trigger_unpause_all = __dbenv_trigger_unpause_all;
 
@@ -424,6 +428,21 @@ __dbenv_set_alloc(dbenv, mal_func, real_func, free_func)
 	dbenv->db_malloc = mal_func;
 	dbenv->db_realloc = real_func;
 	dbenv->db_free = free_func;
+	return (0);
+}
+
+/*
+ * __dbenv_set_txn_commit_callback --
+ * Set a callback function for txn_commit which is invoked before releasing
+ * lock.
+ */
+static int
+__dbenv_set_txn_commit_callback(dbenv, callback)
+	DB_ENV *dbenv;
+	void (*callback) __P((DB_ENV *, DB_TXN *, DB_LSN));
+{
+	ENV_ILLEGAL_AFTER_OPEN(dbenv, "DB_ENV->set_txn_commit_callback");
+	dbenv->txn_commit_callback = callback;
 	return (0);
 }
 
@@ -1400,6 +1419,19 @@ __dbenv_lock_or_unlock_a_trigger_subscription(void *obj, void *action)
 		t->status = TRIGGER_SUBSCRIPTION_OPEN;
 		t->was_open = 0;
 	}
+	Pthread_mutex_unlock(&t->lock);
+	return 0;
+}
+
+static int
+__dbenv_trigger_signal(dbenv, fname)
+	DB_ENV *dbenv;
+	const char *fname;
+{
+	struct __db_trigger_subscription *t;
+	t = __db_get_trigger_subscription(fname);
+	Pthread_mutex_lock(&t->lock);
+	Pthread_cond_signal(&t->cond);
 	Pthread_mutex_unlock(&t->lock);
 	return 0;
 }

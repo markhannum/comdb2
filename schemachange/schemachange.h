@@ -166,6 +166,7 @@ struct schema_change_type {
     int compress;       /* new compression algorithm or -1 for no change */
     int compress_blobs; /* new blob com algorithm or -1 for no change */
     int persistent_seq; /* init queue with persistent sequence */
+    int stable;         /* init with stable-queue */
     int ip_updates;     /* inplace updates or -1 for no change */
     int instant_sc;     /* 1 is enable, 0 disable, or -1 for no change */
     int preempted;
@@ -287,6 +288,7 @@ struct schema_change_type {
     unsigned is_osql : 1;
     unsigned set_running : 1;
     uint64_t seed;
+    unsigned stable_queue : 1;
 
     int (*publish)(tran_type *, struct schema_change_type *);
     void (*unpublish)(struct schema_change_type *);

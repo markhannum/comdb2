@@ -49,6 +49,7 @@ add_library(bdb
   rowlocks.c
   rowlocks_util.c
   serializable.c
+  stable_queue_trigger.c
   summarize.c
   temphash.c
   temptable.c

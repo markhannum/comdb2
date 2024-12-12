@@ -381,15 +381,14 @@ REGISTER_TUNABLE("dont_init_queue_with_persistent_sequence",
                  "Disables 'init_queue_with_persistent_sequence'",
                  TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("dont_init_with_queue_persistent_sequence",
-                 "Disables 'dont_init_with_queue_ondisk_header'",
-                 TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
-                 INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("dont_optimize_repdb_truncate",
-                 "Disable 'optimize_repdb_truncate'", TUNABLE_BOOLEAN,
-                 &gbl_optimize_truncate_repdb,
-                 INVERSE_VALUE | READONLY | NOARG | READEARLY, NULL, NULL, NULL,
-                 NULL);
+REGISTER_TUNABLE("dont_init_with_queue_stable", "DIsables 'init_with_queue_stable'", TUNABLE_BOOLEAN,
+                 &gbl_init_with_queue_stable, INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("init_with_queue_stable",
+                 "Initialize queues with stable feature.  "
+                 "(Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_init_with_queue_stable, READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("dont_optimize_repdb_truncate", "Disable 'optimize_repdb_truncate'", TUNABLE_BOOLEAN,
+                 &gbl_optimize_truncate_repdb, INVERSE_VALUE | READONLY | NOARG | READEARLY, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("dont_prefix_foreign_keys", "Disables 'prefix_foreign_keys'",
                  TUNABLE_BOOLEAN, &gbl_fk_allow_prefix_keys,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
@@ -636,19 +635,13 @@ REGISTER_TUNABLE("init_with_queue_ondisk_header",
 REGISTER_TUNABLE("init_with_queue_persistent_sequence",
                  "Initialize queues with persistent sequence numbers. "
                  "(Default: on)",
-                 TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq,
-                 READONLY | NOARG, NULL, NULL, NULL, NULL);
-REGISTER_TUNABLE("init_with_rowlocks",
-                 "Enables row-locks for the database. (Default: 0)",
-                 TUNABLE_INTEGER, &gbl_init_with_rowlocks, READONLY | NOARG,
-                 NULL, NULL, init_with_rowlocks_update, NULL);
-REGISTER_TUNABLE(
-    "init_with_rowlocks_master_only",
-    "Enables row-locks for the database (master-only). (Default: 0)",
-    TUNABLE_INTEGER, &gbl_init_with_rowlocks, READONLY | NOARG, NULL, NULL,
-    init_with_rowlocks_master_only_update, NULL);
-REGISTER_TUNABLE("init_with_time_based_genids", "Enables time-based GENIDs",
-                 TUNABLE_BOOLEAN, &gbl_init_with_genid48,
+                 TUNABLE_BOOLEAN, &gbl_init_with_queue_persistent_seq, READONLY | NOARG, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("init_with_rowlocks", "Enables row-locks for the database. (Default: 0)", TUNABLE_INTEGER,
+                 &gbl_init_with_rowlocks, READONLY | NOARG, NULL, NULL, init_with_rowlocks_update, NULL);
+REGISTER_TUNABLE("init_with_rowlocks_master_only", "Enables row-locks for the database (master-only). (Default: 0)",
+                 TUNABLE_INTEGER, &gbl_init_with_rowlocks, READONLY | NOARG, NULL, NULL,
+                 init_with_rowlocks_master_only_update, NULL);
+REGISTER_TUNABLE("init_with_time_based_genids", "Enables time-based GENIDs", TUNABLE_BOOLEAN, &gbl_init_with_genid48,
                  INVERSE_VALUE | READONLY | NOARG, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("instant_schema_change",
                  "When possible (eg: when just adding fields) schema change "

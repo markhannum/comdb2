@@ -47,4 +47,5 @@ message CDB2_Schemachange {
   optional uint64 tpstart = 44;
   optional string tpmergetable = 45;
   optional int32 tpmergeversion = 46;
+  optional sint32 stable_queue = 47;
 }

@@ -1146,8 +1146,7 @@ void bdb_set_blobstripe_genid(bdb_state_type *bdb_state,
 void bdb_set_odh_options(bdb_state_type *bdb_state, int odh, int compression,
                          int blob_compression);
 
-void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh,
-                               int compression, int persistseq);
+void bdb_set_queue_odh_options(bdb_state_type *bdb_state, int odh, int compression, int persistseq, int stable);
 
 void bdb_get_compr_flags(bdb_state_type *bdb_state, int *odh, int *compr,
                          int *blob_compr);
@@ -2493,4 +2492,6 @@ int release_locks_int(const char *trace, const char *func, int line, struct sqlc
 int bdb_keylen(bdb_state_type *bdb_state, int ixnum);
 
 void llmeta_collect_tablename_alias(void);
+
+void send_myseqnum_to_all(bdb_state_type *bdb_state, int nodelay);
 #endif

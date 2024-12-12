@@ -1153,6 +1153,16 @@ static int bdb_queuedb_get_int(bdb_state_type *bdb_state, tran_type *tran, DB *d
         goto done;
     }
 
+    /* This genid is not replicated everywhere .. pretend the queue is empty */
+    if (bdb_state->stable && !bdb_queue_can_read_stable(bdb_state, fndk.genid)) {
+        if (gbl_debug_queuedb) {
+            logmsg(LOGMSG_USER, "Genid %016" PRIx64 " queue %s is not stable\n", fndk.genid, bdb_state->name);
+        }
+        *bdberr = BDBERR_FETCH_DTA;
+        rc = -1;
+        goto done;
+    }
+
     /* made this far? massage the data and return it. */
     p_buf = dbt_data.data;
     p_buf_end = p_buf + dbt_data.size;

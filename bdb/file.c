@@ -2300,6 +2300,23 @@ static void panic_func(DB_ENV *dbenv, int errval)
     abort();
 }
 
+extern __thread tran_type *commit_trans;
+
+/* We have to prevent genid's from being dequeue'd before we've updated our stable queue structures.
+ * This is a callback from __txn_commit at the point where we have already written the commit-
+ * record, but before we have released locks. */
+void trans_commit_callback(DB_ENV *berkdb, DB_TXN *tran, DB_LSN commit_lsn)
+{
+    if (commit_trans == NULL || commit_trans->tid != tran)
+        return;
+
+    struct queue_first_genid *qfg;
+    while ((qfg = listc_rtl(&commit_trans->queue_first_genids)) != NULL) {
+        update_stable_queue(qfg->queue, qfg->first_genid, &commit_lsn);
+        free(qfg);
+    }
+}
+
 static void set_dbenv_stuff(DB_ENV *dbenv, bdb_state_type *bdb_state)
 {
     int rc;
@@ -2337,6 +2354,12 @@ static void set_dbenv_stuff(DB_ENV *dbenv, bdb_state_type *bdb_state)
     rc = dbenv->set_lsn_chaining(dbenv, bdb_state->attr->rep_lsn_chaining);
     if (rc != 0) {
         logmsg(LOGMSG_FATAL, "set_lsn_chaining\n");
+        exit(1);
+    }
+
+    rc = dbenv->set_txn_commit_callback(dbenv, trans_commit_callback);
+    if (rc != 0) {
+        logmsg(LOGMSG_FATAL, "set_txn_commit_callback\n");
         exit(1);
     }
 }
@@ -7112,8 +7135,7 @@ static int bdb_free_int(bdb_state_type *bdb_state, bdb_state_type *replace,
 
     /* dont free open bdb handles */
     if (bdb_state->isopen) {
-        print(bdb_state, "bdb_free_int(%s) isopen, not freeing\n",
-              bdb_state->name);
+        print(bdb_state, "bdb_free_int(%s) isopen, not freeing\n", bdb_state->name);
         return -1;
     }
 
@@ -7133,6 +7155,16 @@ static int bdb_free_int(bdb_state_type *bdb_state, bdb_state_type *replace,
         free(child->fld_hints);
         for (int i = 0; i < child->numix; ++i) {
             free(child->fld_hints_pd[i]);
+        }
+        if (child->stable) {
+            struct stable_genids *sg;
+            Pthread_mutex_lock(&child->stable_genids_lk);
+            while ((sg = listc_rtl(&child->stable_genid_list)) != NULL) {
+                free(sg);
+            }
+            Pthread_mutex_unlock(&child->stable_genids_lk);
+            Pthread_mutex_destroy(&child->stable_genids_lk);
+            Pthread_cond_destroy(&child->stable_genids_cd);
         }
 
         // free bthash
@@ -7390,8 +7422,7 @@ static size_t dirent_buf_size(const char *dir)
     if (name_max <= 255)
         name_max = 255;
     name_end = (size_t)offsetof(struct dirent, d_name) + name_max + 1;
-    return (name_end > sizeof(struct dirent) ? name_end
-                                             : sizeof(struct dirent));
+    return (name_end > sizeof(struct dirent) ? name_end : sizeof(struct dirent));
 }
 
 uint64_t bdb_queuedb_size(bdb_state_type *bdb_state)
@@ -7408,6 +7439,118 @@ uint64_t bdb_queuedb_size(bdb_state_type *bdb_state)
         totalSize += mystat(bdb_trans(tmpname, tmpnamenew));
     }
     return totalSize;
+}
+
+/* Return 1 if we can dequeue this genid */
+int bdb_queue_can_read_stable(bdb_state_type *bdb_state, u_int64_t genid)
+{
+    int rtn = 0;
+    Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+    struct stable_genids *ck = (struct stable_genids *)LISTC_TOP(&bdb_state->stable_genid_list);
+    if (!ck || bdb_cmp_genids(genid, ck->genid) < 0) {
+        rtn = 1;
+    }
+    Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+    return rtn;
+}
+
+/* Remove all genids, and enqueue a 0 genid sentinel which will prevent client from dequeueing
+ * anything until retrieving a new seqnum.  New seqnum processing will remove the 0 genid. */
+static void bdb_queue_reset_stable(bdb_state_type *bdb_state)
+{
+    Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+    struct stable_genids *sg;
+    while ((sg = listc_rtl(&bdb_state->stable_genid_list)) != NULL) {
+        free(sg);
+    }
+    sg = calloc(1, sizeof(struct stable_genids));
+    listc_abl(&bdb_state->stable_genid_list, sg);
+    Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+}
+
+/* We've received a seqnum with a new stable lsn.  Remove all entries which are equal to or below
+ * this lsn, then signal the condition. */
+static void bdb_queue_notify_stable(bdb_state_type *bdb_state, DB_LSN *lsn)
+{
+    Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+    while (listc_size(&bdb_state->stable_genid_list) > 0) {
+        struct stable_genids *ck = (struct stable_genids *)LISTC_TOP(&bdb_state->stable_genid_list);
+        if (log_compare(&ck->commit_lsn, lsn) > 0) {
+            break;
+        }
+        struct stable_genids *sg = listc_rtl(&bdb_state->stable_genid_list);
+        bdb_state->signal_queue = 1;
+        free(sg);
+    }
+    Pthread_cond_signal(&bdb_state->stable_genids_cd);
+    Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+}
+
+/* Remove all entries from all stable queues: don't allow any dequeueing until we have received a
+ * seqnum with a stable-lsn from the new master */
+void reset_stable_queues(void)
+{
+    for (int i = 0; i < thedb->num_qdbs && thedb->qdbs[i]->dbtype == DBTYPE_QUEUEDB; i++) {
+        if (thedb->qdbs[i]->handle && thedb->qdbs[i]->handle->stable) {
+            bdb_queue_reset_stable(thedb->qdbs[i]->handle);
+        }
+    }
+}
+
+/* Update all stable queues with the new stable lsn */
+void notify_stable_queues(DB_LSN *lsn)
+{
+    for (int i = 0; i < thedb->num_qdbs && thedb->qdbs[i]->dbtype == DBTYPE_QUEUEDB; i++) {
+        bdb_state_type *bdb_state = thedb->qdbs[i]->handle;
+        if (bdb_state != NULL && bdb_state->stable) {
+            bdb_queue_notify_stable(bdb_state, lsn);
+        }
+    }
+}
+
+void signal_stable_queues(void)
+{
+    for (int i = 0; i < thedb->num_qdbs && thedb->qdbs[i]->dbtype == DBTYPE_QUEUEDB; i++) {
+        bdb_state_type *bdb_state = thedb->qdbs[i]->handle;
+        if (bdb_state != NULL && bdb_state->stable && bdb_state->signal_queue) {
+            bdb_state->parent->dbenv->trigger_signal(bdb_state->parent->dbenv, bdb_state->name);
+            bdb_state->signal_queue = 0;
+        }
+    }
+}
+
+/* This is called by a log-trigger for each new entry placed on a queue.  If this is the first entry
+ * for this commit-lsn, then add the genid->commit_lsn mapping to the stable queue list */
+
+/* TODO: log-triggers are all replicant .. need to think of way for this to work on the master ..
+ * Maintain hash in tran that holds first genid that we add to a queue .. then use a callback from
+ * berkley-commit.  We would call this callback after we have written the commit record (so we know
+ * the commit-lsn), but prior to releasing locks for the transaction */
+void update_stable_queue(bdb_state_type *bdb_state, const u_int64_t genid, const DB_LSN *commit_lsn)
+{
+    if (bdb_state->stable) {
+        DB_LSN wait_lsn;
+        retrieve_wait_lsn(&wait_lsn);
+        if (log_compare(&wait_lsn, commit_lsn) >= 0) {
+            return;
+        }
+
+        int cmp = 0;
+        Pthread_mutex_lock(&bdb_state->stable_genids_lk);
+
+        struct stable_genids *sg = LISTC_BOT(&bdb_state->stable_genid_list);
+        if (sg && (cmp = log_compare(&sg->commit_lsn, commit_lsn)) == 0) {
+            Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+            return;
+        }
+
+        assert(!sg || cmp < 0);
+        struct stable_genids *sg_new = malloc(sizeof(struct stable_genids));
+        sg_new->commit_lsn = *commit_lsn;
+        sg_new->genid = genid;
+        listc_abl(&bdb_state->stable_genid_list, sg_new);
+        Pthread_mutex_unlock(&bdb_state->stable_genids_lk);
+    }
 }
 
 uint64_t bdb_queue_size(bdb_state_type *bdb_state, unsigned *num_extents)

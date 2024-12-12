@@ -386,7 +386,7 @@ enum RMTDB_TYPE {
 };
 
 enum DB_METADATA {
-    META_SCHEMA_RRN = 0, /* use this rrn in the meta table for schema info */
+    META_SCHEMA_RRN = 0,     /* use this rrn in the meta table for schema info */
     META_SCHEMA_VERSION = 1, /* this key holds the current ONDISK schema version
                                 as a 32 bit int */
 
@@ -400,8 +400,8 @@ enum DB_METADATA {
     META_BLOBSTRIPE_GENID_RRN = -3, /* in this rrn store the genid of table
                                        when it was converted to blobstripe */
 
-    META_STUFF_RRN = -4, /* used by pushlogs.c to do "stuff" to the database
-                           until we get past a given lsn. */
+    META_STUFF_RRN = -4,          /* used by pushlogs.c to do "stuff" to the database
+                                    until we get past a given lsn. */
     META_ONDISK_HEADER_RRN = -5,  /* do we have the new ondisk header? */
     META_COMPRESS_RRN = -6,       /* which compression algorithm to use for new
                                      records (if any) */
@@ -415,7 +415,8 @@ enum DB_METADATA {
     META_QUEUE_ODH = -14,
     META_QUEUE_COMPRESS = -15,
     META_QUEUE_PERSISTENT_SEQ = -16,
-    META_QUEUE_SEQ = -17
+    META_QUEUE_SEQ = -17,
+    META_QUEUE_STABLE = -18,
 };
 
 enum CONSTRAINT_FLAGS {
@@ -1788,6 +1789,7 @@ extern int gbl_init_with_genid48;
 extern int gbl_init_with_odh;
 extern int gbl_init_with_queue_odh;
 extern int gbl_init_with_queue_persistent_seq;
+extern int gbl_init_with_queue_stable;
 extern int gbl_init_with_ipu;
 extern int gbl_init_with_instant_sc;
 extern int gbl_init_with_compr;
@@ -2495,6 +2497,9 @@ int put_db_queue_persistent_seq(struct dbtable *db, tran_type *, int persist);
 int get_db_queue_persistent_seq(struct dbtable *db, int *persist);
 int get_db_queue_persistent_seq_tran(struct dbtable *, int *persist,
                                      tran_type *);
+int put_db_queue_stable(struct dbtable *db, tran_type *, int stable);
+int get_db_queue_stable(struct dbtable *db, int *stable);
+int get_db_queue_stable_tran(struct dbtable *, int *stable, tran_type *);
 int put_db_queue_sequence(struct dbtable *db, tran_type *, long long seq);
 int get_db_queue_sequence(struct dbtable *db, long long *seq);
 int get_db_queue_sequence_tran(struct dbtable *, long long *seq, tran_type *);
@@ -3527,8 +3532,7 @@ int rename_table_sequences(tran_type *tran, struct dbtable *, const char *newnam
 
 int alter_table_sequences(struct ireq *iq, tran_type *tran, struct dbtable *old, struct dbtable *new);
 
-void set_bdb_queue_option_flags(struct dbtable *, int odh, int compr,
-                                int persist);
+void set_bdb_queue_option_flags(struct dbtable *, int odh, int compr, int persist, int stable);
 
 extern int gbl_debug_temptables;
 

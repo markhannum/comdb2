@@ -353,9 +353,9 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
   ABORT ACTION AFTER ANALYZE ASC ATTACH BEFORE BEGIN BY CASCADE CAST COLUMNKW
   CONFLICT DATABASE DEFERRED DESC DETACH DO
   EACH END EXCLUSIVE EXPLAIN FAIL FOR
-  IGNORE IMMEDIATE INITIALLY INSTEAD LIKE_KW MATCH NO PLAN
+  IGNORE IMMEDIATE INITIALLY INSTEAD LIKE_KW MATCH NO NOTSTABLE PLAN
   QUERY KEY OF OFFSET PRAGMA RAISE RECURSIVE RELEASE REPLACE RESTRICT ROW ROWS
-  ROLLBACK SAVEPOINT SEQUENCE TEMP TRIGGER VACUUM VIEW VIRTUAL WITH WITHOUT
+  ROLLBACK SAVEPOINT SEQUENCE STABLE TEMP TRIGGER VACUUM VIEW VIRTUAL WITH WITHOUT
 %ifdef SQLITE_OMIT_COMPOUND_SELECT
   EXCEPT INTERSECT UNION
 %endif SQLITE_OMIT_COMPOUND_SELECT
@@ -2601,8 +2601,8 @@ cmd ::= dryrun CREATE LUA AGGREGATE FUNCTION nm(Q). {
     comdb2CreateAggFunc(pParse, &Q);
 }
 
-cmd ::= dryrun CREATE trigger(T) nm(Q) withsequence(S) ON table_trigger_event(E). {
-    comdb2CreateTrigger(pParse,T,S,&Q,E);
+cmd ::= dryrun CREATE trigger(T) nm(Q) withsequence(S) withstable(A) ON table_trigger_event(E). {
+    comdb2CreateTrigger(pParse,T,S,A,&Q,E);
 }
 
 %type trigger {int}
@@ -2622,6 +2622,11 @@ table_trigger_event(A) ::= LP TABLE fullname(T) FOR trigger_events(B) RP. {
 withsequence(A) ::= .                   { A = -1; }
 withsequence(A) ::= WITHOUT SEQUENCE.   { A = 0; }
 withsequence(A) ::= WITH SEQUENCE.      { A = 1; }
+
+%type withstable {int}
+withstable(A) ::= .                     { A = -1; }
+withstable(A) ::= STABLE.               { A = 1; }
+withstable(A) ::= NOTSTABLE.            { A = 0; }
 
 %type table_trigger_event {Cdb2TrigTables*}
 %destructor table_trigger_event {sqlite3DbFree(pParse->db, $$);}

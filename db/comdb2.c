@@ -359,6 +359,7 @@ int gbl_init_with_odh = 1;
 int gbl_init_with_queue_odh = 1;
 int gbl_init_with_queue_compr = BDB_COMPRESS_LZ4;
 int gbl_init_with_queue_persistent_seq = 0;
+int gbl_init_with_queue_stable = 0;
 int gbl_init_with_ipu = 1;
 int gbl_init_with_instant_sc = 1;
 int gbl_init_with_compr = BDB_COMPRESS_CRLE;
@@ -6252,6 +6253,13 @@ int comdb2_replicated_truncate(void *dbenv, void *inlsn, uint32_t flags)
     if (gbl_rowlocks)
         bdb_run_logical_recovery(thedb->bdb_env,
                                  is_master && !gbl_is_physical_replicant);
+
+    /* TODO better header location for these? */
+    void clear_wait_lsn(void);
+    void reset_stable_queues(void);
+
+    clear_wait_lsn();
+    reset_stable_queues();
 
     logmsg(LOGMSG_INFO, "%s complete [%d:%d]\n", __func__, *file, *offset);
 

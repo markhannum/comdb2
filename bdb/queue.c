@@ -575,6 +575,22 @@ unsigned long long bdb_queue_item_genid(const struct bdb_queue_found *dta)
     return 0;
 }
 
+static void add_firstgenid_tran(bdb_state_type *bdb_state, tran_type *tran, unsigned long long genid)
+{
+    struct queue_first_genid *qfg;
+    LISTC_FOR_EACH(&tran->queue_first_genids, qfg, lnk)
+    {
+        if (bdb_state == qfg->queue)
+        {
+            return;
+        }
+    }
+    qfg = malloc(sizeof(struct queue_first_genid));
+    qfg->first_genid = genid;
+    qfg->queue = bdb_state;
+    listc_abl(&tran->queue_first_genids, qfg);
+}
+
 /* add an item to the end of the queue. */
 int bdb_queue_add(bdb_state_type *bdb_state, tran_type *tran, const void *dta,
                   size_t dtalen, int *bdberr, unsigned long long *out_genid)
@@ -587,6 +603,9 @@ int bdb_queue_add(bdb_state_type *bdb_state, tran_type *tran, const void *dta,
     } else {
         bdb_lock_table_read(bdb_state, tran);
         rc = bdb_queue_add_int(bdb_state, tran, dta, dtalen, bdberr, out_genid);
+        if (!rc) {
+            add_firstgenid_tran(bdb_state, tran, *out_genid);
+        }
     }
     BDB_RELLOCK();
 

@@ -904,6 +904,8 @@ static inline unsigned long long lag_bytes(bdb_state_type *bdb_state)
     return lagbytes;
 }
 
+extern __thread tran_type *commit_trans;
+
 static int bdb_tran_commit_phys_getlsn_flags(bdb_state_type *bdb_state,
                                              tran_type *tran, DB_LSN *inlsn,
                                              int flags)
@@ -992,6 +994,16 @@ static int bdb_tran_commit_phys_getlsn_flags(bdb_state_type *bdb_state,
                         "class=%d) for %p (logical, class=%d)\n",
                 tran, tran->tranclass, tran->logical_tran,
                 tran->logical_tran->tranclass);
+
+    struct queue_first_genid *qfg;
+
+    while ((qfg = listc_rtl(&tran->queue_first_genids)) != NULL) {
+        free(qfg);
+    }
+
+    if (tran == commit_trans) {
+        commit_trans = NULL;
+    }
 
     free(tran);
     return rc;
@@ -2121,6 +2133,11 @@ cleanup:
     if (tran->bkfill_txn_list)
         free(tran->bkfill_txn_list);
 
+    struct queue_first_genid *qfg;
+    while ((qfg = listc_rtl(&tran->queue_first_genids)) != NULL) {
+        free(qfg);
+    }
+
     free(tran);
 
     return outrc;
@@ -2415,6 +2432,11 @@ cleanup:
 
     if (tran->bkfill_txn_list)
         free(tran->bkfill_txn_list);
+
+    struct queue_first_genid *qfg;
+    while ((qfg = listc_rtl(&tran->queue_first_genids)) != NULL) {
+        free(qfg);
+    }
 
     free(tran);
     return outrc;

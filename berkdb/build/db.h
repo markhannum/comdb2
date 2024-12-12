@@ -2322,6 +2322,9 @@ struct __db_env {
 	int (*app_dispatch)		/* User-specified recovery dispatch. */
 		__P((DB_ENV *, DBT *, DB_LSN *, db_recops));
 
+	/* Called on master while still holding locks with commit-lsn */
+	void (*txn_commit_callback) __P((DB_ENV *, DB_TXN *, DB_LSN));
+
 	/* Locking. */
 	u_int8_t	*lk_conflicts;	/* Two dimensional conflict matrix. */
 	u_int32_t	 lk_modes;	/* Number of lock modes in table. */
@@ -2473,6 +2476,7 @@ struct __db_env {
 		void *(*)(void *, size_t), void (*)(void *)));
 	int  (*set_app_dispatch) __P((DB_ENV *,
 		int (*)(DB_ENV *, DBT *, DB_LSN *, db_recops)));
+	int  (*set_txn_commit_callback) __P((DB_ENV *, void (*)(DB_ENV *, DB_TXN *, DB_LSN)));
 	int  (*get_data_dirs) __P((DB_ENV *, const char ***));
 	int  (*set_data_dir) __P((DB_ENV *, const char *));
 	int  (*get_encrypt_flags) __P((DB_ENV *, u_int32_t *));
@@ -2833,6 +2837,7 @@ struct __db_env {
 	int(*trigger_unlock) __P((DB_ENV *, struct __db_trigger_subscription *));
 	int(*trigger_open) __P((DB_ENV *, const char *));
 	int(*trigger_close) __P((DB_ENV *, const char *));
+	int(*trigger_signal) __P((DB_ENV *, const char *));
 	int(*trigger_ispaused) __P((DB_ENV *, const char *));
 	int(*trigger_pause) __P((DB_ENV *, const char *));
 	int(*trigger_unpause) __P((DB_ENV *, const char *));

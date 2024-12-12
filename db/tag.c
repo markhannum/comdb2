@@ -5685,10 +5685,10 @@ void set_bdb_option_flags(dbtable *tbl, int odh, int ipu, int isc, int ver,
     bdb_set_key_compression(handle);
 }
 
-void set_bdb_queue_option_flags(dbtable *tbl, int odh, int compr, int persist)
+void set_bdb_queue_option_flags(dbtable *tbl, int odh, int compr, int persist, int stable)
 {
     bdb_state_type *handle = tbl->handle;
-    bdb_set_queue_odh_options(handle, odh, compr, persist);
+    bdb_set_queue_odh_options(handle, odh, compr, persist, stable);
 }
 
 int gbl_permissive_sequence_sc = 1;
