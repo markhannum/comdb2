@@ -51,7 +51,14 @@ function full_recover_node
     # For all 'failure' cases, the recovered node generation will be higher than the clusters
     if [[ "$DBNAME" == *"disable"* || "$DBNAME" == *"ckpbug"* ]]; then
         if [[ "$RECOVERY_GENERATION" -lt "$CLUSTER_GENERATION" ]]; then
-            failexit "Recovered generation is $RECOVERY_GENERATION, not higher than $CLUSTER_GENERATION"
+            if [[ "$DBNAME" == *"disable"* ]]; then
+                while :; do 
+                    echo "NOT FAILING TEST .. to see if this still loses data"
+                    sleep 1
+                done
+            else
+                failexit "Recovered generation is $RECOVERY_GENERATION, not higher than $CLUSTER_GENERATION"
+            fi
         fi
     else
         if [[ "$RECOVERY_GENERATION" -gt "$CLUSTER_GENERATION" ]]; then

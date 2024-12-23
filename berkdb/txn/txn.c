@@ -1286,6 +1286,7 @@ __txn_commit_int(txnp, flags, ltranid, llid, last_commit_lsn, rlocks, inlks,
 							abort();
 						}
 					} else {
+						logmsg(LOGMSG_USER, "%s emitting regop-rowlocks record with generation %u\n", __func__, gen);
 						ret =
 							__txn_regop_rowlocks_log(dbenv,
 									txnp, lsn_out, &context, lflags,
