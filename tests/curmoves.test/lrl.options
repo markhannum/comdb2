@@ -1,3 +1,5 @@
+berkattr elect_highest_committed_gen 0
+
 table t t.csc2
 
 dtastripe 4
