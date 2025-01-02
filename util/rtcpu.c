@@ -35,7 +35,7 @@
 #include "logmsg.h"
 #include "sys_wrap.h"
 
-static int machine_is_up_default(const char *host);
+static int machine_is_up_default(const char *host, int *isdrtest);
 static int machine_status_init(void);
 static int machine_class_default(const char *host);
 static int machine_my_class_default(void);
@@ -46,7 +46,7 @@ static int machine_my_cluster_default(const char **cluster);
 static int machine_cluster_machs_default(const char *cluster, int *count, const char ***machs);
 static int machine_add_cluster_default(const char *host, const char *cluster);
 
-static int (*machine_is_up_cb)(const char *host) = machine_is_up_default;
+static int (*machine_is_up_cb)(const char *host, int *drtest) = machine_is_up_default;
 static int (*machine_status_init_cb)(void) = machine_status_init;
 static int (*machine_class_cb)(const char *host) = machine_class_default;
 static int (*machine_my_class_cb)(void) = machine_my_class_default;
@@ -58,6 +58,7 @@ static int (*machine_cluster_machs_cb)(const char *cluster, int *count,
                                        const char ***machs) = machine_cluster_machs_default;
 static int (*machine_add_cluster_cb)(const char *host, const char *cluster) = machine_add_cluster_default;
 
+int gbl_fake_drtest = 0;
 static int inited = 0;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static void do_once(void)
@@ -71,7 +72,7 @@ static void init_once(void)
     pthread_once(&once, do_once);
 }
 
-void register_rtcpu_callbacks(int (*a)(const char *), int (*b)(void), int (*c)(const char *), int (*d)(void),
+void register_rtcpu_callbacks(int (*a)(const char *, int *), int (*b)(void), int (*c)(const char *), int (*d)(void),
                               int (*e)(const char *), int (*f)(const char *), int (*g)(const char *, const char **),
                               int (*h)(const char **), int (*i)(const char *, int *, const char ***),
                               int (*j)(const char *, const char *))
@@ -94,14 +95,14 @@ void register_rtcpu_callbacks(int (*a)(const char *), int (*b)(void), int (*c)(c
     machine_add_cluster_cb = j;
 }
 
-int machine_is_up(const char *host)
+int machine_is_up(const char *host, int *drtest)
 {
     init_once();
 
     if (!isinterned(host))
         abort();
 
-    return machine_is_up_cb(host);
+    return machine_is_up_cb(host, drtest);
 }
 
 int machine_class(const char *host)
@@ -144,9 +145,12 @@ int machine_num(const char *host)
     return machine_num_cb(host);
 }
 
-static int machine_is_up_default(const char *host)
+static int machine_is_up_default(const char *host, int *drtest)
 {
-    return 1;
+    if (drtest) {
+        *drtest = gbl_fake_drtest;
+    }
+    return gbl_fake_drtest ? 0 : 1;
 }
 
 static int machine_status_init(void)
