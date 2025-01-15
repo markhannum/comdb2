@@ -267,7 +267,10 @@ done:
         rc != RC_TRAN_CLIENT_RETRY && rc != RC_INTERNAL_FORWARD && rc != RC_INTERNAL_RETRY &&
         rc != ERR_TRAN_TOO_BIG && /* THIS IS SENT BY BLOCKSQL WHEN TOOBIG */
         rc != 999 && rc != ERR_ACCESS && rc != ERR_UNCOMMITTABLE_TXN && rc != ERR_DIST_ABORT &&
-        (rc != ERR_NOT_DURABLE || !iq->sorese)) {
+        /* pass not-durable to client .. even for tagged api */
+        rc != ERR_NOT_DURABLE
+    )
+    {
         /* XXX CLIENT_RETRY DOESNT ACTUALLY CAUSE A RETRY USUALLY, just
            a bad rc to the client! */
         /*rc = RC_TRAN_CLIENT_RETRY;*/
@@ -505,6 +508,7 @@ int handle_ireq(struct ireq *iq)
             /* process socket end request */
             if (iq->is_socketrequest) {
                 if (iq->sb == NULL) {
+                    logmsg(LOGMSG_INFO, "%s send_blockreply rc=%d\n", __func__, rc);
                     rc = offload_comm_send_blockreply(
                         iq->frommach, iq->fwd_tag_rqid, iq->p_buf_out_start,
                         iq->p_buf_out - iq->p_buf_out_start, rc);
