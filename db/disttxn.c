@@ -1019,18 +1019,24 @@ static int disttxn_check_commitable_lk(transaction_t *dtran)
     } else if (gbl_debug_disttxn_trace) {
         char hosts[1024] = {0};
         struct participant *part = NULL, *tmp = NULL;
-        LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
-        {
-            char *pmaster = part->participant_master ? part->participant_master : "(failed-prepare)";
-            if (part->status != PARTICIPANT_PREPARED) {
-                strcat(hosts, part->participant_name);
-                strcat(hosts, "/");
-                strcat(hosts, pmaster);
-                strcat(hosts, " ");
+        if (listc_size(&dtran->participants) > 0) {
+            LISTC_FOR_EACH_SAFE(&dtran->participants, part, tmp, linkv)
+            {
+                char *pmaster = part->participant_master ? part->participant_master : "(failed-prepare)";
+                if (part->status != PARTICIPANT_PREPARED) {
+                    strcat(hosts, part->participant_name);
+                    strcat(hosts, "/");
+                    strcat(hosts, pmaster);
+                    strcat(hosts, " ");
+                }
             }
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s not-yet commitable waiting for %s\n", __func__, dtran->dist_txnid,
+                    hosts);
+        } else {
+            logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s not-yet commitable, but not waiting on participants\n", __func__, dtran->dist_txnid);
         }
-        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s not-yet commitable waiting for %s\n", __func__, dtran->dist_txnid,
-               hosts);
+        logmsg(LOGMSG_USER, "DISTTXN %s dist_txnid %s coordinator-local status %d\n", __func__, dtran->dist_txnid,
+               dtran->coordinator_local->status);
     }
     return rtn;
 }
