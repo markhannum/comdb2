@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+. ${TESTSROOTDIR}/tools/runit_common.sh
+set -x
+
+destdb=${TESTCASE}dest${TESTID}
+COPY_DBDIR=${DBDIR}/$destdb
+DEST_DBDIR=${COPY_DBDIR}/$DBNAME
+#TABLECNT=5
+TABLECNT=5
+REPLOGCNT=1
+PHYSREP_BOUNCES=0
+MAXINSERT=10000
+export stopfile=./stopfile.txt
+export pausefile=./pausefile.txt
+
+export COPYCOMDB2_EXE=${BUILDDIR}/db/copycomdb2
+
+function override_physrep_sp()
+{
+    local mnode=`getmaster`
+    ${CDB2SQL_EXE} $CDB2_OPTIONS $DBNAME --host $mnode "create procedure 'sys.physrep.register_replicant' version '1' { `cat ./register_replicant.lua`  }"
+}
+
+function bounce_physrep()
+{
+    ${CDB2SQL_EXE} $CDB2_OPTIONS $destdb local "exec procedure sys.cmd.send('exit')"
+    while kill -0 $(cat $DEST_DBDIR/${destdb}.pid) 2>/dev/null; do
+        echo "Waiting for physrep to exit"
+        sleep 1
+    done
+    echo "Physrep exited"
+
+    touch $pausefile
+
+    j=$(( REPLOGCNT - 1 ))
+    while [[ "$j" -gt 0 ]]; do
+        mv $replog.$j $replog.$(( j + 1 ))
+        let j=j-1
+    done
+    mv $replog $replog.1
+    let REPLOGCNT=REPLOGCNT+1
+
+    sleep 2
+    (cd $DBDIR; timeout --kill-after=5s $TEST_TIMEOUT $COMDB2_EXE $destdb --lrl $DEST_DBDIR/${destdb}.lrl --pidfile $DEST_DBDIR/${destdb}.pid >$replog 2>&1) &
+    sleep 2
+
+    goodselect=0
+    while kill -0 $(cat $DEST_DBDIR/${destdb}.pid) 2>/dev/null; do
+        out=$(${CDB2SQL_EXE} --tabs $destdb --host localhost 'select 1' 2>/dev/null)
+        if [[ "$out" == "1" ]]; then
+            goodselect=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ $goodselect == "0" ]]; then
+        touch $stopfile
+        failexit "Physrep did not come up after bounce"
+    else
+        rm $pausefile 2>/dev/null
+        let PHYSREP_BOUNCES=PHYSREP_BOUNCES+1
+        echo "Successfully completed $PHYSREP_BOUNCES physrep bounces"
+    fi
+}
+
+function setup_replicant()
+{
+	mkdir -p $DEST_DBDIR
+	if [[ -z "$CLUSTER" ]]; then
+	    cl="-y @localhost"
+	else
+	    cl="-y @$(echo $CLUSTER | tr ' ' ',')"
+	fi
+	if [[ -n "$CLUSTER" ]]; then
+	    if [[ "$CLUSTER" =~ .*$myhost.* ]]; then
+		rmt=""
+	    else
+		clarray=($CLUSTER)
+		rmt="${clarray[0]}:"
+	    fi
+	fi
+
+	${COPYCOMDB2_EXE} -x ${COMDB2_EXE} -H $destdb $cl $rmt${DBDIR}/${DBNAME}.lrl $DEST_DBDIR $DEST_DBDIR
+	if [ $? -ne 0 ]; then
+	    failexit "copycomdb2 failed"
+	fi
+
+    df $DBDIR | awk '{print $1 }' | grep "tmpfs\|nfs" && echo "setattr directio 0" >> $DEST_DBDIR/${destdb}.lrl
+    echo "verbose_fills on" >> $DEST_DBDIR/${destdb}.lrl
+
+    if [ -n "$PMUXPORT" ] ; then
+        echo "portmux_port $PMUXPORT" >> $DEST_DBDIR/${destdb}.lrl
+        echo "portmux_bind_path $pmux_socket" >> $DEST_DBDIR/${destdb}.lrl
+    fi
+
+    echo "stall_at_exit 1" >> $DEST_DBDIR/${destdb}.lrl
+    echo "stall_on_parallel_rep_enqueue 1" >> $DEST_DBDIR/${destdb}.lrl
+
+    replog=$TESTDIR/logs/$destdb.db
+
+    (cd $DBDIR; timeout --kill-after=5s $TEST_TIMEOUT $COMDB2_EXE $destdb --lrl $DEST_DBDIR/${destdb}.lrl --pidfile $DEST_DBDIR/${destdb}.pid >$replog 2>&1) &
+
+    out=
+    retries=0
+    while [[ "$out" != "1" ]]; do
+        out=$(${CDB2SQL_EXE} --tabs $destdb --host localhost 'select 1' 2>/dev/null)
+        sleep 1
+
+        let retries=retries+1
+
+        if [ $retries -eq 10 ]; then
+            failexit "Timeout waiting for local replicant to come up"
+        fi
+    done
+}
+
+function cleanup_abort()
+{
+    kill -6 $(cat $DEST_DBDIR/${destdb}.pid)
+}
+
+function cleanup()
+{
+    kill -9 $(cat $DEST_DBDIR/${destdb}.pid)
+}
+
+function create_tables()
+{
+    j=1
+    while [[ "$j" -le "$TABLECNT" ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table if not exists t$j(a int)"
+        [[ $? -ne 0 ]] && failexit "Failed to create table t$j"
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index ix$j on t$j(a)"
+        [[ $? -ne 0 ]] && failexit "Failed to create index ix$j"
+        let j=j+1
+    done
+}
+
+function checkpoint_thread()
+{
+    echo "Starting checkpoint thread"
+    while [[ ! -f $stopfile ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "exec procedure sys.cmd.send('flush')" > /dev/null 2>&1
+        sleep 1
+    done
+    echo "Finished checkpoint thread"
+}
+
+function inserter_thread()
+{
+    echo "Starting inserter thread for table t$1"
+    while [[ ! -f $stopfile ]]; do
+        while [[ -f $pausefile && ! -f $stopfile ]]; do
+            sleep 0.25
+        done
+        if [[ -f $stopfile ]]; then
+            break
+        fi
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t$1 select * from generate_series(1, $MAXINSERT)" > /dev/null 2>&1
+    done
+    echo "Finished inserter thread for table t$1"
+}
+
+function run_tests()
+{
+    rm -Rf $stopfile 2>/dev/null
+    rm -Rf $pausefile 2>/dev/null
+
+    typeset maxtime=300
+    typeset now=$(date +%s)
+    typeset endtime=$((now + maxtime))
+
+    j=1
+    while [[ "$j" -le "$TABLECNT" ]]; do
+        inserter_thread $j &
+        let j=j+1
+    done
+
+    checkpoint_thread &
+
+    while [[ $(date +%s) -lt $endtime && ! -f $stopfile && ! -f ${DBNAME}.failexit ]]; do
+        sleep 15
+        bounce_physrep
+    done
+
+    if [[ -f ${DBNAME}.failexit ]]; then
+        failexit "Physrep did not come up after bounce"
+    fi
+
+    touch $stopfile
+}
+
+export TABLECNT=$(( ( RANDOM % 50 ) + 1 ))
+echo "Testing with $TABLECNT tables"
+override_physrep_sp 
+setup_replicant
+create_tables
+run_tests
+cleanup
+wait
+
+echo "Success"
+
+exit 0

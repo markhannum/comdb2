@@ -612,6 +612,8 @@ void bdb_clear_logfile_pglogs_stat();
 void bdb_osql_trn_clients_status();
 void bdb_newsi_mempool_stat();
 
+int gbl_stall_at_exit = 0;
+
 static pthread_mutex_t exiting_lock = PTHREAD_MUTEX_INITIALIZER;
 void *clean_exit_thd(void *unused)
 {
@@ -626,6 +628,11 @@ void *clean_exit_thd(void *unused)
         return NULL;
     }
     gbl_exit = 1;
+    if (gbl_stall_at_exit) {
+        logmsg(LOGMSG_USER, "Stalling for 5 seconds at exit\n");
+        sleep(5);
+    }
+
     Pthread_mutex_unlock(&exiting_lock);
 
     bdb_thread_event(thedb->bdb_env, BDBTHR_EVENT_START_RDWR);

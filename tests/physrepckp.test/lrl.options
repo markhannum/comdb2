@@ -1,0 +1,2 @@
+setattr REP_PROCESSORS 4
+setattr REP_WORKERS 16

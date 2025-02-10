@@ -4223,6 +4223,8 @@ fuid_hash_free(void *obj, void *unused)
 	return 0;
 }
 
+int gbl_stall_on_parallel_rep_enqueue = 0;
+
 static void
 processor_thd(struct thdpool *pool, void *work, void *thddata, int op)
 {
@@ -4454,6 +4456,11 @@ processor_thd(struct thdpool *pool, void *work, void *thddata, int op)
 	else {
 		inline_worker = 0;
 		rq = listc_rtl(&queues);
+
+        if (gbl_stall_on_parallel_rep_enqueue) {
+            logmsg(LOGMSG_USER, "stalling on parallel rep enqueue\n");
+            sleep(1);
+        }
 
 		while (rq) {
 			if (rp->recovery_queues[rq->fileid] == NULL) {
@@ -6235,7 +6242,9 @@ bad_resize:	;
 		if (!gbl_exit) {
 			logmsg(LOGMSG_ERROR, "%s: error %d running processor thread\n", __func__, rc);
 			abort();
-		}
+		} else {
+            logmsg(LOGMSG_USER, "%s: gbl_exit is set, not enquing processor thd\n", __func__);
+        }
 		Pthread_mutex_lock(&dbenv->recover_lk);
 		listc_rfl(&dbenv->inflight_transactions, rp);
 		Pthread_mutex_unlock(&dbenv->recover_lk);
@@ -8680,9 +8689,8 @@ __rep_inflight_txns_older_than_lsn(DB_ENV *dbenv, DB_LSN *lsn)
 	LISTC_FOR_EACH(&dbenv->inflight_transactions, rp, lnk) {
 		if (log_compare(&rp->commit_lsn, lsn) < 0) {
 			Pthread_mutex_unlock(&dbenv->recover_lk);
-			/*printf("inflight transaction %u:%u checkpoint lsn %u:%u\n", 
-			 * rp->commit_lsn.file, rp->commit_lsn.offset,
-			 * lsn->file, lsn->offset); */
+            logmsg(LOGMSG_USER, "Checkpoint waiting for inflight transaction %u:%u checkpoint lsn %u:%u\n",
+            tp->commit_lsn.file, tp->commit_lsn.offset, lsn->file, lsn->offset);
 			return 1;
 		}
 	}

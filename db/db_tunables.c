@@ -95,6 +95,8 @@ extern int gbl_sparse_lockerid_map;
 extern int gbl_spstrictassignments;
 extern int gbl_early;
 extern int gbl_exit_alarm_sec;
+extern int gbl_stall_at_exit;
+extern int gbl_stall_on_parallel_rep_enqueue;
 extern int gbl_fdb_default_ver;
 extern int gbl_fdb_track;
 extern int gbl_fdb_track_hints;
