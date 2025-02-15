@@ -1,0 +1,3 @@
+# Sleeps for 10 seconds after opening main db, before opening tables
+# debug_stall_at_open 1
+# debug_abort_on_clear_inadjlist 1
