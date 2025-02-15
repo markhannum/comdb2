@@ -1931,6 +1931,10 @@ REGISTER_TUNABLE("forbid_incoherent_writes",
                  "transaction start.  (Default: off)",
                  TUNABLE_BOOLEAN, &gbl_forbid_incoherent_writes, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
+REGISTER_TUNABLE("debug_stall_at_open",
+                 "Sleep on open to reproduce curadj bug.  (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_debug_stall_at_open, 0, NULL, NULL, NULL, NULL);
+
 REGISTER_TUNABLE("debug_downgrade_cluster_at_open",
                  "Sleep on open to allow testsuite to downgrade master.  (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_debug_downgrade_cluster_at_open, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);

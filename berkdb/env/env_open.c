@@ -104,6 +104,10 @@ clear_adj_fileid(dbenv, func)
 				logmsg(LOGMSG_DEBUG, "%s removing db %p adj_fileid %u from "
 						"dbenv %p list %p\n", func, db, db->adj_fileid, dbenv,
 						&dbenv->dbs[db->adj_fileid]);
+			if (db->inadjlist) {
+				logmsg(LOGMSG_FATAL, "%s %s is in adjlist\n", __func__, db->fname);
+				abort();
+			}
 			db->inadjlist = 0;
 			if (!db->dblistlinks.le_prev)
 				abort();
