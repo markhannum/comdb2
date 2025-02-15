@@ -21,6 +21,7 @@ static const char revid[] = "$Id: bt_curadj.c,v 11.34 2003/07/09 02:32:24 margo 
 #include <stdlib.h>
 
 #include "logmsg.h"
+#include "assert.h"
 
 static int __bam_opd_cursor __P((DB *, DBC *, db_pgno_t, u_int32_t, u_int32_t));
 
@@ -89,9 +90,12 @@ __bam_ca_delete_int(dbp, pgno, indx, delete, fromclose)
 	 * list of DBs and then the list of cursors in each DB.
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+	if (!dbp->inadjlist) abort();
+
 	for (count = 0, ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		for (dbc = __db_lock_aq(dbp, ldbp, &cq);
 			dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
 			cp = (BTREE_CURSOR *)dbc->internal;
@@ -205,6 +209,9 @@ __ram_ca_delete(dbp, root_pgno)
 	 * Review the cursors.  See the comment in __bam_ca_delete().
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
 	    found == 0 && ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
 	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
@@ -250,6 +257,9 @@ __bam_ca_di(my_dbc, pgno, indx, adjust)
 	 */
 	found = 0;
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
 	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
 	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
@@ -374,6 +384,9 @@ __bam_ca_dup(my_dbc, first, fpgno, fi, tpgno, ti)
 	 */
 	found = 0;
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
 	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
 	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
@@ -444,6 +457,9 @@ __bam_ca_undodup(dbp, first, fpgno, fi, ti)
 	 * Adjust the cursors.  See the comment in __bam_ca_delete().
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
 	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
 	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
@@ -510,18 +526,21 @@ __bam_ca_rsplit(my_dbc, fpgno, tpgno)
 	 */
 	found = 0;
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		for (dbc = __db_lock_aq(dbp, ldbp, &cq);
-		    dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
+			dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
 			if (dbc->dbtype == DB_RECNO)
 				continue;
 			if (dbc->internal->pgno == fpgno) {
 				dbc->internal->pgno = tpgno;
 				/* [#8032]
 				DB_ASSERT(!STD_LOCKING(dbc) ||
-				    dbc->internal->lock_mode != DB_LOCK_NG);
+					dbc->internal->lock_mode != DB_LOCK_NG);
 				*/
 				if (my_txn != NULL && dbc->txn != my_txn)
 					found = 1;
@@ -578,11 +597,14 @@ __bam_ca_split(my_dbc, ppgno, lpgno, rpgno, split_indx, cleft)
 	 */
 	found = 0;
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		for (dbc = __db_lock_aq(dbp, ldbp, &cq);
-		    dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
+			dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
 			if (dbc->dbtype == DB_RECNO)
 				continue;
 			cp = dbc->internal;
@@ -647,11 +669,14 @@ __bam_ca_undosplit(dbp, frompgno, topgno, lpgno, split_indx)
 	 * to the original offset and bump it by the split_indx.
 	 */
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		for (dbc = __db_lock_aq(dbp, ldbp, &cq);
-		    dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
+			dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
 			if (dbc->dbtype == DB_RECNO)
 				continue;
 			cp = dbc->internal;

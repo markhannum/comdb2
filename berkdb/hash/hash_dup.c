@@ -62,6 +62,7 @@ static const char revid[] = "$Id: hash_dup.c,v 11.81 2003/06/30 17:20:11 bostic 
 #include "dbinc/mp.h"
 
 #include "logmsg.h"
+#include "assert.h"
 
 static int __ham_c_chgpg __P((DBC *,
     db_pgno_t, u_int32_t, db_pgno_t, u_int32_t));
@@ -853,12 +854,15 @@ __ham_c_chgpg(dbc, old_pgno, old_index, new_pgno, new_index)
 	found = 0;
 
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		MUTEX_THREAD_LOCK(dbenv, dbp->mutexp);
 		for (cp = TAILQ_FIRST(&ldbp->active_queue); cp != NULL;
-		    cp = TAILQ_NEXT(cp, links)) {
+			cp = TAILQ_NEXT(cp, links)) {
 			if (cp == dbc || cp->dbtype != DB_HASH)
 				continue;
 

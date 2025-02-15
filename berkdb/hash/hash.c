@@ -60,6 +60,7 @@ static const char revid[] = "$Id: hash.c,v 11.177 2003/10/04 01:31:58 margo Exp 
 #include "dbinc/hash.h"
 #include "dbinc/lock.h"
 #include "dbinc/mp.h"
+#include "assert.h"
 
 static int  __ham_bulk __P((DBC *, DBT *, u_int32_t));
 static int  __ham_c_close __P((DBC *, db_pgno_t, int *));
@@ -1830,6 +1831,8 @@ __ham_c_update(dbc, len, add, is_dup)
 	found = 0;
 
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
 
 	/*
 	 * Calculate the order of this deleted record.
@@ -2009,25 +2012,28 @@ __ham_get_clist(dbp, pgno, indx, listp)
 	dbenv = dbp->dbenv;
 
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		MUTEX_THREAD_LOCK(dbenv, dbp->mutexp);
 		for (cp = TAILQ_FIRST(&ldbp->active_queue); cp != NULL;
-		    cp = TAILQ_NEXT(cp, links))
+			cp = TAILQ_NEXT(cp, links))
 			/*
 			 * We match if cp->pgno matches the specified
 			 * pgno, and if either the cp->indx matches
 			 * or we weren't given an index.
 			 */
 			if (cp->internal->pgno == pgno &&
-			    (indx == NDX_INVALID ||
-			    cp->internal->indx == indx)) {
+				(indx == NDX_INVALID ||
+				cp->internal->indx == indx)) {
 				if (nused >= nalloc) {
 					nalloc += 10;
 					if ((ret = __os_realloc(dbp->dbenv,
-					    nalloc * sizeof(HASH_CURSOR *),
-					    listp)) != 0)
+						nalloc * sizeof(HASH_CURSOR *),
+						listp)) != 0)
 						goto err;
 				}
 				(*listp)[nused++] = cp;
@@ -2041,7 +2047,7 @@ __ham_get_clist(dbp, pgno, indx, listp)
 		if (nused >= nalloc) {
 			nalloc++;
 			if ((ret = __os_realloc(dbp->dbenv,
-			    nalloc * sizeof(HASH_CURSOR *), listp)) != 0)
+				nalloc * sizeof(HASH_CURSOR *), listp)) != 0)
 				return (ret);
 		}
 		(*listp)[nused] = NULL;
@@ -2076,7 +2082,7 @@ __ham_c_writelock(dbc)
 			return (ret);
 		dbenv = dbc->dbp->dbenv;
 		if (LOCK_ISSET(tmp_lock) &&
-		    (ret = __lock_put(dbenv, &tmp_lock)) != 0)
+			(ret = __lock_put(dbenv, &tmp_lock)) != 0)
 			return (ret);
 	}
 	return (0);

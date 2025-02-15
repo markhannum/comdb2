@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+. ${TESTSROOTDIR}/tools/runit_common.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+export maxrec=10
+export debug=1
+[[ "$debug" == 1 ]] && set -x
+
+function create_table()
+{
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table t1 (a int)"
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create index t1a on t1(a)"
+}
+
+function insert_records()
+{
+    j=0
+    while [[ $j -lt 1000 ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into t1 select * from generate_series(1, $maxrec)"
+        let j=j+1
+    done
+}
+
+if [[ -z "$CLUSTER" ]]; then 
+    echo "This test requires a cluster"
+    exit -1
+fi
+
+function get_non_master()
+{
+    $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select host from comdb2_cluster where is_master='N' limit 1"
+}
+
+function get_master()
+{
+    $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select host from comdb2_cluster where is_master='Y' limit 1"
+}
+
+function find_current_lsn()
+{
+    $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1"
+}
+
+# Find most recent cdel lsn
+function find_cdel_lsn()
+{
+    $CDB2SQL_EXE -tabs $CDB2_OPTIONS $DBNAME default "select lsn from comdb2_transaction_logs(NULL, NULL, 4) where rectype=57 or rectype=2057 or rectype=3057 limit 1"
+}
+
+function restart_replicant()
+{
+    node=$1
+
+    pushd $DBDIR
+    mv --backup=numbered $LOGDIR/${DBNAME}.${node}.db $LOGDIR/${DBNAME}.${node}.db.1
+    LOGDIR=$TESTDIR/logs
+    REP_ENV_VARS="${DBDIR}/replicant_env_vars"
+    PARAMS="--no-global-lrl --lrl $DBDIR/${DBNAME}.lrl --pidfile ${TMPDIR}/${DBNAME}.${node}.pid"
+    # debug_abort_on_clear_inadjlist tunable demonstrates the race 
+    #CMD="cd ${DBDIR}; source ${REP_ENV_VARS}; echo \"debug_stall_at_open 1\" >> $DBDIR/${DBNAME}.lrl ; echo \"debug_abort_on_clear_inadjlist 1\" >> $DBDIR/${DBNAME}.lrl ; $COMDB2_EXE ${DBNAME} ${PARAMS} 2>&1 | tee ${TESTDIR}/${DBNAME}.${node}.db"
+    CMD="cd ${DBDIR}; source ${REP_ENV_VARS}; echo \"debug_stall_at_open 1\" >> $DBDIR/${DBNAME}.lrl ; $COMDB2_EXE ${DBNAME} ${PARAMS} 2>&1 | tee ${TESTDIR}/${DBNAME}.${node}.db"
+    ssh -n -o StrictHostKeyChecking=no -tt $node ${CMD} &> ${LOGDIR}/${DBNAME}.${node}.db </dev/null &
+    echo $! > ${TMPDIR}/${DBNAME}.${node}.pid
+}
+
+function block_until_all_up()
+{
+    while :; do
+        all_up=1
+        for node in $CLUSTER; do
+            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $node "select 1"  >/dev/null 2>&1
+            if [[ $? -ne 0 ]]; then
+                all_up=0
+                echo "Node $node is not up"
+            fi
+        done
+        if [[ $all_up -eq 1 ]]; then
+            echo "All nodes are up"
+            break
+        fi
+    done
+}
+
+function delete_loop()
+{
+    j=1
+    node=$(get_non_master)
+    master=$(get_master)
+    count=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+    currentlsn=$(find_current_lsn)
+    while [[ $j -le $maxrec ]]; do
+        $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "delete from t1 where a=$j"
+
+        verify=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+        [[ "$verify" == "$count" ]] && failexit "Failed to delete, iteration $j"
+
+        kill_by_pidfile ${TMPDIR}/${DBNAME}.${node}.pid
+        r=1
+        trunciter=0
+        while [[ $r -ne 0 ]]; do
+            let trunciter=trunciter+1
+            $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME --host $master "exec procedure sys.cmd.truncate_log(\"$currentlsn\")"
+            r=$?
+            if [[ $r -ne 0 ]]; then
+                echo "Failed to truncate logs, iteration $trunciter"
+                sleep 1
+            fi
+        done
+        sleep 1
+        sleep 10
+
+        verify=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+        [[ "$verify" != "$count" ]] && failexit "Failed to restore, iteration $j"
+        restart_replicant $node
+        sleep 10
+        block_until_all_up
+        verify2=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME --host $node "select count(*) from t1")
+        [[ "$verify2" != "$count" ]] && failexit "Failed to restore $node, iteration $j"
+
+        let j=j+1
+    done
+}
+
+function run_test()
+{
+    create_table
+    insert_records
+    delete_loop
+}
+
+run_test
+echo "Success!"

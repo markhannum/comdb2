@@ -22,6 +22,7 @@ static const char revid[] = "$Id: bt_recno.c,v 11.113 2003/06/30 17:19:34 bostic
 #include "dbinc/btree.h"
 #include "dbinc/db_shash.h"
 #include "dbinc/lock.h"
+#include "assert.h"
 
 static int __ram_add __P((DBC *, db_recno_t *, DBT *, u_int32_t, u_int32_t));
 static int __ram_source __P((DB *));
@@ -761,6 +762,9 @@ __ram_ca(dbc_arg, op)
 	DB_ASSERT(F_ISSET(cp_arg, C_RENUMBER));
 
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	/*
 	 * Adjust the cursors.  See the comment in __bam_ca_delete().
 	 */
@@ -774,14 +778,14 @@ __ram_ca(dbc_arg, op)
 	if (op == CA_DELETE) {
 		order = 1;
 		for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-		    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-		    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+			ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+			ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 			for (dbc = __db_lock_aq(dbp, ldbp, &cq);
-			    dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
+				dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
 				cp = (BTREE_CURSOR *)dbc->internal;
 				if (cp_arg->root == cp->root &&
-				    recno == cp->recno && CD_ISSET(cp) &&
-				    order <= cp->order)
+					recno == cp->recno && CD_ISSET(cp) &&
+					order <= cp->order)
 					order = cp->order + 1;
 			}
 			__db_unlock_aq(dbp, ldbp, cq);
@@ -791,10 +795,10 @@ __ram_ca(dbc_arg, op)
 
 	/* Now go through and do the actual adjustments. */
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		for (dbc = __db_lock_aq(dbp, ldbp, &cq);
-		    dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
+			dbc != NULL; dbc = TAILQ_NEXT(dbc, links)) {
 			cp = (BTREE_CURSOR *)dbc->internal;
 			if (cp_arg->root != cp->root)
 				continue;

@@ -65,6 +65,7 @@ static const char revid[] = "$Id: hash_page.c,v 11.93 2003/06/30 17:20:12 bostic
 #include "dbinc/hash.h"
 #include "dbinc/lock.h"
 #include "dbinc/mp.h"
+#include "assert.h"
 
 static int __ham_c_delpg
     __P((DBC *, db_pgno_t, db_pgno_t, u_int32_t, db_ham_mode, u_int32_t *));
@@ -1782,13 +1783,16 @@ __ham_c_delpg(dbc, old_pgno, new_pgno, num_ent, op, orderp)
 	 * Find the highest order of any cursor our movement
 	 * may collide with.
 	 */
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	order = 1;
 	for (ldbp = __dblist_get(dbenv, dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		MUTEX_THREAD_LOCK(dbenv, dbp->mutexp);
 		for (cp = TAILQ_FIRST(&ldbp->active_queue); cp != NULL;
-		    cp = TAILQ_NEXT(cp, links)) {
+			cp = TAILQ_NEXT(cp, links)) {
 			if (cp == dbc || cp->dbtype != DB_HASH)
 				continue;
 			hcp = (HASH_CURSOR *)cp->internal;

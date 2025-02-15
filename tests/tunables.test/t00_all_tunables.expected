@@ -193,6 +193,7 @@
 (name='debug_queuedb', description='Enable debug-trace for queuedb.  (Default: off)', type='BOOLEAN', value='OFF', read_only='N')
 (name='debug_random_prepare', description='Prepare randomly. (Default: off)', type='BOOLEAN', value='OFF', read_only='N')
 (name='debug_sqlthd_failures', description='Force sqlthd failures in unusual places', type='BOOLEAN', value='OFF', read_only='N')
+(name='debug_stall_at_open', description='Sleep on open to reproduce curadj bug.  (Default: off)', type='BOOLEAN', value='OFF', read_only='N')
 (name='debug_temp_tables', description='Debug temp tables', type='BOOLEAN', value='OFF', read_only='N')
 (name='debug_timepart_cron', description='', type='BOOLEAN', value='OFF', read_only='N')
 (name='debug_timepart_sqlite', description='', type='BOOLEAN', value='OFF', read_only='N')

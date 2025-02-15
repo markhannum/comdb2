@@ -59,6 +59,7 @@ static const char revid[] = "$Id: hash_rec.c,v 11.76 2003/07/04 17:45:07 margo E
 #include "dbinc/hash.h"
 #include "dbinc/log.h"
 #include "dbinc/mp.h"
+#include "assert.h"
 
 static int __ham_alloc_pages __P((DB *, __ham_groupalloc_args *, DB_LSN *));
 
@@ -1097,13 +1098,16 @@ __ham_chgpg_recover(dbenv, dbtp, lsnp, op, info)
 	order = argp->new_indx;
 
 	MUTEX_THREAD_LOCK(dbenv, dbenv->dblist_mutexp);
+	assert(dbp->inadjlist);
+    if (!dbp->inadjlist) abort();
+
 	for (ldbp = __dblist_get(dbenv, file_dbp->adj_fileid);
-	    ldbp != NULL && ldbp->adj_fileid == file_dbp->adj_fileid;
-	    ldbp = LIST_NEXT(ldbp, dblistlinks)) {
+		ldbp != NULL && ldbp->adj_fileid == file_dbp->adj_fileid;
+		ldbp = LIST_NEXT(ldbp, dblistlinks)) {
 		MUTEX_THREAD_LOCK(dbenv, file_dbp->mutexp);
 
 		for (cp = TAILQ_FIRST(&ldbp->active_queue); cp != NULL;
-		    cp = TAILQ_NEXT(cp, links)) {
+			cp = TAILQ_NEXT(cp, links)) {
 			lcp = (HASH_CURSOR *)cp->internal;
 
 			switch (argp->mode) {
@@ -1111,8 +1115,8 @@ __ham_chgpg_recover(dbenv, dbtp, lsnp, op, info)
 				if (lcp->pgno != argp->new_pgno)
 					break;
 				if (lcp->indx != indx ||
-				    !F_ISSET(lcp, H_DELETED) ||
-				    lcp->order >= order) {
+					!F_ISSET(lcp, H_DELETED) ||
+					lcp->order >= order) {
 					lcp->pgno = argp->old_pgno;
 					if (lcp->indx == indx)
 						lcp->order -= order;

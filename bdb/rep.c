@@ -5299,6 +5299,9 @@ static int berkdb_receive_rtn_int(void *ack_handle, void *usr_ptr,
     return outrc;
 }
 
+extern int gbl_dbenv_is_opened;
+extern int gbl_debug_stall_at_open;
+
 void berkdb_receive_rtn(void *ack_handle, void *usr_ptr, char *from_host,
                         struct interned_string *from_host_interned, int usertype,
                         void *dta, int dtalen, uint8_t is_tcp)
@@ -5311,6 +5314,11 @@ void berkdb_receive_rtn(void *ack_handle, void *usr_ptr, char *from_host,
 
     if (bdb_state->parent)
         bdb_state = bdb_state->parent;
+
+    if (gbl_debug_stall_at_open && !gbl_dbenv_is_opened) {
+        logmsg(LOGMSG_USER, "stalling before dbenv-open\n");
+        sleep(1);
+    }
 
 again:
     BDB_READLOCK("berkdb_receive_rtn");

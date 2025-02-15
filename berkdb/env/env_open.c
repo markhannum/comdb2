@@ -100,10 +100,9 @@ clear_adj_fileid(dbenv, func)
 	for (i = 1; i <= dbenv->maxdb; i++) {
 		db = listc_rtl(&dbenv->dbs[i]);
 		while (db) {
-			if (gbl_instrument_dblist)
-				logmsg(LOGMSG_DEBUG, "%s removing db %p adj_fileid %u from "
-						"dbenv %p list %p\n", func, db, db->adj_fileid, dbenv,
-						&dbenv->dbs[db->adj_fileid]);
+			logmsg(LOGMSG_INFO, "%s removing db %p adj_fileid %u from "
+					"dbenv %p list %p\n", func, db, db->adj_fileid, dbenv,
+					&dbenv->dbs[db->adj_fileid]);
 			db->inadjlist = 0;
 			if (!db->dblistlinks.le_prev)
 				abort();
@@ -616,6 +615,7 @@ foundlsn:
 	 * region for environments and db handles.  So, the mpool region must
 	 * already be initialized.
 	 */
+	/* Putting back temporarily to prove crash */
 	clear_adj_fileid(dbenv, __func__);
 	LIST_INIT(&dbenv->dblist);
 	clear_fid_hash(dbenv);

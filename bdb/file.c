@@ -2393,6 +2393,8 @@ int bdb_is_standalone(void *dbenv, void *in_bdb_state)
 extern int gbl_commit_delay_trace;
 int gbl_skip_catchup_logic = 0;
 int gbl_debug_downgrade_cluster_at_open = 0;
+int gbl_debug_stall_at_open = 0;
+int gbl_dbenv_is_opened = 0;
 
 static DB_ENV *dbenv_open(bdb_state_type *bdb_state)
 {
@@ -2919,6 +2921,11 @@ static DB_ENV *dbenv_open(bdb_state_type *bdb_state)
         opt = listc_rtl(&bdb_state->attr->deferred_berkdb_options);
     }
 
+    if (gbl_debug_stall_at_open) {
+        logmsg(LOGMSG_USER, "%s: sleeping for 10 seconds at open\n", __func__);
+        sleep(3);
+    }
+
     BDB_WRITELOCK("dbenv_open");
 
     print(bdb_state, "opening %s\n", txndir);
@@ -2930,6 +2937,7 @@ static DB_ENV *dbenv_open(bdb_state_type *bdb_state)
         exit(1);
     }
 
+    gbl_dbenv_is_opened = 1;
     BDB_RELLOCK();
 
     /* Just before we are officially "open" - we still need to add any blkseqs
@@ -3086,6 +3094,11 @@ waitformaster:
 
         print(bdb_state, "AFTER REP_START our LSN: %s\n",
               lsn_to_str(our_lsn_str, &our_lsn));
+    }
+
+    if (gbl_debug_stall_at_open != 0) {
+        logmsg(LOGMSG_USER, "Stalling for 60 seconds at open\n");
+        sleep(3);
     }
 
     /*
