@@ -478,9 +478,8 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                 if (rectype == DB_llog_ltran_commit) {
                     break;
                 }
-            } else if (rectype == DB___txn_regop_gen) {
-                rc = __txn_regop_gen_read(bdb_state->dbenv, logdta.data,
-                                          &arggenp);
+            } else if (rectype == DB___txn_regop_gen || rectype == DB___txn_regop_gen_endianize) {
+                rc = __txn_regop_gen_read(bdb_state->dbenv, logdta.data, &arggenp);
                 prevlsn = arggenp->prev_lsn;
                 free(logdta.data);
                 logdta.data = NULL;
@@ -533,9 +532,8 @@ static int osql_serial_check(bdb_state_type *bdb_state, void *ranges,
                 if (rectype == DB_llog_ltran_commit) {
                     break;
                 }
-            } else if (rectype == DB___txn_regop_rowlocks) {
-                rc = __txn_regop_rowlocks_read(bdb_state->dbenv, logdta.data,
-                                               &argrlp);
+            } else if (rectype == DB___txn_regop_rowlocks || rectype == DB___txn_regop_rowlocks_endianize) {
+                rc = __txn_regop_rowlocks_read(bdb_state->dbenv, logdta.data, &argrlp);
                 prevlsn = argrlp->prev_lsn;
                 free(logdta.data);
                 logdta.data = NULL;
