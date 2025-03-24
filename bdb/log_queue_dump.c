@@ -311,7 +311,52 @@ void register_dump_qtrigger(const char *filename, bdb_state_type *(*gethndl)(con
     }
     setvbuf(f, NULL, _IOLBF, 0);
     logmsg(LOGMSG_USER, "Registered queue-dump for %s -> %s\n", filename, outfile);
-    register_logqueue_trigger(filename, gethndl, dump_qtrigger, f, maxsz, LOGQTRIGGER_PUSH);
+    int32_t flags = (LOGQTRIGGER_PUSH | LOGQTRIGGER_ENABLED);
+    register_logqueue_trigger(filename, gethndl, dump_qtrigger, f, maxsz, flags);
+}
+
+static hash_t *memq_hash = NULL;
+static pthread_mutex_t memq_mutex = PTHREAD_MUTEX_INITIALIZER;
+struct memq_file {
+    char *filename;
+    void *qhandle;
+};
+
+void register_memq(const char *filename, bdb_state_type *(*gethndl)(const char *q), int maxsz)
+{
+    Pthread_mutex_lock(&memq_mutex);
+    if (!memq_hash) {
+        memq_hash = hash_init_strptr(0);
+    }
+    if (hash_find(memq_hash, &filename) != NULL) {
+        Pthread_mutex_unlock(&memq_mutex);
+        logmsg(LOGMSG_USER, "Mem-qtrigger for %s is already registered\n", filename);
+        return;
+    }
+    struct memq_file *mf = calloc(sizeof(struct memq_file), 1);
+    mf->filename = strdup(filename);
+
+    /* Becomes enabled when consumer subscribes */
+    uint32_t flags = LOGQTRIGGER_PULL;
+    mf->qhandle = register_logqueue_trigger(filename, gethndl, NULL, NULL, maxsz, flags);
+    hash_add(memq_hash, mf);
+    Pthread_mutex_unlock(&memq_mutex);
+    logmsg(LOGMSG_USER, "Registered mem-qtrigger for %s\n", filename);
+}
+
+void *queue_is_memq(const char *filename)
+{
+    void *qhandle = NULL;
+    if (!memq_hash) {
+        return NULL;
+    }
+    Pthread_mutex_lock(&memq_mutex);
+    struct memq_file *mf = hash_find(memq_hash, &filename);
+    if (mf) {
+        qhandle = mf->qhandle;
+    }
+    Pthread_mutex_unlock(&memq_mutex);
+    return qhandle;
 }
 
 #ifdef WITH_QKAFKA
@@ -406,8 +451,8 @@ int register_queue_kafka(const char *filename, const char *kafka_topic, bdb_stat
     kstate->topic = strdup(kafka_topic);
     kstate->rkt_p = rkt_p;
     kstate->rk_p = rk_p;
-    register_logqueue_trigger(filename, gethndl, write_kafka, kstate, maxsz,
-                              LOGQTRIGGER_PUSH | LOGQTRIGGER_MASTER_ONLY);
+    uint32_t flags = (LOGQTRIGGER_ENABLED | LOGQTRIGGER_PUSH | LOGQTRIGGER_MASTER_ONLY);
+    register_logqueue_trigger(filename, gethndl, write_kafka, kstate, maxsz, flags);
     logmsg(LOGMSG_USER, "Registered kafka-qwrite for %s -> %s\n", filename, kafka_topic);
 
     return 0;

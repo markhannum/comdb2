@@ -846,6 +846,9 @@ function setup_physrep_cluster()
                 # Update the lrl
                 ssh $node "echo \"cluster nodes ${CLUSTER}\" >> ${_dbdir}/${_dbname}.lrl" < /dev/null
 
+                # Add the lrl-entry for the 'watch' memory-consumer that we will add later
+                ssh $node "echo \"memqueue watch 0\" >> ${_dbdir}/${_dbname}.lrl" < /dev/null
+
                 firstNode=${node}
             else
                 ssh $node "${COPYCOMDB2_EXE} -x ${COMDB2_EXE} $firstNode:${_dbdir}/${_dbname}.lrl $_dbdir $_dbdir" >> ${logFile} 2>&1 < /dev/null
@@ -1511,25 +1514,172 @@ function phys_rep_nomatch
     return 0
 }
 
+function memq_consumer
+{
+    # Create table and a lua consumer on the parent, then wait for it to appear 
+    # on the physrep.  The SP is taken from our documentation.
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<'EOF'
+CREATE TABLE t(i int, d double, c cstring(10), b byte(4), y intervalym)$$
+CREATE PROCEDURE watch VERSION 'sample' {
+local function define_emit_columns()
+    local num = db:exec("select count(*) as num from comdb2_columns where tablename='t'"):fetch().num
+    local total = 2 + (num * 2) -- type, tablename, new column values, old column values
+    db:num_columns(total)
+    db:column_name('tbl', 1)  db:column_type('cstring', 1)
+    db:column_name('type', 2) db:column_type('cstring', 2)
+    local stmt = db:exec("select columnname as name, type as type from comdb2_columns where tablename='t'")
+    local r = stmt:fetch()
+    local i = 2
+    while r do
+        i = i + 1
+        db:column_name(r.name, i)                db:column_type(r.type, i)
+        db:column_name('old_'..r.name, i + num)  db:column_type(r.type, i + num)
+        r = stmt:fetch()
+    end
+end
+
+local function main()
+    define_emit_columns()
+    -- get handle to consumer associated with stored procedure
+    local consumer = db:consumer()
+    while true do
+        local change = consumer:get() -- blocking call
+        local row
+        if change.new ~= nil then
+            row = change.new
+        end
+        if row == nil then
+            row = {}
+        end
+        if change.old ~= nil then
+            for k, v in pairs(change.old) do
+                row['old_'..k] = v
+            end
+        end
+        row.tbl = change.name
+        row.type = change.type
+        consumer:emit(row) -- blocking call
+        consumer:consume()
+    end
+end
+}$$
+CREATE LUA CONSUMER watch ON (TABLE t FOR INSERT AND UPDATE AND DELETE)
+EOF
+
+    # Now block, waiting for this to appear on the physical replicant
+    count=0
+    while [[ "$count" -eq "0" ]]; do
+        count=$(${CDB2SQL_EXE} --tabs ${REPL_CLUS_DBNAME} --host ${REPL_CLUS_HOST} "select count(*) from comdb2_queues")
+        [[ "$count" -eq "0" ]] && sleep 1
+    done
+
+    consout="physrep_consumer.txt"
+    sleep 1
+
+    # Start a lua consumer on the physical replicant cluster .. this should block
+    ${CDB2SQL_EXE} $CDB2_OPTIONS ${REPL_CLUS_DBNAME} --host ${REPL_CLUS_HOST} "EXEC PROCEDURE watch()" > $consout 2>&1 &
+
+    conspid=$!
+
+    # Sleep a bit to verify that it is blocked
+    sleep 5
+
+    if kill -0 $conspid 2>/dev/null ; then
+        echo "Consumer is still running"
+    else
+        echo "Consumer exited"
+        cat $consout
+        cleanFailExit "Consumer exited"
+    fi
+
+    # Insert some records into the parent
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<'EOF'
+INSERT INTO t VALUES(1, 22.0/7, 'hello', x'deadbeef', 5)
+UPDATE t set i = i + d, d = d + i, b = x'600dc0de'
+DELETE from t
+EOF
+
+    # Sleep a bit more to make sure we have consumed
+    sleep 5
+
+    # Kill the consumer and compare the files
+    kill -9 $conspid
+
+    diff $consout memq.expected
+    if [[ $? -ne 0 ]]; then
+        cleanFailExit "Consumer output does not match"
+    fi
+
+    # Start consumer against different node
+    ${CDB2SQL_EXE} $CDB2_OPTIONS ${REPL_CLUS_DBNAME} --host ${REPL_CLUS_HOST2} "EXEC PROCEDURE watch()" > $consout 2>&1 &
+
+    conspid=$!
+
+    # Sleep a bit to verify that it is blocked
+    sleep 5
+
+    if kill -0 $conspid 2>/dev/null ; then
+        echo "Consumer is still running"
+    else
+        echo "Consumer exited"
+        cat $consout
+        cleanFailExit "Consumer exited"
+    fi
+
+
+    # Insert slightly different thing
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<'EOF'
+INSERT INTO t VALUES(1, 22.0/7, 'goodbye', x'beeffade', 5)
+UPDATE t set i = i + d, d = d + i, b = x'600dc0de'
+DELETE from t
+EOF
+
+    # Sleep a bit more to make sure we have consumed
+    sleep 5
+
+    # Kill the consumer and compare the files
+    kill -9 $conspid
+
+    diff $consout memq.expected.2
+
+    if [[ $? -ne 0 ]]; then
+        cleanFailExit "Consumer output 2 does not match"
+    fi
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default - <<'EOF'
+DROP LUA CONSUMER watch
+DROP PROCEDURE watch 'sample'
+DROP TABLE t
+EOF
+}
+
 trap - INT EXIT
 
 # 1. Setup replication metadata cluster
 REPL_META_DBNAME=${TESTCASE}_META
 REPL_META_DBDIR=${DBDIR}/${REPL_META_DBNAME}
 REPL_META_HOST=""
+REPL_META_HOST2=""
 
 if [[ -z "$CLUSTER" ]]; then # Standalone
     REPL_META_HOST=$(hostname)
+    second=$(hostname)
 else                         # Cluster
     for node in ${CLUSTER}; do
         let cluster_count=cluster_count+1
     done
+    first=""
+    second=""
     for node in ${CLUSTER}; do
-        first=${node}
-        REPL_META_HOST=${node}
+        if [[ -z "$first" ]]; then
+            first=${node}
+            REPL_META_HOST=${node}
+        else
+            second=${node}
+            break
+        fi
         # Downgrade now - we want to test incoherent later
         cdb2sql ${CDB2_OPTIONS} ${dbname} --host $node "exec procedure sys.cmd.send('downgrade')"
-        break
     done
 fi
 
@@ -1551,6 +1701,7 @@ fi
 REPL_CLUS_DBNAME=${TESTCASE}_CLUS
 REPL_CLUS_DBDIR=${DBDIR}/${REPL_CLUS_DBNAME}
 REPL_CLUS_HOST=${REPL_META_HOST}
+REPL_CLUS_HOST2=${second}
 setup_physrep_cluster ${REPL_CLUS_DBNAME} ${REPL_CLUS_DBDIR} ${SOURCE_DBNAME} ${SOURCE_HOST} ${SOURCE_DBDIR} ${REPL_META_DBNAME} ${REPL_META_HOST} ${REPL_META_DBDIR}
 
 # 4. Setup physical replicants
@@ -1584,7 +1735,7 @@ function testcase_preamble
     announce "Running $testcase"
 }
 
-function run_tests
+function run_tests_full
 {
     testcase="verify_generation"
     testcase_preamble $testcase
@@ -1673,6 +1824,29 @@ function run_tests
     testcase_preamble $testcase
     verify_revconn_fix
     testcase_finish $testcase
+
+    testcase="memq_consumer"
+    testcase_preamble $testcase
+    memq_consumer
+    testcase_finish $testcase
+}
+
+function run_some_tests
+{
+    j=0
+    while [[ $j -lt 10 ]]; do
+        testcase="memq_consumer_$j"
+        testcase_preamble $testcase
+        memq_consumer
+        testcase_finish $testcase
+        let j=j+1
+    done
+}
+
+function run_tests
+{
+    run_tests_full
+    #run_some_tests
 }
 
 run_tests

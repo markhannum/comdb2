@@ -7,6 +7,7 @@
 #include <dbinc/btree.h>
 #include <build/db.h>
 #include <epochlib.h>
+#include <bdb_queue.h>
 #include <dbinc_auto/btree_auto.h>
 
 #define MAX_QUEUE_FILES 64
@@ -294,6 +295,13 @@ static int log_queue_trigger_callback(const DB_LSN *lsn, const DB_LSN *commit_ls
         return -1;
     }
 
+    if (!(file->flags & LOGQTRIGGER_ENABLED)) {
+        logmsg(LOGMSG_WARN, "%s ignoring update for log-queue %s, not enabled\n", __func__, filename);
+        return 0;
+    } else {
+        logmsg(LOGMSG_WARN, "%s processing update for enabled log-queue %s\n", __func__, filename);
+    }
+
     int rc = normalize_rectype(&rectype);
     if (rectype > 1000 && rectype < 10000) {
         rectype = rectype - 1000;
@@ -325,7 +333,7 @@ static int unpack_queue_record(struct log_queue_file *file, struct log_queue_rec
         file->bdb_state = file->gethndl(file->filename);
     }
 
-    if (!(txn->flags & FLAGS_UNPACKED) && file->func && file->bdb_state) {
+    if (!(txn->flags & FLAGS_UNPACKED) && file->bdb_state) {
         if (file->flags & LOGQTRIGGER_MASTER_ONLY) {
             if (!bdb_amimaster(file->bdb_state->parent)) {
                 return 0;
@@ -368,7 +376,7 @@ void *log_queue_consumer(void *arg)
         }
         file->cursz -= txn->record_len;
         Pthread_mutex_unlock(&file->queue_lk);
-        if (unpack_queue_record(file, txn)) {
+        if (file->func != NULL && unpack_queue_record(file, txn)) {
             DBT key = {.data = txn->key, .size = 12};
             DBT data = {.data = txn->odh.recptr, .size = txn->odh.length};
             file->func(file->bdb_state, &txn->commit_lsn, file->filename, &key, &data, file->userptr);
@@ -403,30 +411,169 @@ static inline void logqueue_wait(struct log_queue_file *file, int timeoutms)
     }
 }
 
-int logqueue_trigger_get(void *qfile, DBT *key, DBT *data, int timeoutms)
+/* Find the correct record in the queue */
+static inline struct log_queue_record *retrieve_item_lk(struct log_queue_file *file, void *key, int next)
 {
-    struct log_queue_file *file = qfile;
-    int rc = -1;
+    struct log_queue_record *txn = LISTC_TOP(&file->outqueue);
+    while (txn != NULL) {
+        /* Returns 1 if unpacks successfully */
+        int rc = unpack_queue_record(file, txn);
+        if (!rc) {
+            logmsg(LOGMSG_FATAL, "%s:%d debug-abort on failed to unpack queue record\n", __func__, __LINE__);
+            abort();
+        }
+        if (key) {
+            if (memcmp(txn->key, key, 12) == 0) {
+                if (next) {
+                    txn = txn->lnk.next;
+                    if (txn != NULL) {
+                        unpack_queue_record(file, txn);
+                    }
+                }
+                break;
+            }
+            txn = txn->lnk.next;
+        } else {
+            break;
+        }
+    }
+    return txn;
+}
+
+static inline void logqueue_trigger_drain_lk(struct log_queue_file *file)
+{
+    struct log_queue_record *txn;
+    while ((txn = listc_rtl(&file->outqueue)) != NULL) {
+        file->cursz -= txn->record_len;
+        log_queue_record_free(txn);
+    }
+    assert(file->cursz == 0);
+}
+
+void logqueue_trigger_enable(void *infile)
+{
+    struct log_queue_file *file = infile;
+    Pthread_mutex_lock(&file->queue_lk);
+    file->flags |= LOGQTRIGGER_ENABLED;
+    Pthread_mutex_unlock(&file->queue_lk);
+}
+
+void logqueue_trigger_disable(void *infile)
+{
+    struct log_queue_file *file = infile;
+    Pthread_mutex_lock(&file->queue_lk);
+    file->flags &= ~LOGQTRIGGER_ENABLED;
+    logqueue_trigger_drain_lk(file);
+    Pthread_mutex_unlock(&file->queue_lk);
+}
+
+int logqueue_trigger_consume(bdb_state_type *bdb_state, uint64_t genid)
+{
+    struct log_queue_file *file = bdb_state->memqueue;
+
+    if (file == NULL) {
+        return -1;
+    }
+
+    struct queuedb_key k = {0};
+    uint8_t key[QUEUEDB_KEY_LEN] = {0};
+    uint8_t *p_buf = key, *p_buf_end = p_buf + QUEUEDB_KEY_LEN;
+
+    memcpy(&k.genid, &genid, sizeof(uint64_t));
+    p_buf = queuedb_key_put(&k, p_buf, p_buf_end);
+    assert(p_buf != NULL);
+
+    struct log_queue_record *txn = retrieve_item_lk(file, key, 0);
+    if (txn == NULL) {
+        Pthread_mutex_unlock(&file->queue_lk);
+        logmsg(LOGMSG_ERROR, "%s failed to find genid %" PRIx64 " on queue %s\n", __func__, genid, file->filename);
+        return -1;
+    }
+    listc_rfl(&file->outqueue, txn);
+    file->cursz -= txn->record_len;
+    Pthread_mutex_unlock(&file->queue_lk);
+    log_queue_record_free(txn);
+    return 0;
+}
+
+int logqueue_trigger_get(bdb_state_type *bdb_state, const struct bdb_queue_cursor *prevcursor,
+                         struct bdb_queue_found **fnd, size_t *fnddtalen, size_t *fnddtaoff,
+                         struct bdb_queue_cursor *fndcursor, long long *seq, int *bdberr, int timeoutms)
+{
+    struct log_queue_file *file = bdb_state->memqueue;
     Pthread_mutex_lock(&file->queue_lk);
     logqueue_wait(file, timeoutms);
-    if (listc_size(&file->outqueue) > 0) {
-        struct log_queue_record *txn = listc_rtl(&file->outqueue);
-        file->cursz -= txn->record_len;
-        Pthread_mutex_unlock(&file->queue_lk);
-        if (unpack_queue_record(file, txn)) {
-            key->size = 12;
-            key->data = malloc(12);
-            memcpy(key->data, txn->key, 12);
-            data->size = txn->odh.length;
-            data->data = malloc(data->size);
-            memcpy(data->data, txn->odh.recptr, data->size);
-            rc = 0;
-        }
-        log_queue_record_free(txn);
-    } else {
-        Pthread_mutex_unlock(&file->queue_lk);
+
+    /* Endianize search key */
+    struct queuedb_key k = {0};
+    uint8_t key[QUEUEDB_KEY_LEN] = {0};
+    void *keyptr = NULL;
+    uint8_t *p_buf = key, *p_buf_end = p_buf + QUEUEDB_KEY_LEN;
+    if (prevcursor && prevcursor->genid != 0) {
+        memcpy(&k.genid, &prevcursor->genid, sizeof(uint64_t));
+        p_buf = queuedb_key_put(&k, p_buf, p_buf_end);
+        assert(p_buf != NULL);
+        keyptr = key;
     }
-    return rc;
+
+    /* Grab tip of queue */
+    struct log_queue_record *txn;
+    txn = retrieve_item_lk(file, keyptr, 1);
+    if (txn == NULL) {
+        Pthread_mutex_unlock(&file->queue_lk);
+        *bdberr = BDBERR_FETCH_DTA;
+        return -1;
+    }
+
+    /* Found a record */
+    p_buf = txn->key;
+    p_buf_end = p_buf + QUEUEDB_KEY_LEN;
+
+    struct queuedb_key fndk;
+    p_buf = queuedb_key_get(&fndk, p_buf, p_buf_end);
+
+    assert(p_buf != NULL);
+    assert(fndk.consumer == 0);
+
+    long long sequence = 0;
+    size_t data_offset = 0;
+
+    struct bdb_queue_found_seq qfnd_odh = {0};
+    (*fnd) = malloc(txn->odh.length);
+    memcpy(*fnd, txn->odh.recptr, txn->odh.length);
+
+    p_buf = (uint8_t *)txn->odh.recptr;
+    p_buf_end = p_buf + txn->odh.length;
+
+    if (bdb_state->ondisk_header) {
+        p_buf = (uint8_t *)queue_found_seq_get(&qfnd_odh, p_buf, p_buf_end);
+        memcpy(*fnd, &qfnd_odh, sizeof(qfnd_odh));
+        sequence = qfnd_odh.seq;
+        data_offset = qfnd_odh.data_offset;
+    } else {
+        struct bdb_queue_found qfnd;
+        p_buf = (uint8_t *)queue_found_get(&qfnd, p_buf, p_buf_end);
+        memcpy(*fnd, &qfnd, sizeof(qfnd));
+        data_offset = qfnd.data_offset;
+    }
+    if (fnddtalen) {
+        *fnddtalen = txn->odh.length;
+    }
+    if (fnddtaoff) {
+        *fnddtaoff = data_offset;
+    }
+    if (seq) {
+        *seq = sequence;
+    }
+    if (fndcursor) {
+        memcpy(&fndcursor->genid, &fndk.genid, sizeof(fndk.genid));
+        fndcursor->recno = 0;
+        fndcursor->reserved = 0;
+    }
+    *bdberr = BDBERR_NOERROR;
+    Pthread_mutex_unlock(&file->queue_lk);
+
+    return 0;
 }
 
 /* Register log-queue trigger */

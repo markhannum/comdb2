@@ -27,7 +27,8 @@ extern int should_ignore_btree(const char *filename,
 extern int gbl_import_mode;
 extern int gbl_physrep_debug;
 int gbl_physrep_exit_on_invalid_logstream = 0;
-int gbl_physrep_ignore_queues = 1;
+/* This causes recovery failures- disabling for now */
+int gbl_physrep_ignore_queues = 0;
 
 static LOG_INFO get_lsn_internal(bdb_state_type *bdb_state, int flags)
 {

@@ -11,6 +11,13 @@ union trans_t {
     unsigned int tid;
 };
 
+enum { QUEUEDB_KEY_LEN = 4 + 8 };
+
+struct queuedb_key {
+    int consumer;
+    uint64_t genid;
+};
+
 struct bdb_queue_found {
     /* genid of this item */
     unsigned long long genid;
@@ -64,5 +71,9 @@ const uint8_t *queue_found_seq_get(struct bdb_queue_found_seq *p_queue_found,
 
 uint8_t *queue_found_seq_put(const struct bdb_queue_found_seq *p_queue_found,
                              uint8_t *p_buf, const uint8_t *p_buf_end);
+
+uint8_t *queuedb_key_get(struct queuedb_key *p_queuedb_key, uint8_t *p_buf, uint8_t *p_buf_end);
+
+uint8_t *queuedb_key_put(struct queuedb_key *p_queuedb_key, uint8_t *p_buf, uint8_t *p_buf_end);
 
 #endif

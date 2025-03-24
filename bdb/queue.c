@@ -61,6 +61,9 @@
 #include "bdb_queuedb.h"
 #include "logmsg.h"
 
+#include "bdb_api.h"
+#include "log_queue_trigger.h"
+
 /* See also Oracle support request #6353586.992.  It seems that non
  * transactional reads against a queue (at least, the way I was doing them) is
  * prone to deadlock.  By making my cursor transactional I seem to get around
@@ -1714,6 +1717,8 @@ lookagain:
     return 0;
 }
 
+extern int gbl_is_physical_replicant;
+
 /* get the first item unconsumed by this consumer number, AFTER the passed in
  * key (pass in a zero key to get the first unconsumed item).  the caller is
  * responsible for freeing *fnddta. */
@@ -1727,8 +1732,12 @@ int bdb_queue_get(bdb_state_type *bdb_state, tran_type *tran, int consumer,
 
     BDB_READLOCK("bdb_queue_get");
     if (bdb_state->bdbtype == BDBTYPE_QUEUEDB)
-        rc = bdb_queuedb_get(bdb_state, tran, consumer, prevcursor, fnd,
-                             fnddtalen, fnddtaoff, fndcursor, seq, bdberr);
+        if (gbl_is_physical_replicant && bdb_state->memqueue != NULL) {
+            rc = logqueue_trigger_get(bdb_state, prevcursor, fnd, fnddtalen, fnddtaoff, fndcursor, seq, bdberr, 0);
+        } else {
+            rc = bdb_queuedb_get(bdb_state, tran, consumer, prevcursor, fnd, fnddtalen, fnddtaoff, fndcursor, seq,
+                                 bdberr);
+        }
     else
         rc = bdb_queue_get_int(bdb_state, consumer, prevcursor, (void **)fnd, fnddtalen,
                                fnddtaoff, fndcursor, bdberr);

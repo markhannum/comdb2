@@ -865,6 +865,8 @@ static void reset_consumer_cursor(SP sp)
     memset(&q->last, 0, sizeof(q->last));
 }
 
+int logqueue_trigger_consume(bdb_state_type *bdb_state, uint64_t genid);
+
 /*
 ** (1) No explicit db:begin()
 ** (2) Have explicit db:begin(), but no writes yet.
@@ -883,6 +885,13 @@ static int dbconsumer_consume(Lua L)
     const char *err = NULL;
     SP sp = getsp(L);
     struct sqlclntstate *clnt = sp->clnt;
+
+    if (gbl_is_physical_replicant && 
+            logqueue_trigger_consume(sp->consumer->iq.usedb->handle, q->genid) == 0){
+        reset_consumer_cursor(sp);
+        return push_and_return(L, 0);
+    }
+
     int implicit_txn = in_parent_trans(sp);
     if (implicit_txn) {
         err = db_begin_int(L, &rc);
@@ -944,6 +953,11 @@ static int dbconsumer_next(Lua L)
     }
     Q4SP(qname, q->info.spname);
     ++clnt->osql_max_trans;
+    if (gbl_is_physical_replicant && 
+            logqueue_trigger_consume(q->iq.usedb->handle, q->genid) == 0){
+        q->last = q->fnd;
+        return push_and_return(L, 0);
+    }
     rc = osql_delrec_qdb(clnt, qname, q->genid);
     if (rc) {
         if (errstat_get_rc(&clnt->osql.xerr)) {
@@ -7249,6 +7263,8 @@ badargs:
     return -1;
 }
 
+void *queue_is_memq(const char *filename);
+
 static int exec_procedure_int(struct sqlthdstate *thd,
                               struct sqlclntstate *clnt, char **err, int trigger)
 {
@@ -7283,6 +7299,7 @@ static int exec_procedure_int(struct sqlthdstate *thd,
     if ((rc = get_func_by_name(L, main_func, err)) != 0) return rc;
 
     int consumer = 0;
+    int memq = 0;
     if (trigger) {
         sp->can_consume = 1;
         remove_tran_funcs(L);
@@ -7295,6 +7312,7 @@ static int exec_procedure_int(struct sqlthdstate *thd,
         if (getqueuebyname(qname)) {
             consumer = 1;
             sp->can_consume = 1;
+            memq = (queue_is_memq(qname) != NULL) ? 1 : 0;
         }
         unlock_schema_lk();
         if (consumer) add_consumer_funcs(L);
@@ -7317,7 +7335,7 @@ static int exec_procedure_int(struct sqlthdstate *thd,
         return SQLITE_ACCESS;
     }
 
-    if (gbl_is_physical_replicant && consumer) {
+    if (gbl_is_physical_replicant && consumer && !memq) {
         rc = -3;
         (*err) = strdup("Cannot execute consumer on physical-replicant");
     }

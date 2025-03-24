@@ -27,6 +27,7 @@
 #include "schemachange.h"
 #include "comdb2.h"
 #include "translistener.h"
+#include "log_queue_trigger.h"
 
 extern int gbl_queuedb_file_threshold;
 extern int gbl_queuedb_file_interval;
@@ -58,17 +59,9 @@ struct bdb_queue_priv {
     struct bdb_queue_stats stats;
 };
 
-struct queuedb_key {
-    int consumer;
-    uint64_t genid;
-};
-
-enum { QUEUEDB_KEY_LEN = 4 + 8 };
-
 int gbl_debug_queuedb = 0;
 
-static uint8_t *queuedb_key_get(struct queuedb_key *p_queuedb_key,
-                                uint8_t *p_buf, uint8_t *p_buf_end)
+uint8_t *queuedb_key_get(struct queuedb_key *p_queuedb_key, uint8_t *p_buf, uint8_t *p_buf_end)
 {
     if (p_buf_end < p_buf || (p_buf_end - p_buf) < QUEUEDB_KEY_LEN)
         return NULL;
@@ -80,8 +73,7 @@ static uint8_t *queuedb_key_get(struct queuedb_key *p_queuedb_key,
     return p_buf;
 }
 
-static uint8_t *queuedb_key_put(struct queuedb_key *p_queuedb_key,
-                                uint8_t *p_buf, uint8_t *p_buf_end)
+uint8_t *queuedb_key_put(struct queuedb_key *p_queuedb_key, uint8_t *p_buf, uint8_t *p_buf_end)
 {
     if (p_buf_end < p_buf || (p_buf_end - p_buf) < QUEUEDB_KEY_LEN)
         return NULL;
@@ -1437,17 +1429,27 @@ const struct bdb_queue_stats *bdb_queuedb_get_stats(bdb_state_type *bdb_state)
     return &qstate->stats;
 }
 
+extern int gbl_is_physical_replicant;
+
 int bdb_trigger_subscribe(bdb_state_type *bdb_state, pthread_cond_t **cond,
                           pthread_mutex_t **lock, const uint8_t **status, struct __db_trigger_subscription **hndl)
 {
     DB_ENV *dbenv = bdb_state->dbenv;
-    return dbenv->trigger_subscribe(dbenv, bdb_state->name, cond, lock, status, hndl);
+    int rc = dbenv->trigger_subscribe(dbenv, bdb_state->name, cond, lock, status, hndl);
+    if (rc == 0 && gbl_is_physical_replicant && bdb_state->memqueue != NULL) {
+        logqueue_trigger_enable(bdb_state->memqueue);
+    }
+    return rc;
 }
 
 int bdb_trigger_unsubscribe(bdb_state_type *bdb_state, struct __db_trigger_subscription *t)
 {
     DB_ENV *dbenv = bdb_state->dbenv;
-    return dbenv->trigger_unsubscribe(dbenv, t);
+    int rc = dbenv->trigger_unsubscribe(dbenv, t);
+    if (rc == 0 && gbl_is_physical_replicant && bdb_state->memqueue != NULL) {
+        logqueue_trigger_disable(bdb_state->memqueue);
+    }
+    return rc;
 }
 
 int bdb_trigger_lock(bdb_state_type *bdb_state, const uint8_t **status, struct __db_trigger_subscription **retp)

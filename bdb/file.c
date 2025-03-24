@@ -110,6 +110,7 @@
 #include <phys_rep_lsn.h>
 
 #include <log_trigger.h>
+#include <log_queue_trigger.h>
 
 extern int gbl_bdblock_debug;
 extern int gbl_keycompr;
@@ -6507,6 +6508,10 @@ bdb_state_type *bdb_open_more_queue(const char name[], const char dir[],
                        parent_bdb_state->attr->createdbs,  /* create */
                        bdberr, parent_bdb_state, pagesize, /* pagesize override */
                        isqueuedb ? BDBTYPE_QUEUEDB : BDBTYPE_QUEUE, tran ? &tran->tid : NULL, 0, NULL, 0);
+
+    if (ret != NULL) {
+        ret->memqueue = queue_is_memq(name);
+    }
 
     BDB_RELLOCK();
 

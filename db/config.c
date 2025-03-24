@@ -1509,6 +1509,24 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
             logmsg(LOGMSG_INFO, "log-trigger for %s\n", table);
             log_trigger_add_table(table);
         }
+    } else if (tokcmp(tok, ltok, "memqueue") == 0) {
+        if ((tok = segtok(line, len, &st, &ltok)) == NULL || ltok <= 0) {
+            logmsg(LOGMSG_ERROR, "memqueue <qname> <size>\n");
+            return -1;
+        }
+        char *queue = alloca(ltok + 1);
+        tokcpy(tok, ltok, queue);
+        char *bdbq = alloca(ltok + 4);
+        sprintf(bdbq, "%s%s", Q_TAG, queue);
+
+        if ((tok = segtok(line, len, &st, &ltok)) == NULL || ltok <= 0) {
+            logmsg(LOGMSG_ERROR, "Expected max queue-size\n");
+            return -1;
+        }
+        int maxsz = toknum(tok, ltok);
+        logmsg(LOGMSG_USER, "Adding memqueue trigger for %s max-queue %d\n", bdbq, maxsz);
+        register_memq(bdbq, queuehndl, maxsz);
+
     } else if (tokcmp(tok, ltok, "qdump") == 0) {
         if ((tok = segtok(line, len, &st, &ltok)) == NULL || ltok <= 0) {
             logmsg(LOGMSG_ERROR, "qdump <qname> <filename> <size>\n");

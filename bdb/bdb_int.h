@@ -1071,6 +1071,8 @@ struct bdb_state_tag {
     unsigned long long dtavers[1 + MAXBLOBS];
     unsigned long long ixvers[MAXINDEX];
     unsigned long long qvers[BDB_QUEUEDB_MAX_FILES];
+
+    void *memqueue;
 };
 
 #include <net_types.h>
