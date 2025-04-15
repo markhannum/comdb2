@@ -16,6 +16,7 @@ add_executable(cdb2sql
 
 include_directories(
   ${PROJECT_SOURCE_DIR}/util
+  ${PROJECT_SOURCE_DIR}/mem
   ${PROJECT_SOURCE_DIR}/bbinc
   ${PROJECT_SOURCE_DIR}/cdb2api
   ${OPENSSL_INCLUDE_DIR}
@@ -27,13 +28,15 @@ set(libs
   ${UNWIND_LIBRARY}
   ${OPENSSL_LIBRARIES}
   ${ZLIB_LIBRARIES}
+  util
+  mem
   ${CMAKE_DL_LIBS}
 )
 
 if(COMDB2_BBCMAKE)
   target_link_libraries(cdb2sql opencdb2api ${READLINE_LIBRARY} tinfo ${libs})
 else()
-  target_link_libraries(cdb2sql cdb2api ${READLINE_LIBRARIES} ${libs})
+  target_link_libraries(cdb2sql cdb2api util mem ${READLINE_LIBRARIES} ${libs})
 endif()
 
 if(COMDB2_BUILD_STATIC)

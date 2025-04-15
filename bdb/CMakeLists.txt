@@ -112,7 +112,7 @@ include_directories(
   ${PROTOBUF-C_INCLUDE_DIR}
 )
 add_dependencies(bdb db mem proto)
-target_link_libraries(bdb PUBLIC db)
+target_link_libraries(bdb PUBLIC db ${LIBELF_LIBRARIES})
 if (COMDB2_BBCMAKE)
   comdb2_lib_target(bdb)
 endif()

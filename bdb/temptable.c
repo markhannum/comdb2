@@ -52,6 +52,15 @@
 #include "bdb_int.h"
 #include "strbuf.h"
 
+#include <execinfo.h>
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <libelf.h>
+#include <fcntl.h>
+#include <gelf.h>
+
 extern int recover_deadlock_simple(bdb_state_type *bdb_state);
 
 #ifdef __GLIBC__
@@ -87,16 +96,108 @@ struct hashobj {
 
 uint32_t gbl_temptable_count;
 
+static uintptr_t get_base_address()
+{
+    static uintptr_t base = 0;
+    if (base != 0) return base;
+    char exe_path[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len < 0) return 0;
+    exe_path[len] = '\0';
+
+    FILE *fp = fopen("/proc/self/maps", "r");
+    if (!fp) return 0;
+
+    char line[512];
+    uintptr_t map_start = 0;
+    uintptr_t throwaway = 0;
+    uintptr_t file_offset = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, " r-xp ") && strstr(line, exe_path)) {
+            // Example: 575d8fa4f000-575d8ff50000 r-xp 00027000 ...
+            sscanf(line, "%lx-%lx r-xp %lx", &map_start, &throwaway, &file_offset);
+            break;
+        }
+    }
+
+    fclose(fp);
+    base = (uintptr_t)map_start - file_offset;
+    return base;
+}
+
 static char *get_stack_backtrace(void)
 {
-    void *stack[100] = {0};
-    int nFrames = backtrace(stack, sizeof(stack) / sizeof(void*));
-    if (nFrames > 0) {
-        strbuf *pStr = strbuf_new();
-        for (int i = 0; i < nFrames; i++) {
-            if (i > 0) strbuf_append(pStr, " ");
-            strbuf_appendf(pStr, "%p", stack[i]);
+    void *buffer[100];
+    int nptrs = backtrace(buffer, 100);
+    uintptr_t base = get_base_address();
+
+    if (elf_version(EV_CURRENT) == EV_NONE) return NULL;
+
+    int fd = open("/proc/self/exe", O_RDONLY);
+    if (fd < 0) return NULL;
+
+    Elf *elf = elf_begin(fd, ELF_C_READ, NULL);
+    if (!elf) {
+        close(fd);
+        return NULL;
+    }
+
+    strbuf *pStr = NULL;
+
+    size_t shstrndx;
+    elf_getshdrstrndx(elf, &shstrndx);
+    Elf_Scn *scn = NULL;
+    GElf_Shdr shdr;
+    Elf_Data *sym_data = NULL;
+    size_t sym_count = 0;
+    int symtab_index = -1;
+
+    // Locate the symbol table
+    while ((scn = elf_nextscn(elf, scn)) != NULL) {
+        gelf_getshdr(scn, &shdr);
+        if (shdr.sh_type == SHT_SYMTAB) {
+            sym_data = elf_getdata(scn, NULL);
+            sym_count = shdr.sh_size / shdr.sh_entsize;
+            symtab_index = shdr.sh_link;
+            break;
         }
+    }
+
+    for (int i = 0; i < nptrs; ++i) {
+        uintptr_t addr = (uintptr_t)buffer[i];
+        uintptr_t offset = addr - base;
+
+        //printf("addr: %lx base: 0x%lx offset: 0x%lx\n", addr, base, offset);
+
+        if (sym_data) {
+            for (size_t j = 0; j < sym_count; ++j) {
+                GElf_Sym sym;
+                gelf_getsym(sym_data, j, &sym);
+
+                if (ELF64_ST_TYPE(sym.st_info) != STT_FUNC)
+                    continue;
+
+                if (offset >= sym.st_value && offset < sym.st_value + sym.st_size) {
+                    const char *raw_name = elf_strptr(elf, symtab_index, sym.st_name);
+                    if (raw_name) {
+                        if (pStr == NULL) {
+                            pStr = strbuf_new();
+                        }
+                        char buf[256];
+                        snprintf(buf, sizeof(buf), "#%02d %p %s + 0x%lx\n", i, (void *)addr, raw_name, offset - sym.st_value);
+                        strbuf_append(pStr, buf);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    elf_end(elf);
+    close(fd);
+
+    if (pStr != NULL) {
         char *zBacktrace = strbuf_disown(pStr);
         strbuf_free(pStr);
         return zBacktrace;
@@ -489,6 +590,7 @@ static int bdb_temp_table_init_temp_db(bdb_state_type *bdb_state,
         if (rc)
             goto done;
 
+        logmsg(LOGMSG_USER, "%s closing old temp db %p\n", __func__, tbl->tmpdb);
         rc = tbl->tmpdb->close(tbl->tmpdb, 0);
         if (rc) {
             *bdberr = rc;
@@ -497,6 +599,8 @@ static int bdb_temp_table_init_temp_db(bdb_state_type *bdb_state,
             tbl->tmpdb = NULL;
             goto done;
         }
+    } else {
+        logmsg(LOGMSG_USER, "%s not closing temp db %p\n", __func__, tbl->tmpdb);
     }
 
     rc = db_create(&db, tbl->dbenv_temp, 0);
@@ -1391,6 +1495,8 @@ static int bdb_temp_table_truncate_temp_db(bdb_state_type *bdb_state,
     return bdb_temp_table_reset_cursors(bdb_state, tbl, bdberr);
 }
 
+int gbl_temptable_recreate_size = 1048576;
+
 int bdb_temp_table_truncate(bdb_state_type *bdb_state, struct temp_table *tbl,
                             int *bdberr)
 {
@@ -1428,7 +1534,10 @@ int bdb_temp_table_truncate(bdb_state_type *bdb_state, struct temp_table *tbl,
         break;
 
     case TEMP_TABLE_TYPE_BTREE:
-        if (tbl->num_mem_entries < 100)
+        off_t sz;
+
+        rc = tbl->tmpdb->size(tbl->tmpdb, &sz);
+        if (tbl->num_mem_entries < 100 && (rc == 0 && sz < gbl_temptable_recreate_size))
             rc = bdb_temp_table_truncate_temp_db(bdb_state, tbl, bdberr);
         else
             rc = bdb_temp_table_init_temp_db(bdb_state, tbl, bdberr);

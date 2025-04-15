@@ -2,6 +2,8 @@ add_executable(cdb2_sqlreplay cdb2_sqlreplay.cpp)
 include_directories(
   ${PROJECT_SOURCE_DIR}/cdb2api
   ${PROJECT_SOURCE_DIR}/cson
+  ${PROJECT_SOURCE_DIR}/util
+  ${PROJECT_SOURCE_DIR}/mem
 )
 set(libs
   cdb2api
@@ -10,11 +12,14 @@ set(libs
   ${OPENSSL_LIBRARIES}
   ${ZLIB_LIBRARIES}
   ${CMAKE_DL_LIBS}
+  mem
+  util
 )
 
 list(APPEND libs ${UNWIND_LIBRARY})
 
 target_link_libraries(cdb2_sqlreplay ${libs})
+
 if(COMDB2_BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
 endif()

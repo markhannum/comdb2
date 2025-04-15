@@ -20,6 +20,18 @@
 #include <walkback.h>
 #include <inttypes.h>
 
+#include "limits.h"
+#include "unistd.h"
+#include "strbuf.h"
+#include <execinfo.h>
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <libelf.h>
+#include <fcntl.h>
+#include <gelf.h>
+
 #ifdef DUMP_STACK
 #include <errno.h>
 #include <fcntl.h>
@@ -623,6 +635,120 @@ void comdb2_cheapstack_sym(FILE *f, char *fmt, ...)
 #if defined CHEAPSTACK_LOCK
     pthread_mutex_unlock(&lk);
 #endif
+}
+
+static uintptr_t get_base_address()
+{
+    static uintptr_t base = 0;
+    if (base != 0) return base;
+    char exe_path[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len < 0) return 0;
+    exe_path[len] = '\0';
+
+    FILE *fp = fopen("/proc/self/maps", "r");
+    if (!fp) return 0;
+
+    char line[512];
+    uintptr_t map_start = 0;
+    uintptr_t throwaway = 0;
+    uintptr_t file_offset = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, " r-xp ") && strstr(line, exe_path)) {
+            sscanf(line, "%lx-%lx r-xp %lx", &map_start, &throwaway, &file_offset);
+            break;
+        }
+    }
+
+    fclose(fp);
+    base = (uintptr_t)map_start - file_offset;
+    return base;
+}
+
+static char *get_stack_backtrace(void)
+{
+    void *buffer[100];
+    int nptrs = backtrace(buffer, 100);
+    uintptr_t base = get_base_address();
+
+    if (elf_version(EV_CURRENT) == EV_NONE) return NULL;
+
+    int fd = open("/proc/self/exe", O_RDONLY);
+    if (fd < 0) return NULL;
+
+    Elf *elf = elf_begin(fd, ELF_C_READ, NULL);
+    if (!elf) {
+        close(fd);
+        return NULL;
+    }
+
+    strbuf *pStr = NULL;
+
+    size_t shstrndx;
+    elf_getshdrstrndx(elf, &shstrndx);
+    Elf_Scn *scn = NULL;
+    GElf_Shdr shdr;
+    Elf_Data *sym_data = NULL;
+    size_t sym_count = 0;
+    int symtab_index = -1;
+
+    // Locate the symbol table
+    while ((scn = elf_nextscn(elf, scn)) != NULL) {
+        gelf_getshdr(scn, &shdr);
+        if (shdr.sh_type == SHT_SYMTAB) {
+            sym_data = elf_getdata(scn, NULL);
+            sym_count = shdr.sh_size / shdr.sh_entsize;
+            symtab_index = shdr.sh_link;
+            break;
+        }
+    }
+
+    for (int i = 0; i < nptrs; ++i) {
+        uintptr_t addr = (uintptr_t)buffer[i];
+        uintptr_t offset = addr - base;
+
+        //printf("addr: %lx base: 0x%lx offset: 0x%lx\n", addr, base, offset);
+
+        if (sym_data) {
+            for (size_t j = 0; j < sym_count; ++j) {
+                GElf_Sym sym;
+                gelf_getsym(sym_data, j, &sym);
+
+                if (ELF64_ST_TYPE(sym.st_info) != STT_FUNC)
+                    continue;
+
+                if (offset >= sym.st_value && offset < sym.st_value + sym.st_size) {
+                    const char *raw_name = elf_strptr(elf, symtab_index, sym.st_name);
+                    if (raw_name) {
+                        if (pStr == NULL) {
+                            pStr = strbuf_new();
+                        }
+                        char buf[256];
+                        snprintf(buf, sizeof(buf), "#%02d %p %s + 0x%lx\n", i, (void *)addr, raw_name, offset - sym.st_value);
+                        strbuf_append(pStr, buf);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    elf_end(elf);
+    close(fd);
+
+    if (pStr != NULL) {
+        char *zBacktrace = strbuf_disown(pStr);
+        strbuf_free(pStr);
+        return zBacktrace;
+    }
+    return NULL;
+}
+
+void comdb2_cheapstack_print()
+{
+    char *wb = get_stack_backtrace();
+    fprintf(stderr, "%s\n", wb);
 }
 
 void comdb2_cheapstack_sym_char_array(char *str, int maxln)

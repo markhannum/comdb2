@@ -1,2 +1,4 @@
 sqlenginepool linger 4
 sqlenginepool mint 0
+temptable_mem_threshold 1
+debug_temptables 1

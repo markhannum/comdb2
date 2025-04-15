@@ -715,6 +715,8 @@ __memp_fopen(dbmfp, mfp, path, flags, mode, pagesize)
 
 		goto err;
 	}
+	logmsg(LOGMSG_USER, "%s dbmfp %p opened fhp %p for %s mfp is %p\n", __func__,
+			dbmfp, dbmfp->fhp, rpath, mfp);
 
 	/*
 	 * Open the recovery-page file handle if the user has enabled this
@@ -1248,8 +1250,20 @@ __memp_fclose(dbmfp, flags)
 	}
 
 	MUTEX_THREAD_UNLOCK(dbenv, dbmp->mutexp);
-	if (ref != 0)
+	if (ref != 0) {
+
+		if ((t_ret = __db_appname(dbmp->dbenv,
+						DB_APP_DATA, R_ADDR(dbmp->reginfo,
+							mfp->path_off), 0, NULL, &rpath)) == 0)
+ 
+
+		{
+
+		logmsg(LOGMSG_USER, "%s not closing %s, still %d references\n",
+			   __func__, rpath, ref);
+		}
 		return (0);
+	}
 
 	/* Complain if pinned blocks never returned. */
 	if (dbmfp->pinref != 0) {
@@ -1280,6 +1294,17 @@ __memp_fclose(dbmfp, flags)
 				ret = t_ret;
 		}
 		dbmfp->fhp = NULL;
+	} else {
+        /*
+		if ((__db_appname(dbmp->dbenv,
+						DB_APP_DATA, R_ADDR(dbmp->reginfo,
+							mfp->path_off), 0, NULL, &rpath)) == 0)
+ 
+
+        */
+
+		logmsg(LOGMSG_USER, "%s not closing %p, fhp is NULL\n",
+			   __func__, dbmfp);
 	}
 
 	/* Close the recovery-page file.  */

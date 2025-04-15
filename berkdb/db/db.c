@@ -1096,8 +1096,10 @@ __db_refresh(dbp, txn, flags, deferred_closep)
 			F_ISSET(dbp, DB_AM_OPEN_CALLED));
 #endif
 	/* If never opened, or not currently open, it's easy. */
-	if (!F_ISSET(dbp, DB_AM_OPEN_CALLED))
+	if (!F_ISSET(dbp, DB_AM_OPEN_CALLED)) {
+        logmsg(LOGMSG_USER, "skipping close of dbp %p never opened\n", dbp);
 		goto never_opened;
+    }
 
 	/*
 	 * If we have any secondary indices, disassociate them from us.
@@ -1212,8 +1214,10 @@ __db_refresh(dbp, txn, flags, deferred_closep)
 					if ((ret =
 								__txn_closeevent(dbenv, txn, dbp)) != 0)
 						return (__db_panic(dbenv, ret));
-					if (deferred_closep != NULL)
+					if (deferred_closep != NULL) {
+						logmsg(LOGMSG_USER, "%s set deferred close flag\n", __func__);
 						*deferred_closep = 1;
+					}
 					return (t_ret);
 				}
 			}
@@ -1316,10 +1320,10 @@ never_opened:
 			}
 			listc_rfl(&dbenv->dbs[dbp->adj_fileid], dbp);
 			dbp->inadjlist = 0;
-            if (gbl_instrument_dblist)
-                logmsg(LOGMSG_DEBUG, "%s removing dbp %p adj_fileid %u from %p "
-                        "list %p\n", __func__, dbp, dbp->adj_fileid, dbenv,
-                        &dbenv->dbs[dbp->adj_fileid]);
+			if (gbl_instrument_dblist)
+				logmsg(LOGMSG_DEBUG, "%s removing dbp %p adj_fileid %u from %p "
+						"list %p\n", __func__, dbp, dbp->adj_fileid, dbenv,
+						&dbenv->dbs[dbp->adj_fileid]);
 		}
 		dbp->dblistlinks.le_prev = NULL;
 	}
@@ -1327,10 +1331,12 @@ never_opened:
 	/* Close the memory pool file handle. */
 	if (dbp->mpf != NULL) {
 		if ((t_ret = __memp_fclose(dbp->mpf,
-		    F_ISSET(dbp, DB_AM_DISCARD) ? DB_MPOOL_DISCARD : 0)) != 0 &&
-		    ret == 0)
+			F_ISSET(dbp, DB_AM_DISCARD) ? DB_MPOOL_DISCARD : 0)) != 0 &&
+			ret == 0)
 			ret = t_ret;
 		dbp->mpf = NULL;
+	} else {
+		logmsg(LOGMSG_USER, "skipping close of dbp %p null mpf\n", dbp);
 	}
 
 	MUTEX_THREAD_UNLOCK(dbenv, dbenv->dblist_mutexp);

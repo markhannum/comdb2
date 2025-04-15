@@ -62,6 +62,9 @@ err:
  *
  * PUBLIC: int __os_unlink __P((DB_ENV *, const char *));
  */
+
+void comdb2_cheapstack_print();
+
 int
 ___os_unlink(dbenv, path)
 	DB_ENV *dbenv;
@@ -69,6 +72,9 @@ ___os_unlink(dbenv, path)
 {
 	int ret, retries;
 	int tmp_file = 0;
+
+    fprintf(stderr, "%s unlinking %s\n", __func__, path);
+    comdb2_cheapstack_print();
 
 	if (dbenv->db_tmp_dir && *dbenv->db_tmp_dir)
 		if (memcmp(dbenv->db_tmp_dir, path,

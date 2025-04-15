@@ -111,16 +111,25 @@ int __os_open(DB_ENV *dbenv, const char *name, u_int32_t flags, int mode,
 int ___os_open_extend(DB_ENV *dbenv, const char *name, u_int32_t log_size,
                       u_int32_t page_size, u_int32_t flags, int mode,
                       DB_FH **fhpp);
+
+
+void comdb2_cheapstack_print();
 int __os_open_extend(DB_ENV *dbenv, const char *name, u_int32_t log_size,
-                     u_int32_t page_size, u_int32_t flags, int mode,
-                     DB_FH **fhpp)
+					 u_int32_t page_size, u_int32_t flags, int mode,
+					 DB_FH **fhpp)
 {
-    char buf[PATH_MAX];
-    const char *pbuf = bdb_trans(name, buf);
-    int rc =
-        ___os_open_extend(dbenv, pbuf, log_size, page_size, flags,
-                          gbl_file_permissions, fhpp);
-    clogf("___os_open_extend(%s:%s) = %d\n", name, pbuf, rc);
+	char buf[PATH_MAX];
+	const char *pbuf = bdb_trans(name, buf);
+	int rc =
+		___os_open_extend(dbenv, pbuf, log_size, page_size, flags,
+						  gbl_file_permissions, fhpp);
+	if (fhpp && !*fhpp) {
+		logmsg(LOGMSG_USER, "%s opening %s fhp is NULL\n", __func__, name);
+		comdb2_cheapstack_print();
+	} else if (fhpp) {
+        logmsg(LOGMSG_USER, "%s opening %s fhp is %p\n", __func__, name, *fhpp);
+    }
+	clogf("___os_open_extend(%s:%s) = %d\n", name, pbuf, rc);
     return rc;
 }
 
@@ -186,6 +195,7 @@ int __os_region_unlink(DB_ENV *dbenv, const char *path)
 }
 
 int ___os_unlink(DB_ENV *dbenv, const char *path);
+
 int __os_unlink(DB_ENV *dbenv, const char *path)
 {
     char buf[PATH_MAX];

@@ -6,8 +6,11 @@ set(src
   ${PROJECT_SOURCE_DIR}/util/sbuf2.c
   ${PROJECT_SOURCE_DIR}/util/ssl_glue.c
   ${PROJECT_SOURCE_DIR}/util/ssl_support.c
+  ${PROJECT_SOURCE_DIR}/util/strbuf.c
   ${PROJECT_SOURCE_DIR}/util/walkback.c
 )
+
+configure_file(${PROJECT_SOURCE_DIR}/mem/mem.h.in mem_util.h @ONLY)
 
 set_source_files_properties(
   ${PROJECT_BINARY_DIR}/protobuf/sqlquery.pb-c.c
@@ -19,7 +22,12 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/bbinc
   ${PROJECT_SOURCE_DIR}/util
+  ${PROJECT_SOURCE_DIR}/mem
+  ${PROJECT_BINARY_DIR}
+  ${PROJECT_SOURCE_DIR}/berkdb
+  ${PROJECT_SOURCE_DIR}/berkdb/build
   ${PROJECT_BINARY_DIR}/protobuf
+  ${PROJECT_BINARY_DIR}/util
   ${PROTOBUF-C_INCLUDE_DIR}
   ${OPENSSL_INCLUDE_DIR}
 )
@@ -27,6 +35,7 @@ include_directories(
 # common obj files for .so/.dylib and .a
 add_definitions(-DDISABLE_HOSTADDR_CACHE)
 add_definitions(-DSBUF2_SERVER=0)
+find_package(LibElf REQUIRED)
 
 if (COMDB2_BBCMAKE)
   include(${EXTRA_PLUGINS}/cdb2api/cdb2api.cmake)
@@ -37,7 +46,8 @@ if (COMDB2_BBCMAKE)
 else()
 
 add_library(cdb2api STATIC ${src})
-add_dependencies(cdb2api proto)
+add_dependencies(cdb2api proto util mem)
+target_link_libraries(cdb2api PUBLIC util mem ${LIBELF_LIBRARIES})
 
 configure_file(cdb2api.pc cdb2api.pc @ONLY)
 install(TARGETS cdb2api ARCHIVE DESTINATION lib)

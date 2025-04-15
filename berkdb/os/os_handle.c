@@ -233,8 +233,18 @@ err:	if (ret != 0) {
 		(void)__os_closehandle(dbenv, fhp);
 		*fhpp = NULL;
 	}
+	fprintf(stderr, "%s opened %s at fd %d\n", __func__, name, fhp->fd);
+	fflush(stderr);
 
 	return (ret);
+}
+
+void comdb2_cheapstack_print(void);
+int CloseWrap(int fd) {
+	fprintf(stderr, "\nClosing fd %d\n", fd);
+	comdb2_cheapstack_print();
+    fprintf(stderr, "\n");
+	return close(fd);
 }
 
 /*
@@ -260,7 +270,7 @@ __os_closehandle(dbenv, fhp)
 		retries = 0;
 		do {
 			ret = DB_GLOBAL(j_close) != NULL ?
-			    DB_GLOBAL(j_close)(fhp->fd) : Close(fhp->fd);
+			    DB_GLOBAL(j_close)(fhp->fd) : CloseWrap(fhp->fd);
 		} while (ret != 0 &&
 		    ((ret = __os_get_errno()) == EINTR || ret == EBUSY) &&
 		    ++retries < DB_RETRY);

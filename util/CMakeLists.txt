@@ -1,6 +1,9 @@
 set(module util)
 set(MODULE UTIL)
 configure_file(${PROJECT_SOURCE_DIR}/mem/mem.h.in mem_util.h @ONLY)
+
+find_package(LibElf REQUIRED)
+
 set(src
   averager.c
   bb_asprintf.c
@@ -92,6 +95,7 @@ include_directories(
   ${UNWIND_INCLUDE_DIR}
 )
 add_dependencies(util mem)
+target_link_libraries(util PUBLIC ${LIBELF_LIBRARIES})
 if (COMDB2_BBCMAKE)
   comdb2_lib_target(util)
 endif()

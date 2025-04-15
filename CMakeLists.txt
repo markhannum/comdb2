@@ -72,6 +72,7 @@ endif()
 if(${CMAKE_SYSTEM_NAME} STREQUAL Linux OR ${CMAKE_SYSTEM_NAME} STREQUAL Darwin)
   find_package(Unwind REQUIRED)
 endif()
+find_package(LibElf REQUIRED)
 
 option(WITH_RDKAFKA "Turn ON to compile with Kafka Publish" OFF)
 if(WITH_RDKAFKA)

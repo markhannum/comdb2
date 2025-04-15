@@ -4,10 +4,11 @@ add_executable(pmux
   ${PROJECT_SOURCE_DIR}/util/bb_daemon.c
 )
 include_directories(
-  ${PROJECT_SOURCE_DIR}/util
   ${PROJECT_SOURCE_DIR}/cdb2api
   ${SQLite3_INCLUDE_DIRS}
   ${LIBEVENT_INCLUDE_DIR}
+  ${PROJECT_SOURCE_DIR}/util
+  ${PROJECT_SOURCE_DIR}/mem
 )
 set(libs
   cdb2api
@@ -17,6 +18,8 @@ set(libs
   ${CMAKE_DL_LIBS}
   ${OPENSSL_LIBRARIES}
   ${ZLIB_LIBRARIES}
+  mem
+  util
 )
 
 list(APPEND libs ${UNWIND_LIBRARY})
