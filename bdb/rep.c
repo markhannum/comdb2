@@ -3166,6 +3166,7 @@ int64_t gbl_not_durable_commit_count = 0;
 /* ripped out ALL SUPPORT FOR ALL BROKEN CRAP MODES, aside from "newcoh" */
 
 int gbl_replicant_retry_on_not_durable = 0;
+int gbl_force_not_durable = 0;
 int gbl_require_distributed_count = 0;
 
 static int bdb_wait_for_seqnum_from_all_int(bdb_state_type *bdb_state, seqnum_type *seqnum, int *timeoutms,
@@ -3543,7 +3544,7 @@ done_wait:
                calc_lsn.offset, calc_gen);
     }
 
-    return outrc;
+    return gbl_force_not_durable ? BDBERR_NOT_DURABLE : outrc;
 }
 
 int bdb_wait_for_seqnum_from_all(bdb_state_type *bdb_state, seqnum_type *seqnum)
