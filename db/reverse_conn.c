@@ -253,7 +253,7 @@ static int add_reverse_host(const char *dbname, const char *host, reverse_conn_h
 }
 
 int gbl_reverse_hosts_v2 = 0;
-extern int gbl_alternate_metadbs_count;
+extern int gbl_altmetadb_count;
 int get_alt_metadb_hndl(cdb2_hndl_tp **hndl, int index);
 
 static int populate_revconn_list(cdb2_hndl_tp *metadb, reverse_conn_host_list_tp *new_reverse_conn_hosts)
@@ -365,7 +365,7 @@ static int refresh_reverse_conn_hosts()
 
     rc = populate_revconn_list(metadb, &new_reverse_conn_hosts);
     cdb2_close(metadb);
-    int altcnt = gbl_alternate_metadbs_count;
+    int altcnt = gbl_altmetadb_count;
     /* See if the alt-metadb requires us to spawn a reverse connection */
     for (int i = 0; i < altcnt; i++) {
         if ((rc = get_alt_metadb_hndl(&metadb, i)) != 0) {

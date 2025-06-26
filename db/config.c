@@ -1569,6 +1569,7 @@ static int read_lrl_option(struct dbenv *dbenv, char *line,
         }
         gbl_physrep_metadb_host = tokdup(tok, ltok);
     } else if (tokcmp(tok, ltok, "alternate_metadb") == 0) {
+        tok = segtok(line, len, &st, &ltok);
         if (ltok == 0) {
             logmsg(LOGMSG_ERROR, "Must specify an alternate database to replicate from\n");
             return -1;

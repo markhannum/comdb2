@@ -93,9 +93,9 @@ struct metadb {
 };
 
 #define MAX_ALTERNATE_METADBS 10
-struct metadb gbl_alternate_metadbs[MAX_ALTERNATE_METADBS] = {0};
+struct metadb gbl_altmetadb[MAX_ALTERNATE_METADBS] = {0};
 __thread int altmetadb_index[MAX_ALTERNATE_METADBS] = {0};
-int gbl_alternate_metadbs_count = 0;
+int gbl_altmetadb_count = 0;
 
 char *gbl_physrep_repl_name = NULL;
 char *gbl_physrep_repl_host = NULL;
@@ -367,15 +367,15 @@ static int get_local_hndl(cdb2_hndl_tp **hndl) {
 
 int physrep_add_alternate_metadb(char *dbname, char *host)
 {
-    if (gbl_alternate_metadbs_count >= MAX_ALTERNATE_METADBS) {
+    if (gbl_altmetadb_count >= MAX_ALTERNATE_METADBS) {
         physrep_logmsg(LOGMSG_ERROR, "%s:%d: Too many alternate metadbs specified (max: %d)\n", __func__, __LINE__,
                        MAX_ALTERNATE_METADBS);
         return 1;
     }
-    gbl_alternate_metadbs[gbl_alternate_metadbs_count].dbname = dbname;
-    gbl_alternate_metadbs[gbl_alternate_metadbs_count].host = host;
-    Pthread_mutex_init(&gbl_alternate_metadbs[gbl_alternate_metadbs_count].lk, 0);
-    gbl_alternate_metadbs_count++;
+    gbl_altmetadb[gbl_altmetadb_count].dbname = dbname;
+    gbl_altmetadb[gbl_altmetadb_count].host = host;
+    Pthread_mutex_init(&gbl_altmetadb[gbl_altmetadb_count].lk, 0);
+    gbl_altmetadb_count++;
     return 0;
 }
 
@@ -477,12 +477,12 @@ static int get_metadb_hndl(cdb2_hndl_tp **hndl)
 
 int get_alt_metadb_hndl(cdb2_hndl_tp **hndl, int index)
 {
-    if (index < 0 || index >= gbl_alternate_metadbs_count) {
+    if (index < 0 || index >= gbl_altmetadb_count) {
         physrep_logmsg(LOGMSG_ERROR, "%s:%d: No alternate metadbs specified!\n", __func__, __LINE__);
         return -1;
     }
 
-    struct metadb *metadb = &gbl_alternate_metadbs[index];
+    struct metadb *metadb = &gbl_altmetadb[index];
 
     return get_metadb_handle_int(hndl, metadb->dbname, metadb->host,
             &metadb->hosts, &metadb->host_count, &altmetadb_index[index], &metadb->lk);
