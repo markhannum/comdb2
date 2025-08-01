@@ -13,7 +13,10 @@ endif
 include $(TESTSROOTDIR)/Makefile.common
 
 # List of disabled tests
-DISABLED_TESTS:=$(shell awk '/^DISABLED/{f=1;next};/<END>/{f=0}f' TODO | cut -d' ' -f1)
+DISABLED_TESTS:=$(shell awk '/^DISABLED TESTS/{f=1;next};/^END DISABLED/{f=0}f' TODO | cut -d' ' -f1)
+
+# List of serial tests
+SERIAL_TESTS:=$(shell awk '/^SERIAL TESTS/{f=1;next};/^END SERIAL/{f=0}f' TODO | cut -d' ' -f1)
 
 # When SKIPSSL is on, skip running tests which rely on SSL
 ifeq ($(SKIPSSL),1)
@@ -56,10 +59,19 @@ else
     # by default exclude all tests which run longer than 1 hour
     FLG=--skip-long-running
   endif
+  
+  # Filter disabled tests from the SERIAL_TESTS
+  export ALL_SERIAL_TESTS:=$(filter-out $(DISABLED_TESTS), $(SERIAL_TESTS))
+  
+.NOTPARALLEL: all_serial_tests
+
+all_serial_tests: $(ALL_SERIAL_TESTS)
+
 
   # This is the list of all non-disabled tests.
-  export ALL_TESTS:=$(patsubst %.test, %, $(filter-out $(DISABLED_TESTS), \
-      $(shell $(TESTSROOTDIR)/tools/get_tests_inorder.sh $(FLG))))
+  export ALL_TESTS:=$(patsubst %.test, %, $(filter-out $(ALL_SERIAL_TESTS), \
+	  $(filter-out $(DISABLED_TESTS), \
+	  $(shell $(TESTSROOTDIR)/tools/get_tests_inorder.sh $(FLG)))))
 endif
 
 # get number of TOTAL tests running: used for printing progress report of tests
@@ -74,7 +86,7 @@ init:
 	@mkdir -p ${TESTDIR}
 
 # Run all non-disabled tests.
-all_tests: $(ALL_TESTS)
+all_tests: $(ALL_TESTS) $(ALL_SERIAL_TESTS)
 
 basicops_nokey: init
 	$(shell which git > /dev/null 2>&1 && git rev-parse --abbrev-ref HEAD | xargs echo "Branch" >> ${TESTDIR}/test.log)
