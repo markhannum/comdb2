@@ -24,6 +24,8 @@
 #include <flibc.h>
 #include "str0.h"
 #include "dynschematypes.h"
+#include "logmsg.h"
+#include "cdb2_constants.h"
 
 typedef struct {
     char name[32];    /* name of field as a \0 terminated string */
@@ -248,8 +250,7 @@ int local_replicant_log_add(struct ireq *iq, void *trans, void *od_dta,
                                                     &inline_len, 4, &isnull,
                                                     &outdtsz, NULL, NULL);
                     if (rc) {
-                        fprintf(
-                            stderr,
+                        logmsg(LOGMSG_ERROR,
                             "table %s field %s: can't determine length rc %d\n",
                             iq->usedb->tablename, fld->name, rc);
                         rc = OP_FAILED_INTERNAL;
@@ -316,7 +317,7 @@ int local_replicant_log_delete_for_update(struct ireq *iq, void *trans, int rrn,
     recsz = get_size_of_schema(iq->usedb->schema);
     tmpbuf = malloc(recsz);
     if (!tmpbuf) {
-        fprintf(stderr, "%s: out of memory for tmpbuf %d\n", __func__, recsz);
+        logmsg(LOGMSG_ERROR, "%s: out of memory for tmpbuf %d\n", __func__, recsz);
         *opfailcode = OP_FAILED_INTERNAL + ERR_MALLOC;
         rc = ERR_INTERNAL;
         return rc;
@@ -377,6 +378,169 @@ int local_replicant_log_delete(struct ireq *iq, void *trans, void *od_dta,
     if (rc != 0)
         *opfailcode = OP_FAILED_INTERNAL + ERR_ADD_OPLOG;
     return rc;
+}
+
+int local_replicant_find_by_seqno_blkpos(struct ireq *iq, void *trans, long long seqno,
+                        int blkpos, int *optype, void **logrec, unsigned *logsz)
+{
+    char key[MAXKEYLEN] = {0}, fndkey[MAXKEYLEN] = {0};
+    int ixnum, rc, keylen = 0, odsz, fndlen, fndoptype, optypefld, opsfld, outsz;
+    const struct field_conv_opts outopts = {0};
+    void *server_buf = NULL;
+    blob_status_t blobs[MAXBLOBS] = {{0}};
+    struct field *f;
+    unsigned long long genid;
+    int rrn;
+
+    struct dbtable *savedb = iq->usedb;
+    iq->usedb = get_dbtable_by_name("comdb2_oplog");
+    rc = getidxnumbyname(iq->usedb, "seqno", &ixnum);
+    if (rc < 0) {
+        logmsg(LOGMSG_ERROR, "%s:%d unable to find seqno index\n", __FILE__, __LINE__);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    /* 2 members, "seqno + blkpos" */
+    struct schema *s = get_schema(iq->usedb, ixnum);
+    if (s == NULL) {
+        logmsg(LOGMSG_ERROR, "%s:%d unable to find schema for index %d\n",
+               __FILE__, __LINE__, ixnum);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    if (s->nmembers != 2) {
+        logmsg(LOGMSG_ERROR, "%s:%d index %d has %d members, expected 2\n",
+               __FILE__, __LINE__, ixnum, s->nmembers);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    f = &s->member[0];
+    if (f->type != CLIENT_INT || f->len != 8) {
+        logmsg(LOGMSG_ERROR, "%s:%d index %d first field is not CLIENT_INT len is %d\n",
+               __FILE__, __LINE__, ixnum, f->len);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    rc = CLIENT_to_SERVER(&seqno, sizeof(seqno), CLIENT_INT,
+                          0, NULL, NULL, key + f->offset, f->len,
+                          f->type, 0, &outsz, &outopts, NULL);
+
+    if (rc != 0) {
+        logmsg(LOGMSG_ERROR, "%s:%d CLIENT_to_SERVER seqno rc %d\n",
+               __FILE__, __LINE__, rc);
+        iq->usedb = savedb;
+        return -1;
+    }
+    keylen += f->len;
+
+    f = &s->member[1];
+    if (f->type != CLIENT_INT || f->len != 4) {
+        logmsg(LOGMSG_ERROR, "%s:%d index %d second field is not CLIENT_INT, len is %d\n",
+               __FILE__, __LINE__, ixnum, f->len);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    rc = CLIENT_to_SERVER(&blkpos, sizeof(blkpos), CLIENT_INT,
+                          0, NULL, NULL, key + f->offset, f->len,
+                          f->type, 0, &outsz, &outopts, NULL);
+
+    if (rc != 0) {
+        logmsg(LOGMSG_ERROR, "%s:%d CLIENT_to_SERVER blkpos rc %d\n",
+               __FILE__, __LINE__, rc);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    keylen += f->len;
+
+    rc = ix_find_flags(iq, trans, 0, key, keylen, fndkey, &rrn,
+                       &genid, NULL, 0, 0, IX_FIND_IGNORE_INCOHERENT);
+    if (rc != IX_FND) {
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    s = find_tag_schema(iq->usedb, ".ONDISK");
+    if (s == NULL) {
+        logmsg(LOGMSG_ERROR, "%s:%d unable to find .ONDISK schema\n", __FILE__, __LINE__);
+        iq->usedb = savedb;
+        return -1;
+    }
+    odsz = get_size_of_schema(s);
+    server_buf = malloc(odsz);
+
+    rc = ix_find_by_rrn_and_genid_tran(iq, rrn, genid, server_buf, &fndlen,
+                                       odsz, trans);
+    if (rc != IX_FND) {
+        logmsg(LOGMSG_ERROR, "%s:%d ix_find_by_rrn_and_genid_tran rc %d\n",
+               __FILE__, __LINE__, rc);
+        free(server_buf);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    if ((optypefld = find_field_idx_in_tag(s, "optype")) == -1) {
+        logmsg(LOGMSG_ERROR, "%s:%d unable to find optype field in .ONDISK schema\n",
+               __FILE__, __LINE__);
+        free(server_buf);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    int isnull = 0;
+    rc = SERVER_to_CLIENT((char *)server_buf + s->member[optypefld].offset,
+                          s->member[optypefld].len, s->member[optypefld].type,
+                          NULL, NULL, 0, &fndoptype, sizeof(fndoptype),
+                          CLIENT_INT, &isnull, &outsz, &outopts, NULL);
+    if (rc != 0) {
+        logmsg(LOGMSG_ERROR, "%s:%d SERVER_to_CLIENT optype rc %d\n",
+               __FILE__, __LINE__, rc);
+        free(server_buf);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    /* Optype */
+    *optype = fndoptype;
+
+    if ((opsfld = find_field_idx_in_tag(s, "ops")) == -1) {
+        logmsg(LOGMSG_ERROR, "%s:%d unable to find ops field in .ONDISK schema\n",
+               __FILE__, __LINE__);
+        free(server_buf);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    rc = save_old_blobs(iq, trans, ".ONDISK", server_buf, rrn, genid,
+                        blobs);
+    if (rc != 0) {
+        logmsg(LOGMSG_ERROR, "%s:%d save_old_blobs rc %d\n", __FILE__, __LINE__,
+               rc);
+        free(server_buf);
+        iq->usedb = savedb;
+        return -1;
+    }
+
+    /* ops */
+    if (blobs[0].blobptrs[s->member[opsfld].blob_index] == NULL) {
+        *logrec = NULL;
+        *logsz = 0;
+    } else {
+        *logsz = blobs[0].bloblens[s->member[opsfld].blob_index];
+        *logrec = malloc(*logsz);
+        memcpy(*logrec, blobs[0].blobptrs[s->member[opsfld].blob_index],
+               *logsz);
+    }
+
+    free(server_buf);
+    free_blob_status_data(blobs);
+    iq->usedb = savedb;
+    return 0;
 }
 
 int local_replicant_log_add_for_update(struct ireq *iq, void *trans, int rrn,
@@ -595,8 +759,8 @@ int local_replicant_log_add_for_update(struct ireq *iq, void *trans, int rrn,
                                                     &inline_len, 4, &isnull,
                                                     &outdtsz, NULL, NULL);
                     if (rc) {
-                        fprintf(
-                            stderr,
+                        logmsg(
+                            LOGMSG_ERROR,
                             "table %s field %s: can't determine length rc %d\n",
                             iq->usedb->tablename, fld->name, rc);
                         rc = OP_FAILED_INTERNAL;
@@ -646,8 +810,8 @@ done:
 }
 
 /* Write an entry to the comdb2_oplog table. */
-int add_oplog_entry(struct ireq *iq, void *trans, int type, void *logrec,
-                    int logsz)
+int add_oplog_entry_int(struct ireq *iq, void *trans, int type, void *logrec,
+                    int logsz, long long seqno, int blkpos)
 {
     int rc;
     int nulls[32] = {0};
@@ -676,9 +840,9 @@ int add_oplog_entry(struct ireq *iq, void *trans, int type, void *logrec,
     blobs[0].length = logsz;
     blobs[0].collected = logsz;
 
-    rec.seqno = iq->blkstate->seqno;
+    rec.seqno = seqno;
     rec.optype = (int)type;
-    rec.blkpos = iq->blkstate->pos;
+    rec.blkpos = blkpos;
     if (logrec != NULL) {
         rec.ops.notnull = 1;
         rec.ops.length = logsz;
@@ -694,7 +858,7 @@ int add_oplog_entry(struct ireq *iq, void *trans, int type, void *logrec,
     p_buf_data_end = p_buf_data + sizeof(buf);
 
     if (!oprec_type_put(&rec, p_buf_data, p_buf_data_end)) {
-        fprintf(stderr, "%s line %d: endian conversion error\n", __func__,
+        logmsg(LOGMSG_ERROR, "%s line %d: endian conversion error\n", __func__,
                 __LINE__);
         return -1;
     }
@@ -711,12 +875,18 @@ int add_oplog_entry(struct ireq *iq, void *trans, int type, void *logrec,
                     &err, &fix, &rrn, &genid, -1ULL, BLOCK2_ADDKL, 0,
                     RECFLAGS_DYNSCHEMA_NULLS_ONLY | RECFLAGS_NO_CONSTRAINTS, 0);
 
-    iq->blkstate->pos++;
-
-    iq->oplog_numops++;
-
     if (iq->debug)
         reqpopprefixes(iq, 1);
+    return rc;
+}
+
+int add_oplog_entry(struct ireq *iq, void *trans, int type, void *logrec,
+                int logsz)
+{
+    int rc = add_oplog_entry_int(iq, trans, type, logrec, logsz,
+                                 iq->blkstate->seqno, iq->blkstate->pos);
+    iq->blkstate->pos++;
+    iq->oplog_numops++;
     return rc;
 }
 
@@ -753,7 +923,7 @@ int add_local_commit_entry(struct ireq *iq, void *trans, long long seqno,
     p_buf_data_end = p_buf_data + sizeof(buf);
 
     if (!commitrec_type_put(&rec, p_buf_data, p_buf_data_end)) {
-        fprintf(stderr, "%s:%d endian conversion error\n", __FILE__, __LINE__);
+        logmsg(LOGMSG_ERROR, "%s:%d endian conversion error\n", __FILE__, __LINE__);
         return -1;
     }
     iq->usedb = db;

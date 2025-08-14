@@ -32,6 +32,7 @@
 #include "sc_util.h"
 #include "views.h"
 #include "macc_glue.h"
+#include "localrep.h"
 
 extern int gbl_broken_max_rec_sz;
 
@@ -49,6 +50,85 @@ int fix_broken_max_rec_sz(int lrl)
     }
 
     return ret;
+}
+
+extern int gbl_comdb2_oplog_preserve_seqno;
+int gbl_comdb2_oplog_copy_entries;
+
+static int cmp_oprec_data(void *unused, int s1, const void *s1p, int s2, const void *s2p)
+{
+    struct oprec_data *o1 = (struct oprec_data *)s1p;
+    struct oprec_data *o2 = (struct oprec_data *)s1p;
+
+    if (o1->seqno < o2->seqno)
+        return -1;
+    else if (o1->seqno > o2->seqno)
+        return 1;
+    else if (o1->blkpos < o2->blkpos)
+        return -1;
+    else if (o1->blkpos > o2->blkpos)
+        return 1;
+    else
+        return 0;
+}
+
+static int copy_oplog_to_temptable(struct ireq *iq, tran_type *tran, long long seqno,
+                                    int copy_entries)
+{
+    int bdberr = 0, rc;
+    struct oprec_data *oprec = alloca(offsetof(struct oprec_data, logreq));
+
+    iq->oprecs = bdb_temp_table_create(thedb->bdb_env, &bdberr);
+    if (iq->oprecs == NULL) {
+        logmsg(LOGMSG_ERROR, "Failed to create temp table for oplog records: %d\n", bdberr);
+        goto err;
+    }
+
+    iq->oprecs_cursor = bdb_temp_table_cursor(thedb->bdb_env, iq->oprecs, NULL, &bdberr);
+    if (!iq->oprecs_cursor) {
+        logmsg(LOGMSG_ERROR, "Failed to create cursor for temp table: %d\n", bdberr);
+        goto err;
+    }
+    bdb_temp_table_set_cmp_func(iq->oprecs, cmp_oprec_data);
+
+    oprec->seqno = seqno - copy_entries;
+
+    while (oprec->seqno < seqno) {
+
+        oprec->blkpos = 0;
+        rc = local_replicant_find_by_seqno_blkpos(iq, tran, oprec->seqno, oprec->blkpos,
+                                                  &oprec->optype, &oprec->logreq,
+                                                  &oprec->logsz);
+        while (rc == 0) {
+            rc = bdb_temp_table_insert(thedb->bdb_env, iq->oprecs_cursor, oprec, 
+                                  offsetof(struct oprec_data, logreq),
+                                  oprec->logreq, oprec->logsz, &bdberr);
+            free(oprec->logreq);
+
+            if (rc) {
+                logmsg(LOGMSG_ERROR, "Failed to insert oplog record into temp table: %d\n", rc);
+                goto err;
+            }
+            oprec->blkpos++;
+            rc = local_replicant_find_by_seqno_blkpos(iq, tran, oprec->seqno, oprec->blkpos,
+                                                      &oprec->optype, &oprec->logreq,
+                                                      &oprec->logsz);
+        }
+        oprec->seqno++;
+    }
+    return 0;
+
+err:
+    if (iq->oprecs_cursor) {
+        bdb_temp_table_close_cursor(thedb->bdb_env, iq->oprecs_cursor, &bdberr);
+        iq->oprecs_cursor = NULL;
+    }
+
+    if (iq->oprecs) {
+        bdb_temp_table_close(thedb->bdb_env, iq->oprecs, &bdberr);
+        iq->oprecs = NULL;
+    }
+    return -1;
 }
 
 int do_fastinit(struct ireq *iq, struct schema_change_type *s, tran_type *tran)
@@ -147,6 +227,15 @@ int do_fastinit(struct ireq *iq, struct schema_change_type *s, tran_type *tran)
     set_bdb_option_flags(newdb, s->headers, s->ip_updates,
                          newdb->instant_schema_change, newdb->schema_version,
                          s->compress, s->compress_blobs, datacopy_odh);
+
+    int copy_entries = gbl_comdb2_oplog_copy_entries;
+    if (gbl_comdb2_oplog_preserve_seqno && copy_entries > 0 &&
+        gbl_replicate_local && strcasecmp(s->tablename, "comdb2_oplog") == 0) {
+        long long seqno;
+        if (get_next_seqno(tran, NULL, &seqno) == 0) {
+            copy_oplog_to_temptable(iq, tran, seqno, copy_entries);
+        }
+    }        
 
     MEMORY_SYNC;
 

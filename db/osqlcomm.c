@@ -58,6 +58,7 @@
 #include "sc_logic.h"
 #include "eventlog.h"
 #include <disttxn.h>
+#include <localrep.h>
 
 #define MAX_CLUSTER REPMAX
 
@@ -6858,6 +6859,63 @@ int osql_set_usedb(struct ireq *iq, const char *tablename, int tableversion, int
 
 int gbl_comdb2_oplog_preserve_seqno = 1;
 
+/* Collect any new oplog entries that have appeared */
+#if 0
+struct void collect_oplog_data_entries(struct ireq *iq, void *trans, long long seqno)
+{
+    return NULL;
+    struct oprec_data *oprecs = calloc(copy_entries, sizeof(struct oprec_data));
+    int ix = 0, rc, found_good = 0;
+    long long seq = seqno - copy_entries, orig = seq;
+
+    while (seq < seqno) {
+        struct oprec_data *r = &oprecs[ix];
+        r->seqno = seq;
+        r->blkpos = 0;
+        rc = local_replicant_find_by_seqno_blkpos(iq, trans, r->seqno, 
+            &r->optype, r->blkpos, &r->logrec, &r->logsz);
+        
+        // TODO .. might be alot of entries.. maybe use a temptable?
+        if (rc == 0) {
+            ix++;
+            foundgood = 1;
+            while (rc == 0) {
+                r->next = calloc(1, sizeof(struct oprec_data));
+                r->next->seqno = r->seqno;
+                r->next->blkpos = r->blkpos + 1;
+                r = r->next;
+                rc = local_replicant_find_by_seqno_blkpos(iq, trans, r->seqno, 
+                        &r->optype, r->blkpos, &r->logrec, &r->logsz);
+            }
+        } else if (foundgood) {
+            /* Found a gap .. ? */
+            logmsg(LOGMSG_ERROR, "%s: Failed to find seqno %lld in oplog, rc %d\n",
+                   __func__, r->seqno, rc);
+            ix = 0;
+            for (int i = orig; i < seq; i++) {
+                struct oprec_data *r = &oprecs[ix], *nxt;
+                while (r) {
+                    nxt = r->next;
+                    free(r);
+                    r = nxt;
+                }
+                free(oprecs[ix].logrec);
+            }
+            *entry_count = 0;
+            free(oprecs);
+            return NULL;
+        }
+        seq++;
+
+
+
+    }
+
+    *entry_count = ix;
+    return oprecs;
+}
+#endif
+
 /**
  * Handle the finalize part of a chain of schema changes
  *
@@ -6894,8 +6952,16 @@ int osql_finalize_scs(struct ireq *iq, tran_type *trans)
             gbl_replicate_local &&
             strcasecmp(iq->usedb->tablename, "comdb2_oplog") == 0) {
             long long seqno;
-            if (get_next_seqno(trans, iq->sc_tran, &seqno) == 0)
+            if (get_next_seqno(trans, iq->sc_tran, &seqno) == 0) {
                 bdb_set_seqno(iq->sc_tran, seqno);
+                if (iq->oprecs != NULL) {
+                //TODO
+                /*
+                    get_prev_oplog_data_entries(iq, iq->sc_tran, seqno,
+                        copy_entries, &entry_count);
+                        */
+                }
+            }
         }
 
         rc = finalize_schema_change(iq, iq->sc_tran);
@@ -6903,8 +6969,21 @@ int osql_finalize_scs(struct ireq *iq, tran_type *trans)
         if (rc != SC_OK) {
             return ERR_SC;
         }
-        if (IS_FASTINIT(iq->sc) && gbl_replicate_local)
+        if (IS_FASTINIT(iq->sc) && gbl_replicate_local) {
+            if (iq->oprecs) {
+            // TODO
+            /*
+                for (int i = 0 ; i < entry_count; i++) {
+                    struct oprec_data *r = &oprecs[i];
+                    add_oplog_entry_int(iq, iq->sc_tran, r->optype,
+                            r->logrec, r->logsz, r->seqno, r->blkpos);
+                    free(r->logrec);
+                }
+                free(oprecs);
+                */
+            }
             local_replicant_write_clear(iq, trans, iq->sc->db);
+        }
         iq->sc = iq->sc->sc_next;
     }
 

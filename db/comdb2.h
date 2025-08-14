@@ -1496,6 +1496,9 @@ struct ireq {
     void *authdata;
     char *argv0;
     int has_ssl;
+
+    struct temp_table *oprecs;
+    struct temp_cursor *oprecs_cursor;
     /* REVIEW COMMENTS AT BEGINING OF STRUCT BEFORE ADDING NEW VARIABLES */
 };
 
@@ -2990,6 +2993,8 @@ void allow_new_requests(struct dbenv *dbenv);
 int get_next_seqno(void *tran, void *sc_tran, long long *seqno);
 int add_oplog_entry(struct ireq *iq, void *trans, int type, void *logrec,
                     int logsz);
+int add_oplog_entry_int(struct ireq *iq, void *trans, int type, void *logrec,
+                    int logsz, long long seqno, int blkpos);
 int local_replicant_write_clear(struct ireq *in_iq, void *in_trans,
                                 struct dbtable *db);
 long long get_record_unique_id(struct dbtable *db, void *rec);

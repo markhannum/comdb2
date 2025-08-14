@@ -734,6 +734,15 @@ struct oprec {
 enum { OPREC_SIZE = 8 + 4 + 4 + CLIENT_BLOB_TYPE_LEN };
 BB_COMPILE_TIME_ASSERT(oprec_size, sizeof(struct oprec) == OPREC_SIZE);
 
+/* Written to temptable on master */
+struct oprec_data {
+    long long seqno;
+    int blkpos;
+    int optype;
+    unsigned logsz;
+    void *logreq;
+};
+
 struct commitrec {
     long long seqno;
     long long seed;
