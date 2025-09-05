@@ -1884,6 +1884,10 @@ REGISTER_TUNABLE("physrep_metadb_name", "Physical replication metadb cluster nam
                  NULL);
 REGISTER_TUNABLE("physrep_reconnect_penalty", "Physrep wait seconds before retry to the same node. (Default: 5)",
                  TUNABLE_INTEGER, &gbl_physrep_reconnect_penalty, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("physrep_allowed_source", "Allow this phyrep to act as a source.  (Default: on)", TUNABLE_BOOLEAN,
+                 &gbl_physrep_allowed_source, 0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("physrep_register_replicant_v2", "Register-replicant-v2 passes the 'allowed-source' flag to register-replicant.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_physrep_register_replicant_v2, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("physrep_reconnect_interval", "Reconnect interval for physical replicants (Default: 600)",
                  TUNABLE_INTEGER, &gbl_physrep_reconnect_interval, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("physrep_shuffle_host_list",

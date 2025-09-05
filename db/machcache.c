@@ -156,8 +156,8 @@ int class_machs(const char *dbname, const char *class, int *count, char ***machs
         for (int i = 0; i < cm->count; i++) {
             machs_cpy[i] = strdup(cm->machs[i]);
         }
-        Pthread_mutex_unlock(&class_machs_mutex);
         *count = cm->count;
+        Pthread_mutex_unlock(&class_machs_mutex);
         *machs = machs_cpy;
         return 0;
     }

@@ -583,7 +583,7 @@ static int db_comdb_physrep_tunables(Lua L)
         return luaL_error(L, "Requires sourcedb");
     }
 
-    int tunables_count = 4;
+    int tunables_count = 5;
 
     lua_createtable(L, tunables_count, 0);
 

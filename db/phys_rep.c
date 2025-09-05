@@ -737,10 +737,13 @@ static LOG_INFO handle_record(cdb2_hndl_tp *repl_db, LOG_INFO prev_info)
     return next_info;
 }
 
+int gbl_physrep_register_replicant_v2 = 0;
+int gbl_physrep_allowed_source = 1;
+
 static int register_self(cdb2_hndl_tp *repl_metadb)
 {
     const size_t nodes_list_sz = REPMAX * (255+1) + 3;
-    char cmd[120+nodes_list_sz];
+    char cmd[130+nodes_list_sz];
     int bytes_written = 0;
     int rc;
 
@@ -767,10 +770,32 @@ static int register_self(cdb2_hndl_tp *repl_metadb)
     char *buf = cmd;
     size_t buf_len = sizeof(cmd);
     LOG_INFO info = get_last_lsn(thedb->bdb_env);
+    int use_v2 = 0;
 
-    bytes_written = snprintf(buf+bytes_written, buf_len-bytes_written,
+    if (gbl_physrep_register_replicant_v2) {
+        snprintf(cmd, sizeof(cmd), "select count(*) from comdb2_columns where tablename='comdb2_physreps' and columnname='allowed_source'"); 
+        rc = cdb2_run_statement(repl_metadb, cmd);
+        if (rc != CDB2_OK) {
+            physrep_logmsg(LOGMSG_ERROR, "%s:%d Failed to execute cmd %s (rc: %d)\n", __func__, __LINE__, cmd, rc);
+            return 1;
+        }
+        if (cdb2_next_record(repl_metadb) == CDB2_OK) {
+            int64_t val = *(int64_t *)cdb2_column_value(repl_metadb, 0);
+            use_v2 = (val != 0) ? 1 : 0;
+        }
+    }
+
+    if (use_v2) {
+        bytes_written = snprintf(buf+bytes_written, buf_len-bytes_written,
+                  "exec procedure sys.physrep.register_replicant_v2('%s', '%s', '%u:%u', '%u', '%s', \"",
+                  gbl_dbname, gbl_myhostname, info.file, info.offset, gbl_physrep_allowed_source, gbl_physrep_source_dbname);
+
+
+    } else {
+        bytes_written = snprintf(buf+bytes_written, buf_len-bytes_written,
                   "exec procedure sys.physrep.register_replicant('%s', '%s', '%u:%u', '%s', \"",
                   gbl_dbname, gbl_myhostname, info.file, info.offset, gbl_physrep_source_dbname);
+    }
     if (bytes_written >= buf_len) {
         physrep_logmsg(LOGMSG_ERROR, "%s:%d Buffer is not long enough!\n", __func__, __LINE__);
         return 1;
