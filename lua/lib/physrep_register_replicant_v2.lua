@@ -1,14 +1,15 @@
--- sys.physrep.register_replicant
+-- sys.physrep.register_replicant_v2
 
 -- As the first step of registration process, physical replicants execute
 -- this stored procedure on the source/replication metadb node in order to
 -- register themselves. The node, in return, sends back a list of "potential"
 -- nodes that the replicant can connect to to pull and apply physical logs.
-local function main(dbname, hostname, lsn, source_dbname, source_hosts)
+local function main(dbname, hostname, lsn, allowed_source, source_dbname, source_hosts)
 
     local pfile, poffset = string.match(lsn, "(%d+):(%d+)")
     pfile = tonumber(pfile)
     poffset = tonumber(poffset)
+    local asource = tonumber(allowed_source)
     print(
         "physrep_register_replicant: dbname = '" .. dbname .. "', hostname = '" .. hostname ..
         "', file = " .. pfile .. ", offset = " .. poffset .. ", source_dbname = '" .. source_dbname .. "', source_hosts = '" ..
@@ -58,6 +59,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
                  "             FROM comdb2_physrep_connections p, tiers t, comdb2_physreps c" ..
                  "             WHERE p.source_dbname = t.dbname AND p.source_host = t.host " ..
                  "             AND p.dbname = c.dbname AND p.host = c.host " ..
+                 "             AND c.allowed_source = 1 " ..
                  "             AND (c.file >= " .. pfile .. " AND " ..
                  "                 (c.firstfile IS NULL OR c.firstfile <= " .. pfile ..  "))" ..
                  "             AND (c.last_keepalive > (NOW() - cast (600 as sec)))), " ..
@@ -68,7 +70,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
                  "             GROUP BY t.dbname, t.host HAVING COUNT(*) < " .. physrep_fanout .. " ) " ..
                  "SELECT c.tier, c.dbname, c.host FROM child_count c, comdb2_physreps p " ..
                  "    WHERE c.dbname = p.dbname AND c.host = p.host AND (p.state IS NULL OR p.state NOT IN ('Pending', 'Inactive'))" ..
-                 "    ORDER BY tier, cnt, random()")
+                 "    ORDER BY tier, cnt, random() ")
     else
         cte = ("WITH RECURSIVE " ..
                  "    tiers (dbname, host, tier) AS " ..
@@ -80,6 +82,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
                  "         SELECT p.dbname, p.host, t.tier+1  " ..
                  "             FROM comdb2_physrep_connections p, tiers t, comdb2_physreps c" ..
                  "             WHERE p.source_dbname = t.dbname AND p.source_host = t.host" ..
+                 "             AND c.allowed_source = 1 " ..
                  "             AND p.dbname = c.dbname AND p.host = c.host " ..
                  "             AND (c.last_keepalive > (NOW() - cast (600 as sec)))), " ..
                  "    child_count (dbname, host, tier, cnt) AS " ..
@@ -96,6 +99,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
     local rs, rc = db:exec(cte)
     local foundrow = 0
 
+    -- TODO: Apply affinity / tier information 
     if (rc == 0) then
         if rs then
             local row = rs:fetch()
@@ -176,7 +180,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
         -- its state set to 'Pending'. This information will give an estimate on how
         -- many replicant registrations are currently in progress.
         -- We could deny further requests if there are too many pending requests.
-        db:exec("INSERT INTO comdb2_physreps(dbname, host, state) VALUES ('" ..  dbname .. "', '" .. hostname .. "', 'Pending')" ..
+        db:exec("INSERT INTO comdb2_physreps(dbname, host, allowed_source, state) VALUES ('" ..  dbname .. "', '" .. hostname .. "', " .. asource .. ", 'Pending')" ..
         " ON CONFLICT (dbname, host) DO UPDATE SET state = 'Pending'")
     end
     db:commit()

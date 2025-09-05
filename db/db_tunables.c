@@ -511,6 +511,8 @@ extern int gbl_physrep_shuffle_host_list;
 extern int gbl_physrep_ignore_queues;
 extern int gbl_physrep_max_rollback;
 extern int gbl_physrep_pollms;
+extern int gbl_physrep_register_replicant_v2;
+extern int gbl_physrep_allowed_source;
 
 /* source-name / host is from lrl */
 extern char *gbl_physrep_source_dbname;
