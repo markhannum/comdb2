@@ -740,6 +740,37 @@ static LOG_INFO handle_record(cdb2_hndl_tp *repl_db, LOG_INFO prev_info)
 int gbl_physrep_register_replicant_v2 = 0;
 int gbl_physrep_allowed_source = 1;
 
+static inline int resolve_class(mach_class class)
+{
+    switch(class)
+    {
+        case CLASS_TEST:
+        case CLASS_INTEGRATION:
+        case CLASS_FUZZ:
+            return CLASS_TEST:  // 1
+        case CLASS_ALPHA:
+            return CLASS_ALPHA: // 2
+        case CLASS_UAT:
+            return CLASS_UAT:   // 3
+        case CLASS_BETA:
+            return CLASS_BETA:  // 4
+        case CLASS_PROD:
+        default:
+            return CLASS_PROD;  // 5
+    }
+}
+
+static void remove_lower_classes(void)
+{
+    int mytier = machine_my_class();
+    return;
+}
+
+static void affinity_reorder(void)
+{
+    return;
+}
+
 static int register_self(cdb2_hndl_tp *repl_metadb)
 {
     const size_t nodes_list_sz = REPMAX * (255+1) + 3;
@@ -838,6 +869,8 @@ static int register_self(cdb2_hndl_tp *repl_metadb)
             last_register = time(NULL);
 
             if (candidate_leaders_count > 0) {
+                remove_lower_classes();
+                affinity_reorder();
                 if (gbl_physrep_debug) {
                     dump_replicant_hosts();
                 }

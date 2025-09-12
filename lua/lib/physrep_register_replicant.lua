@@ -68,8 +68,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
                  "             GROUP BY t.dbname, t.host HAVING COUNT(*) < " .. physrep_fanout .. " ) " ..
                  "SELECT c.tier, c.dbname, c.host FROM child_count c, comdb2_physreps p " ..
                  "    WHERE c.dbname = p.dbname AND c.host = p.host AND (p.state IS NULL OR p.state NOT IN ('Pending', 'Inactive'))" ..
-                 "    ORDER BY tier, cnt, random() " ..
-                 "    LIMIT " .. physrep_max_candidates)
+                 "    ORDER BY tier, cnt, random()")
     else
         cte = ("WITH RECURSIVE " ..
                  "    tiers (dbname, host, tier) AS " ..
@@ -90,8 +89,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
                  "             GROUP BY t.dbname, t.host HAVING COUNT(*) < " .. physrep_fanout .. " ) " ..
                  "SELECT c.tier, c.dbname, c.host FROM child_count c, comdb2_physreps p " ..
                  "    WHERE c.dbname = p.dbname AND c.host = p.host AND (p.state IS NULL OR p.state NOT IN ('Pending', 'Inactive'))" ..
-                 "    ORDER BY tier, random() " ..
-                 "    LIMIT " .. physrep_max_candidates)
+                 "    ORDER BY tier, random()")
     end
 
     print("physrep_register_replicant: sql = " .. cte)
@@ -134,8 +132,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
                          "             GROUP BY t.dbname, t.host) " ..
                          "SELECT c.tier, c.dbname, c.host FROM child_count c, comdb2_physreps p " ..
                          "    WHERE c.dbname = p.dbname AND c.host = p.host AND (p.state IS NULL OR p.state NOT IN ('Pending', 'Inactive'))" ..
-                         "    ORDER BY tier, cnt, random() " ..
-                         "    LIMIT " .. physrep_max_candidates)
+                         "    ORDER BY tier, cnt, random()")
             else
                 cte = ("WITH RECURSIVE " ..
                          "    tiers (dbname, host, tier) AS " ..
@@ -154,8 +151,7 @@ local function main(dbname, hostname, lsn, source_dbname, source_hosts)
                          "             GROUP BY t.dbname, t.host ) " ..
                          "SELECT c.tier, c.dbname, c.host FROM child_count c, comdb2_physreps p " ..
                          "    WHERE c.dbname = p.dbname AND c.host = p.host AND (p.state IS NULL OR p.state NOT IN ('Pending', 'Inactive'))" ..
-                         "    ORDER BY tier, random() " ..
-                         "    LIMIT " .. physrep_max_candidates)
+                         "    ORDER BY tier, random()")
             end
         
             rs, rc = db:exec(cte)
