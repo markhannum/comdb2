@@ -42,6 +42,8 @@
 typedef struct DB_Connection {
     char *hostname;
     char *dbname;
+    int distance;
+    int64_t cnt;
     uint32_t seed;
     int is_up; // was the db available for connection. Default non-zero if not
                // connected before
@@ -119,7 +121,7 @@ reverse_conn_handle_tp *rev_conn_hndl = NULL;
 static int last_register;
 static int repl_db_connect_time;
 
-static int add_replicant_host(char *hostname, char *dbname);
+static int add_replicant_host(char *hostname, char *dbname, int64_t cnt, int distance);
 static void dump_replicant_hosts(void);
 static void delete_replicant_host(DB_Connection *cnct);
 
@@ -744,31 +746,22 @@ static inline int resolve_class(mach_class class)
 {
     switch(class)
     {
-        case CLASS_TEST:
-        case CLASS_INTEGRATION:
-        case CLASS_FUZZ:
-            return CLASS_TEST:  // 1
-        case CLASS_ALPHA:
-            return CLASS_ALPHA: // 2
-        case CLASS_UAT:
-            return CLASS_UAT:   // 3
-        case CLASS_BETA:
-            return CLASS_BETA:  // 4
         case CLASS_PROD:
+            return 7;
+        case CLASS_BETA:
+            return 6;
+        case CLASS_UAT:
+            return 5;
+        case CLASS_ALPHA:
+            return 4;
+        case CLASS_INTEGRATION:
+            return 3;
+        case CLASS_TEST:
+            return 2;
+        case CLASS_FUZZ:
         default:
-            return CLASS_PROD;  // 5
+            return 1;
     }
-}
-
-static void remove_lower_classes(void)
-{
-    int mytier = machine_my_class();
-    return;
-}
-
-static void affinity_reorder(void)
-{
-    return;
 }
 
 static int register_self(cdb2_hndl_tp *repl_metadb)
@@ -857,20 +850,25 @@ static int register_self(cdb2_hndl_tp *repl_metadb)
         }
 
         int candidate_leaders_count = 0;
+        int myclass = resolve_class(machine_my_class());
         if ((rc = cdb2_run_statement(repl_metadb, cmd)) == CDB2_OK) {
             while ((rc = cdb2_next_record(repl_metadb)) == CDB2_OK) {
                 char *dbname = (char *)cdb2_column_value(repl_metadb, 1);
                 char *hostname = (char *)cdb2_column_value(repl_metadb, 2);
+                int64_t cnt = use_v2 ? (int64_t)cdb2_columns_value(repl_metadb, 3) : -1;
 
-                add_replicant_host(hostname, dbname);
+                /* v1 might not return any suitable machines */
+                int class = resolve_class(machine_class(hostname));
+                int distance = machine_distance(hostname);
+                if (!use_v2 || class >= myclass) {
+                    add_replicant_host(hostname, dbname, cnt, distance);
+                }
 
                 ++ candidate_leaders_count;
             }
             last_register = time(NULL);
 
             if (candidate_leaders_count > 0) {
-                remove_lower_classes();
-                affinity_reorder();
                 if (gbl_physrep_debug) {
                     dump_replicant_hosts();
                 }
@@ -991,7 +989,7 @@ static void dump_replicant_hosts()
     }
 }
 
-static int add_replicant_host(char *hostname, char *dbname)
+static int add_replicant_host(char *hostname, char *dbname, int64_t cnt, int distance)
 {
 
     /* Don't add same machine multiple times */
@@ -1008,13 +1006,15 @@ static int add_replicant_host(char *hostname, char *dbname)
     DB_Connection *cnct = malloc(sizeof(DB_Connection));
     cnct->hostname = strdup(hostname);
     cnct->dbname = strdup(dbname);
+    cnct->distance = distance;
+    cnct->cnt = cnt;
     cnct->last_cnct = 0;
     cnct->last_failed = 0;
     cnct->is_up = 1;
     cnct->seed = rand();
 
     repl_dbs = realloc(repl_dbs, (repl_dbs_sz + 1) * sizeof(DB_Connection *));
-    repl_dbs[repl_dbs_sz ++] = cnct;
+    repl_dbs[repl_dbs_sz++] = cnct;
 
     if (gbl_physrep_debug) {
         physrep_logmsg(LOGMSG_USER, "%s:%d Adding %s:%s\n", __func__, __LINE__, hostname, dbname);

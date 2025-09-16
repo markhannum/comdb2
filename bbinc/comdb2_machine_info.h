@@ -28,6 +28,7 @@ struct comdb2_machine_info {
     int (*machine_my_cluster)(const char **cluster);
     int (*machine_cluster_machs)(const char *cluster, int *count, const char ***machs);
     int (*machine_add_cluster)(const char *host, const char *cluster);
+    int (*machine_distance)(const char *host);
 };
 typedef struct comdb2_machine_info comdb2_machine_info_t;
 #endif /* !__INCLUDED_MACHINE_INFO_H */

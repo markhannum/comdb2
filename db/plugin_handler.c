@@ -122,7 +122,7 @@ static int install_plugin_int(comdb2_plugin_t *new_plugin)
                                  machine_info->machine_class, machine_info->machine_my_class, machine_info->machine_dc,
                                  machine_info->machine_num, machine_info->machine_cluster,
                                  machine_info->machine_my_cluster, machine_info->machine_cluster_machs,
-                                 machine_info->machine_add_cluster);
+                                 machine_info->machine_add_cluster, machine_info->machine_distance);
         break;
     }
     case COMDB2_PLUGIN_QUEUE_CONSUMER: {

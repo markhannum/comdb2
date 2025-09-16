@@ -58,6 +58,7 @@ static int (*machine_my_cluster_cb)(const char **) = machine_my_cluster_default;
 static int (*machine_cluster_machs_cb)(const char *cluster, int *count,
                                        const char ***machs) = machine_cluster_machs_default;
 static int (*machine_add_cluster_cb)(const char *host, const char *cluster) = machine_add_cluster_default;
+static int (*machine_distance_cb)(const char *host) = machine_distance_default;
 
 static int inited = 0;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -75,7 +76,7 @@ static void init_once(void)
 void register_rtcpu_callbacks(int (*a)(const char *, int *), int (*b)(void), int (*c)(const char *), int (*d)(void),
                               int (*e)(const char *), int (*f)(const char *), int (*g)(const char *, const char **),
                               int (*h)(const char **), int (*i)(const char *, int *, const char ***),
-                              int (*j)(const char *, const char *))
+                              int (*j)(const char *, const char *), int (*k)(const char *))
 {
 
     if (inited) {
@@ -93,6 +94,7 @@ void register_rtcpu_callbacks(int (*a)(const char *, int *), int (*b)(void), int
     machine_my_cluster_cb = h;
     machine_cluster_machs_cb = i;
     machine_add_cluster_cb = j;
+    machine_distance_cb = k;
 }
 
 int machine_is_up(const char *host, int *drtest)
@@ -298,4 +300,10 @@ static int machine_cluster_machs_default(const char *cluster, int *count, const 
 static int machine_add_cluster_default(const char *host, const char *cluster)
 {
     return mach_addcluster(host, cluster);
+}
+
+static int machine_distance_default(const char *host)
+{
+    int distance = 1;
+    return distance;
 }
