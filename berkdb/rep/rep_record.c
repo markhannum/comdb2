@@ -84,6 +84,7 @@ extern int gbl_dumptxn_at_commit;
 
 int gbl_rep_badgen_trace;
 int gbl_decoupled_logputs = 0;
+int gbl_use_seqnum_for_rep_all_req = 1;
 int gbl_inmem_repdb = 0;
 int gbl_max_apply_dequeue = 100000;
 int gbl_master_req_waitms = 200;
@@ -129,6 +130,10 @@ extern int bdb_purge_logical_transactions(void *statearg, DB_LSN *trunclsn);
 extern int set_commit_context(unsigned long long context, uint32_t *generation,
 	void *plsn, void *args, unsigned int rectype);
 extern int gbl_berkdb_verify_skip_skipables;
+
+/* TODO: header-ize?  callback maybe? */
+int retrieve_host_seqnum(void *in_bdb_state, char *host,
+                         DB_LSN *lsn, uint32_t *generation);
 
 static int __rep_apply __P((DB_ENV *, REP_CONTROL *, DBT *, DB_LSN *,
 	uint32_t *, int));
@@ -1520,6 +1525,28 @@ skip:				/*
 			}
 			goto errlock;
 		}
+
+        if (gbl_use_seqnum_for_rep_all_req) {
+            DB_LSN seq_lsn = {0};
+            uint32_t seq_gen = 0;
+            retrieve_host_seqnum(dbenv->app_private, *eidp, &seq_lsn, &seq_gen);
+            if (seq_gen == rep->gen && 
+                log_compare(&seq_lsn, &lsn) > 0) {
+
+                    logmsg(LOGMSG_INFO, "%s:%d using seqno-lsn %d:%d rather than %d:%d for rep-all-req from %s\n",
+                        __func__, __LINE__, seq_lsn.file, seq_lsn.offset, lsn.file, lsn.offset, *eidp);
+
+                    oldfilelsn = lsn = seq_lsn;
+                    /*
+                if (gbl_verbose_fills) {
+                    logmsg(LOGMSG_USER, "%s line %d ignoring REP_ALL_REQ from %s "
+                            "for %d:%d seqnum is %d:%d\n", __func__, __LINE__,
+                            *eidp, lsn.file, lsn.offset, seq_lsn.file, seq_lsn.offset);
+                }
+                */
+                //goto errlock;
+            }
+        }
 
 		/* REP_LOG_LOGPUT is almost the same as REP_LOG (the type gets reverted
 		   to REP_LOG in rep_send()), except that it can be throttled. */

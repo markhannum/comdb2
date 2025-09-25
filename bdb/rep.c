@@ -2322,6 +2322,21 @@ static inline int should_copy_seqnum(bdb_state_type *bdb_state, seqnum_type *seq
 /* Added for testing- allows us to test slow-replicant-check and inactive-timeout separately */
 int gbl_incoherent_slow_inactive_timeout = 1;
 
+int retrieve_host_seqnum(void *in_bdb_state, char *host,
+                         DB_LSN *lsn, uint32_t *generation)
+{
+    bdb_state_type *bdb_state = (bdb_state_type *)in_bdb_state;
+    struct interned_string *hostinterned = intern_ptr(host);
+    struct hostinfo *h = retrieve_hostinfo(hostinterned);
+
+    Pthread_mutex_lock(&(bdb_state->seqnum_info->lock));
+    lsn->file = h->seqnum.lsn.file;
+    lsn->offset = h->seqnum.lsn.offset;
+    *generation = h->seqnum.generation;
+    Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
+    return 0;
+}
+
 static void got_new_seqnum_from_node(bdb_state_type *bdb_state,
                                      seqnum_type *seqnum, char *host,
                                      struct interned_string *hostinterned,
