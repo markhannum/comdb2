@@ -2323,6 +2323,21 @@ static inline int should_copy_seqnum(bdb_state_type *bdb_state, seqnum_type *seq
 /* Added for testing- allows us to test slow-replicant-check and inactive-timeout separately */
 int gbl_incoherent_slow_inactive_timeout = 1;
 
+int retrieve_host_seqnum(void *in_bdb_state, char *host,
+                         DB_LSN *lsn, uint32_t *generation)
+{
+    bdb_state_type *bdb_state = (bdb_state_type *)in_bdb_state;
+    struct interned_string *hostinterned = intern_ptr(host);
+    struct hostinfo *h = retrieve_hostinfo(hostinterned);
+
+    Pthread_mutex_lock(&(bdb_state->seqnum_info->lock));
+    lsn->file = h->seqnum.lsn.file;
+    lsn->offset = h->seqnum.lsn.offset;
+    *generation = h->seqnum.generation;
+    Pthread_mutex_unlock(&(bdb_state->seqnum_info->lock));
+    return 0;
+}
+
 static void got_new_seqnum_from_node(bdb_state_type *bdb_state,
                                      seqnum_type *seqnum, char *host,
                                      struct interned_string *hostinterned,
@@ -5431,6 +5446,9 @@ void bdb_dump_threads_and_maybe_abort(bdb_state_type *bdb_state, int watchdog,
     if (fatal) abort();
 }
 
+int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *startlsn, DB_LSN *maxlsn,
+                    int flags, const char *func, int line);
+
 void *watcher_thread(void *arg)
 {
     bdb_state_type *bdb_state;
@@ -5572,13 +5590,9 @@ void *watcher_thread(void *arg)
             if (gbl_nudge_replication_when_idle > 0 &&
                 bdb_state->dbenv->get_rep_lsns(bdb_state->dbenv, &next_lsn, &gap_lsn, &nrecs) == 0) {
                 if (nrecs < gbl_nudge_replication_when_idle && !IS_ZERO_LSN(gap_lsn)) {
-                    DB_LSN tmp_lsn = {0};
-                    DBT max_lsn_dbt = {0};
-                    LOGCOPY_TOLSN(&tmp_lsn, &gap_lsn);
-                    max_lsn_dbt.data = &tmp_lsn;
-                    max_lsn_dbt.size = sizeof(tmp_lsn); 
                     logmsg(LOGMSG_INFO, "poking replication: asking for %u:%u gap end at %u:%u\n", next_lsn.file, next_lsn.offset, gap_lsn.file, gap_lsn.offset);
-                    __rep_send_message(bdb_state->dbenv, bdb_state->repinfo->master_host, REP_LOG_REQ, &next_lsn, &max_lsn_dbt, 0, NULL);
+                    send_rep_log_req(bdb_state->dbenv, bdb_state->repinfo->master_host,
+                            &next_lsn, &gap_lsn, 0, __func__, __LINE__);
                 }
             }
         }

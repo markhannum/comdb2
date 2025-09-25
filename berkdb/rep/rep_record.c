@@ -84,6 +84,8 @@ extern int gbl_dumptxn_at_commit;
 
 int gbl_rep_badgen_trace;
 int gbl_decoupled_logputs = 0;
+int gbl_use_seqnum_for_rep_all_req = 0;
+int gbl_use_seqnum_for_rep_log_req = 0;
 int gbl_inmem_repdb = 0;
 int gbl_max_apply_dequeue = 100000;
 int gbl_master_req_waitms = 200;
@@ -94,7 +96,9 @@ int64_t gbl_inmem_repdb_memory = 0;
 int64_t gbl_apply_queue_memory = 0;
 
 /* Finish a fill if we are within 1.5 logfiles */
-int gbl_finish_fill_threshold = 60000000;
+//int gbl_finish_fill_threshold = 60000000;
+/* Finish a fill if we are within 0.25 logfiles */
+int gbl_finish_fill_threshold = 10000000;
 
 int gbl_max_logput_queue = 100000;
 int gbl_apply_thread_pollms = 100;
@@ -129,6 +133,10 @@ extern int bdb_purge_logical_transactions(void *statearg, DB_LSN *trunclsn);
 extern int set_commit_context(unsigned long long context, uint32_t *generation,
 	void *plsn, void *args, unsigned int rectype);
 extern int gbl_berkdb_verify_skip_skipables;
+
+/* TODO: header-ize?  callback maybe? */
+int retrieve_host_seqnum(void *in_bdb_state, char *host,
+                         DB_LSN *lsn, uint32_t *generation);
 
 static int __rep_apply __P((DB_ENV *, REP_CONTROL *, DBT *, DB_LSN *,
 	uint32_t *, int));
@@ -525,7 +533,22 @@ static void reset_rep_all_req_dedup_counters()
 	last_master = db_eid_invalid;
 }
 
-static int send_rep_all_req_dedup(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags, const char *func, int line)
+static int send_rep_time_req(DB_ENV *dbenv, char *eid, DB_LSN *lsn, int flags,
+		const char *func, int line)
+{
+	int now = comdb2_time_epoch(), netnow = htonl(now);
+	DBT time_dbt = { .data = &netnow, .size = sizeof(netnow) };
+	flags |= (DB_REP_NODROP|DB_REP_NOBUFFER);
+	int rc = __rep_send_message(dbenv, eid, REP_TIME_REQ, lsn, &time_dbt, flags, NULL);
+	if (gbl_verbose_fills) {
+		logmsg(LOGMSG_USER, "%s%s:%d rep_time_req lsn %d:%d time=%d rc=%d\n",
+				rc == 0 ? "SENT " : "FAILED SENDING ", func, line, lsn->file, lsn->offset, now, rc);
+	}
+	return rc;
+}
+
+static int send_rep_all_req_dedup(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn,
+		int flags, const char *func, int line)
 {
 	int rc;
 	Pthread_mutex_lock(&rep_all_lk);
@@ -561,7 +584,40 @@ int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 		return 0;
 	}
 	int rc = __rep_send_message(dbenv, master_eid, REP_ALL_REQ, lsn, NULL, flags, NULL);
-	logmsg(LOGMSG_INFO, "SENDING rep_all_req from %s line %d rc=%d\n", func, line, rc);
+	if (gbl_verbose_fills) {
+		logmsg(LOGMSG_USER, "%s rep_all_req from %s line %d -> %d:%d rc=%d\n", rc != 0 ? "FAILED SENDING" : "SENT", func, line, lsn->file, lsn->offset, rc);
+	}
+	return rc;
+}
+
+int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *startlsn, DB_LSN *maxlsn,
+					int flags, const char *func, int line)
+{
+	unsigned long long bytes = 0;
+	DBT *max_lsn_dbt_ptr = NULL, max_lsn_dbt = {0};
+	DB_LSN tmp_lsn = {0};
+	int req_all_threshold = gbl_req_all_threshold;
+	static unsigned long long cnt = 0;
+	if (maxlsn) {
+		bytes = subtract_lsn(dbenv->app_private, maxlsn, startlsn);
+		if (req_all_threshold > 0 && (bytes > req_all_threshold)) {
+			if (gbl_verbose_fills) {
+				logmsg(LOGMSG_USER, "%s:%d Converting large rep_log_req of %llu bytes at %d:%d to %d:%d to rep_all_req\n", __func__, __LINE__, bytes, startlsn->file, startlsn->offset, maxlsn->file, maxlsn->offset);
+			}
+			return send_rep_all_req(dbenv, master_eid, startlsn, flags, func, line);
+		}
+		LOGCOPY_TOLSN(&tmp_lsn, maxlsn);
+		max_lsn_dbt.data = &tmp_lsn;
+		max_lsn_dbt.size = sizeof(tmp_lsn);
+		max_lsn_dbt_ptr = &max_lsn_dbt;
+	}
+	cnt++;
+	int rc = __rep_send_message(dbenv, master_eid, REP_LOG_REQ, startlsn, max_lsn_dbt_ptr, flags, NULL);
+	if (gbl_verbose_fills) {
+		logmsg(LOGMSG_USER, "%s rep_log_req from %s line %d %d:%d -> %d:%d rc=%d bytes=%llu cnt=%llu\n",
+                rc != 0 ? "FAILED SENDING" : "SENT", func, line, startlsn->file, startlsn->offset,
+                maxlsn ? maxlsn->file : -1, maxlsn ? maxlsn->offset : -1, rc, bytes, cnt);
+	}
 	return rc;
 }
 
@@ -862,29 +918,9 @@ static void *apply_thread(void *arg)
 			}
 		} else if (log_compare(&my_lsn, &first_repdb_lsn) < 0){
 			/* Request the gap to repdb */
-			DBT max_lsn_dbt = {0};
-			DB_LSN tmp_lsn = {0};
-			LOGCOPY_TOLSN(&tmp_lsn, &first_repdb_lsn);
-			max_lsn_dbt.data = &tmp_lsn;
-			max_lsn_dbt.size = sizeof(tmp_lsn); 
-			if ((ret = __rep_send_message(dbenv, master_eid,
-							REP_LOG_REQ, &my_lsn, &max_lsn_dbt, 0,
-							NULL)) == 0) {
+			ret = send_rep_log_req(dbenv, master_eid, &my_lsn, &first_repdb_lsn, 0, __func__, __LINE__);
+			if (ret == 0) {
 				last_fill = comdb2_time_epochms();
-
-				if (gbl_verbose_fills) {
-					logmsg(LOGMSG_USER, "%s line %d successful REP_LOG_REQ"
-							" from %d:%d to %d:%d\n", __func__, __LINE__,
-							my_lsn.file, my_lsn.offset, first_repdb_lsn.file,
-							first_repdb_lsn.offset);
-				}
-			} else {
-				if (gbl_verbose_fills) {
-					logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ"
-							" from %d:%d to %d:%d\n", __func__, __LINE__,
-							my_lsn.file, my_lsn.offset, first_repdb_lsn.file,
-							first_repdb_lsn.offset);
-				}
 			}
 		}
 		BDB_RELLOCK();
@@ -1523,6 +1559,23 @@ skip:				/*
 			goto errlock;
 		}
 
+        if (gbl_use_seqnum_for_rep_all_req) {
+            DB_LSN seq_lsn = {0};
+            uint32_t seq_gen = 0;
+            retrieve_host_seqnum(dbenv->app_private, *eidp, &seq_lsn, &seq_gen);
+            if (seq_gen == rp->gen && log_compare(&seq_lsn, &lsn) > 0) {
+
+                    logmsg(LOGMSG_INFO, "%s:%d using seqno-lsn %d:%d rather than %d:%d for rep-all-req from %s\n",
+                        __func__, __LINE__, seq_lsn.file, seq_lsn.offset, lsn.file, lsn.offset, *eidp);
+
+                    oldfilelsn = lsn = seq_lsn;
+            } else {
+                logmsg(LOGMSG_INFO, "%s:%d using requested lsn %d:%d gen %u rather than seqno-lsn %d:%d gen %u for rep-all-req from %s\n",
+                    __func__, __LINE__, lsn.file, lsn.offset, rp->gen, seq_lsn.file, seq_lsn.offset, seq_gen, *eidp);
+            }
+
+        }
+
 		/* REP_LOG_LOGPUT is almost the same as REP_LOG (the type gets reverted
 		   to REP_LOG in rep_send()), except that it can be throttled. */
 		type = gbl_decoupled_logputs ?  REP_LOG_FILL : REP_LOG_LOGPUT;
@@ -1712,6 +1765,20 @@ more:
 		}
 		goto errlock;
 
+	case REP_TIME_REQ:
+		CLIENT_ONLY(rep, rp);
+		MASTER_CHECK(dbenv, *eidp, rep);
+		int time_sent = 0, now = comdb2_time_epoch();;
+		if (rec == NULL) {
+			logmsg(LOGMSG_USER, "%s:%d missing data in REP_TIME_REQ from %s\n",
+					__func__, __LINE__, *eidp);
+			abort();
+		}
+		time_sent = ntohl(*((int *)rec->data));
+		logmsg(LOGMSG_USER, "%s:%d REP_TIME_REQ from %s sent time %d now %d diff %d\n",
+				__func__, __LINE__, *eidp, time_sent, now, now - time_sent);
+
+		break;
 	case REP_LOG_REQ:
 		/* endianize the rec->data lsn */
 		MASTER_ONLY(rep, rp);
@@ -1722,6 +1789,26 @@ more:
 			memcpy(&tmplsn, rec->data, sizeof(tmplsn));
 			LOGCOPY_FROMLSN(rec->data, &tmplsn);
 		}
+
+		oldfilelsn = lsn = rp->lsn;
+
+        if (gbl_use_seqnum_for_rep_log_req) {
+            DB_LSN seq_lsn = {0};
+            uint32_t seq_gen = 0;
+            retrieve_host_seqnum(dbenv->app_private, *eidp, &seq_lsn, &seq_gen);
+            if (seq_gen == rp->gen && 
+                log_compare(&seq_lsn, &lsn) > 0) {
+
+                    logmsg(LOGMSG_INFO, "%s:%d using seqno-lsn %d:%d rather than %d:%d for rep-log-req from %s\n",
+                        __func__, __LINE__, seq_lsn.file, seq_lsn.offset, lsn.file, lsn.offset, *eidp);
+                    oldfilelsn = lsn = seq_lsn;
+
+            } else {
+                logmsg(LOGMSG_INFO, "%s:%d using requested lsn %d:%d gen %u rather than seqno-lsn %d:%d gen %u for rep-log-req from %s\n",
+                    __func__, __LINE__, lsn.file, lsn.offset, rp->gen, seq_lsn.file, seq_lsn.offset, seq_gen, *eidp);
+            }
+
+        }
 #ifdef DIAGNOSTIC
 		if (FLD_ISSET(dbenv->verbose, DB_VERB_REPLICATION) &&
 			rec != NULL && rec->size != 0) {
@@ -1755,7 +1842,6 @@ more:
 		 * it, then we need to send all records up to the LSN in the
 		 * data dbt.
 		 */
-		oldfilelsn = lsn = rp->lsn;
 		fromline = __LINE__;
 		if ((ret = __log_cursor(dbenv, &logc)) != 0)
 			goto errlock;
@@ -1786,10 +1872,14 @@ more:
 			bytes_sent += (data_dbt.size + sizeof(REP_CONTROL));
 
 			if ((resp_rc = __rep_time_send_message(dbenv, *eidp, type, &rp->lsn,
-						&data_dbt, sendflags, NULL, &sendtime))
-					!= 0 && gbl_verbose_fills) {
-				logmsg(LOGMSG_USER, "%s line %d failed for %d:%d\n",
-						__func__, __LINE__, lsn.file, lsn.offset);
+						&data_dbt, sendflags, NULL, &sendtime)) != 0) {
+				/* XXX we failed sending back a record .. BUT IGNORE THAT ?? */
+				if (gbl_verbose_fills) {
+					logmsg(LOGMSG_USER, "%s line %d failed sending %d:%d rc=%d\n",
+							__func__, __LINE__, lsn.file, lsn.offset, resp_rc);
+				}
+				/* Send a rep-time-req */
+				send_rep_time_req(dbenv, *eidp, &rp->lsn, sendflags, __func__, __LINE__);
 			}
 		} else if (ret == DB_NOTFOUND) {
 			R_LOCK(dbenv, &dblp->reginfo);
@@ -1821,31 +1911,35 @@ more:
 							__func__, __LINE__);
 					ret = DB_REP_OUTDATED;
 					/* Tell the replicant he's outdated. */
-					if (gbl_verbose_fills) {
-						logmsg(LOGMSG_USER, "%s line %d failed find newfile "
-								"for LSN %d:%d\n", __func__, __LINE__, 
-								lsn.file, lsn.offset);
-					}
 					logmsg(LOGMSG_INFO, "%s:%d log_c_get failed to find [%d:%d]"
 							" and [%d:%d]: REP_VERIFY_FAIL\n", __func__, __LINE__,
 							lsn.file, lsn.offset,endlsn.file, endlsn.offset);
 					if ((resp_rc = __rep_time_send_message(dbenv, *eidp,
 								REP_VERIFY_FAIL, &lsn, NULL, 0,
-								NULL, &sendtime)) != 0 && gbl_verbose_fills) {
-						/* But we will still return REP_OUTDATED */
-						logmsg(LOGMSG_USER, "%s line %d failed to send "
-								"rep_verify_fail for LSN %d:%d\n", __func__,
-								__LINE__, lsn.file, lsn.offset);
+								NULL, &sendtime)) != 0) {
+						// XXX ?? punt now?  force send .. ?
+						if (gbl_verbose_fills) {
+							/* But we will still return REP_OUTDATED */
+							logmsg(LOGMSG_USER, "%s:%d failed to send "
+									"rep_verify_fail for LSN %d:%d rc=%d\n", __func__,
+									__LINE__, lsn.file, lsn.offset, resp_rc);
+						}
+						/* Send a rep-time-req */
+						send_rep_time_req(dbenv, *eidp, &rp->lsn, sendflags, __func__, __LINE__);
 					}
 				} else {
 					endlsn.offset += logc->c_len;
 					if ((resp_rc = __rep_time_send_message(dbenv, *eidp,
 						REP_NEWFILE, &endlsn, NULL,
-						rec == NULL ? DB_REP_NOBUFFER : 0, NULL, &sendtime)) != 0 &&
-							gbl_verbose_fills) {
-						logmsg(LOGMSG_USER, "%s line %d failed to send newfile "
-								"for LSN %d:%d\n", __func__, __LINE__, 
-								endlsn.file, endlsn.offset);
+						rec == NULL ? DB_REP_NOBUFFER : 0, NULL, &sendtime)) != 0) {
+						// XXX ?? punt now?  force send .. ?
+						if (gbl_verbose_fills) {
+							logmsg(LOGMSG_USER, "%s line %d failed to send newfile "
+									"for LSN %d:%d rc=%d\n", __func__, __LINE__, 
+									endlsn.file, endlsn.offset, resp_rc);
+						}
+						/* Send a rep-time-req */
+						send_rep_time_req(dbenv, *eidp, &rp->lsn, sendflags, __func__, __LINE__);
 					}
 				}
 			} else {
@@ -1883,11 +1977,15 @@ more:
 			if (lsn.file != oldfilelsn.file) {
 				if ((resp_rc = __rep_time_send_message(dbenv,
 					*eidp, REP_NEWFILE, &oldfilelsn, NULL,
-					sendflags, NULL, &sendtime)) != 0 &&
-					gbl_verbose_fills) {
-					logmsg(LOGMSG_USER, "%s line %d failed to send newfile "
-							"for LSN %d:%d, %d\n", __func__, __LINE__, 
-							oldfilelsn.file, oldfilelsn.offset, resp_rc);
+					sendflags, NULL, &sendtime)) != 0) {
+					// XXX ?? punt now?  force send .. ?
+					if (gbl_verbose_fills) {
+						logmsg(LOGMSG_USER, "%s line %d failed to send newfile "
+								"for LSN %d:%d rc=%d\n", __func__, __LINE__, 
+								oldfilelsn.file, oldfilelsn.offset, resp_rc);
+					}
+					/* Send a rep-time-req */
+					send_rep_time_req(dbenv, *eidp, &rp->lsn, sendflags, __func__, __LINE__);
 				}
 			}
 
@@ -1900,10 +1998,22 @@ more:
 			bytes_sent += (data_dbt.size + sizeof(REP_CONTROL));
 			if ((resp_rc = __rep_time_send_message(dbenv, *eidp, type, &lsn,
 							&data_dbt, sendflags, NULL, &sendtime)) != 0) {
+				if (gbl_verbose_fills) {
+					logmsg(LOGMSG_USER, "%s line %d failed to send log record "
+							"for LSN %d:%d rc=%d - breaking loop\n", __func__, __LINE__, 
+							lsn.file, lsn.offset, resp_rc);
+				}
+				/* Send a rep-time-req */
+				send_rep_time_req(dbenv, *eidp, &rp->lsn, sendflags, __func__, __LINE__);
+
 				/* If the net queue is full, we break out of the loop. */
 				break;
 			}
 		}
+// maybe try goto breakloop for all failures .. ?
+// alternately could enque special 'ask-again' message to replicant ..
+// i will make this work
+//breakloop:
 
 		if (gbl_verbose_fills && 0 == logc->stat(logc, &lcstat)) {
 			logmsg(LOGMSG_USER, "%s line %d in-cursor:%d cnt, %llu us / "
@@ -3090,12 +3200,12 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 	DB *dbp;
 	DBC *dbc;
 	DB_LOG *dblp;
-	DB_LSN max_lsn, next_lsn, tmp_lsn;
+	DB_LSN max_lsn, next_lsn;
 	LOG *lp;
 	REP *rep;
 	REP_CONTROL *grp;
 	u_int32_t rectype = 0, txnid;
-	int cmp, do_req, gap, ret, t_ret, rc;
+	int cmp, do_req, gap, ret, t_ret;
 	int num_retries;
 	int disabled_minwrite_noread = 0;
 	char *eid, *dist_txnid = NULL;
@@ -3521,33 +3631,17 @@ gap_check:		max_lsn_dbtp = NULL;
 				 * the payload lsn if we're requesting a range.
 				 */
 
-				if (max_lsn_dbtp) {
-					LOGCOPY_TOLSN(&tmp_lsn,
-						max_lsn_dbtp->data);
-					max_lsn_dbtp->data = &tmp_lsn;
-				}
-				else {
-					ZERO_LSN(tmp_lsn);
-				}
 				// fprintf(stderr, "Requesting %u:%u - %u:%u ready %u:%u waiting %u:%u\n", next_lsn.file, next_lsn.offset, tmp_lsn.file, tmp_lsn.offset, lp->ready_lsn.file, lp->ready_lsn.offset, lp->waiting_lsn.file, lp->waiting_lsn.offset);
 				/*
 				 * fprintf(stderr, "Requesting file %s line %d lsn %d:%d\n", 
 				 * __FILE__, __LINE__, next_lsn.file, next_lsn.offset);
 				 */
 				if (!gbl_decoupled_logputs) {
-					if ((rc = __rep_send_message(dbenv, eid,
-							REP_LOG_REQ, &next_lsn, max_lsn_dbtp, 0,
-							NULL)) == 0) {
-						if (gbl_verbose_fills) {
-							logmsg(LOGMSG_USER, "%s line %d good REP_LOG_REQ "
-									"for %d:%d\n", __func__, __LINE__, 
-									next_lsn.file, next_lsn.offset);
-						}
-					} else if (gbl_verbose_fills){
-						logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ "
-								"for %d:%d, %d\n", __func__, __LINE__, 
-								next_lsn.file, next_lsn.offset, rc);
+					DB_LSN my_max_lsn = {0};
+					if (max_lsn_dbtp) {
+						memcpy(&my_max_lsn, max_lsn_dbtp->data, sizeof(DB_LSN));
 					}
+					send_rep_log_req(dbenv, eid, &next_lsn, max_lsn_dbtp ? &my_max_lsn : NULL, 0, __func__, __LINE__);
 				}
 			}
 		}
@@ -3583,6 +3677,12 @@ gap_check:		max_lsn_dbtp = NULL;
 			 * If we've waited long enough, request the record
 			 * (or set of records) and double the wait interval.
 			 */
+            /*
+            if (gbl_verbose_fills) {
+                logmsg(LOGMSG_USER, "%s line %d rcvd_recs %d >= wait_recs %d, requesting\n",
+                        __func__, __LINE__, lp->rcvd_recs, lp->wait_recs);
+            }
+            */
 			do_req = 1;
 			lp->rcvd_recs = 0;
 
@@ -3598,6 +3698,12 @@ gap_check:		max_lsn_dbtp = NULL;
 			 * this record, not the entire gap.
 			 */
 			if (IS_ZERO_LSN(lp->max_wait_lsn)) {
+                /*
+                if (gbl_verbose_fills) {
+                    logmsg(LOGMSG_USER, "%s line %d max_wait_lsn is zero, setting to waiting_lsn %d:%d\n",
+                            __func__, __LINE__, lp->waiting_lsn.file, lp->waiting_lsn.offset);
+                }
+                */
 				lp->max_wait_lsn = lp->waiting_lsn;
 				memset(&max_lsn_dbt, 0, sizeof(max_lsn_dbt));
 				max_lsn_dbt.data = &lp->waiting_lsn;
@@ -3668,30 +3774,12 @@ gap_check:		max_lsn_dbtp = NULL;
 				rep->stat.st_log_requested++;
 				MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 
-				if (max_lsn_dbtp) {
-					LOGCOPY_TOLSN(&tmp_lsn,
-						max_lsn_dbtp->data);
-					max_lsn_dbtp->data = &tmp_lsn;
-				}
-
-				/*
-				 * fprintf(stderr, "Requesting file %s line %d lsn %d:%d\n", 
-				 * __FILE__, __LINE__, next_lsn.file, next_lsn.offset);
-				 */
 				if (!gbl_decoupled_logputs) {
-					if ((rc = __rep_send_message(dbenv, eid,
-								REP_LOG_REQ, &next_lsn, max_lsn_dbtp, 0,
-								NULL)) == 0) {
-						if (gbl_verbose_fills) {
-							logmsg(LOGMSG_USER, "%s line %d good REP_LOG_REQ "
-									"for %d:%d\n", __func__, __LINE__, 
-									next_lsn.file, next_lsn.offset);
-						}
-					} else if (gbl_verbose_fills) {
-						logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ "
-								"for %d:%d, %d\n", __func__, __LINE__, 
-								next_lsn.file, next_lsn.offset, rc);
+					DB_LSN my_max_lsn = {0};
+					if (max_lsn_dbtp) {
+						memcpy(&my_max_lsn, max_lsn_dbtp->data, sizeof(DB_LSN));
 					}
+					send_rep_log_req(dbenv, eid, &next_lsn, max_lsn_dbtp ? &my_max_lsn : NULL, 0, __func__, __LINE__);
 				}
 			} else {
 				MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
@@ -4862,7 +4950,7 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 	int32_t timestamp = 0;
 	__txn_xa_regop_args *prep_args;
 	u_int32_t rectype;
-	int i, ret, t_ret, line = 0;
+	int i, ret, t_ret, line = 0, now;
 	u_int32_t txnid = 0;
 	u_int64_t utxnid = 0;
 	char *dist_txnid = NULL;
@@ -4873,9 +4961,15 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 	void *pglogs = NULL;
 	u_int32_t keycnt = 0;
 	int endianize = 0;
+    static int lastpr = 0;
+	static unsigned long long cnt = 0;
 
-	logmsg(LOGMSG_DEBUG, "%s processing [%d:%d]\n", __func__, maxlsn.file,
-			maxlsn.offset);
+	cnt++;
+	if (gbl_verbose_fills && (now = time(NULL)) - lastpr) {
+		logmsg(LOGMSG_USER, "%s processing [%d:%d], cnt=%llu\n", __func__, maxlsn.file,
+				maxlsn.offset, cnt);
+		lastpr = now;
+	}
 	db_rep = dbenv->rep_handle;
 	rep = db_rep->region;
 
