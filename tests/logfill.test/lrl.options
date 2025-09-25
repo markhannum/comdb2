@@ -7,8 +7,10 @@
 # This setting to 0 disables the max-queue setting
 # BTW, this breaks if you allow it to grow forever: try to understand
 #max_logput_queue 100000 # this is the default now
-decoupled_logputs on
+#decoupled_logputs on
 #fillcursor_lookahead 0
+#
+logmsg level info
 throttle_logput_trace on
 catchup_window_trace on
 setattr CATCHUP_WINDOW 40000000

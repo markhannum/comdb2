@@ -59,6 +59,7 @@
 #define REP_GEN_VOTE2   27 /* Send a "you are master" vote. */
 
 #define REP_LOG_FILL    28
-#define REP_MAX_TYPE    29
+#define REP_TIME_REQ    29 /* Temporary debug: contains sender timestamp */
+#define REP_MAX_TYPE    30
 
 #endif
