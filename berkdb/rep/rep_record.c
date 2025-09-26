@@ -571,6 +571,31 @@ int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 	return rc;
 }
 
+int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *startlsn, DB_LSN *maxlsn,
+                    int flags, const char *func, int line)
+{
+	unsigned long long bytes = 0;
+	DBT *max_lsn_dbt_ptr = NULL, max_lsn_dbt = {0};
+	DB_LSN tmp_lsn = {0};
+	int req_all_threshold = gbl_req_all_threshold;
+	if (maxlsn) {
+		bytes = subtract_lsn(dbenv->app_private, maxlsn, startlsn);
+		if (req_all_threshold > 0 && (bytes > req_all_threshold)) {
+			if (gbl_verbose_fills) {
+				logmsg(LOGMSG_USER, "%s:%d Converting large rep_log_req of %llu bytes at %d:%d to %d:%d to rep_all_req\n", __func__, __LINE__, bytes, startlsn->file, startlsn->offset, maxlsn->file, maxlsn->offset);
+			}
+			return send_rep_all_req(dbenv, master_eid, startlsn, flags, func, line);
+		}
+		LOGCOPY_TOLSN(&tmp_lsn, maxlsn);
+		max_lsn_dbt.data = &tmp_lsn;
+		max_lsn_dbt.size = sizeof(tmp_lsn);
+		max_lsn_dbt_ptr = &max_lsn_dbt;
+	}
+	int rc = __rep_send_message(dbenv, master_eid, REP_LOG_REQ, startlsn, max_lsn_dbt_ptr, flags, NULL);
+	logmsg(LOGMSG_INFO, "%sSENDING rep_log_req from %s line %d rc=%d bytes=%llu\n", rc != 0 ? "FAILED " : "", func, line, rc, bytes);
+	return rc;
+}
+
 static void *apply_thread(void *arg) 
 {
 	struct bdb_state_tag *bdb_state = gbl_bdb_state;
@@ -868,29 +893,9 @@ static void *apply_thread(void *arg)
 			}
 		} else if (log_compare(&my_lsn, &first_repdb_lsn) < 0){
 			/* Request the gap to repdb */
-			DBT max_lsn_dbt = {0};
-			DB_LSN tmp_lsn = {0};
-			LOGCOPY_TOLSN(&tmp_lsn, &first_repdb_lsn);
-			max_lsn_dbt.data = &tmp_lsn;
-			max_lsn_dbt.size = sizeof(tmp_lsn); 
-			if ((ret = __rep_send_message(dbenv, master_eid,
-							REP_LOG_REQ, &my_lsn, &max_lsn_dbt, 0,
-							NULL)) == 0) {
+			ret = send_rep_log_req(dbenv, master_eid, &my_lsn, &first_repdb_lsn, 0, __func__, __LINE__);
+			if (ret == 0) {
 				last_fill = comdb2_time_epochms();
-
-				if (gbl_verbose_fills) {
-					logmsg(LOGMSG_USER, "%s line %d successful REP_LOG_REQ"
-							" from %d:%d to %d:%d\n", __func__, __LINE__,
-							my_lsn.file, my_lsn.offset, first_repdb_lsn.file,
-							first_repdb_lsn.offset);
-				}
-			} else {
-				if (gbl_verbose_fills) {
-					logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ"
-							" from %d:%d to %d:%d\n", __func__, __LINE__,
-							my_lsn.file, my_lsn.offset, first_repdb_lsn.file,
-							first_repdb_lsn.offset);
-				}
 			}
 		}
 		BDB_RELLOCK();
@@ -3128,12 +3133,12 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 	DB *dbp;
 	DBC *dbc;
 	DB_LOG *dblp;
-	DB_LSN max_lsn, next_lsn, tmp_lsn, tmp_lsn2;
+	DB_LSN max_lsn, next_lsn;
 	LOG *lp;
 	REP *rep;
 	REP_CONTROL *grp;
 	u_int32_t rectype = 0, txnid;
-	int cmp, do_req, gap, ret, t_ret, rc;
+	int cmp, do_req, gap, ret, t_ret;
 	int num_retries;
 	int disabled_minwrite_noread = 0;
 	char *eid, *dist_txnid = NULL;
@@ -3559,33 +3564,17 @@ gap_check:		max_lsn_dbtp = NULL;
 				 * the payload lsn if we're requesting a range.
 				 */
 
-				if (max_lsn_dbtp) {
-					LOGCOPY_TOLSN(&tmp_lsn,
-						max_lsn_dbtp->data);
-					max_lsn_dbtp->data = &tmp_lsn;
-				}
-				else {
-					ZERO_LSN(tmp_lsn);
-				}
 				// fprintf(stderr, "Requesting %u:%u - %u:%u ready %u:%u waiting %u:%u\n", next_lsn.file, next_lsn.offset, tmp_lsn.file, tmp_lsn.offset, lp->ready_lsn.file, lp->ready_lsn.offset, lp->waiting_lsn.file, lp->waiting_lsn.offset);
 				/*
 				 * fprintf(stderr, "Requesting file %s line %d lsn %d:%d\n", 
 				 * __FILE__, __LINE__, next_lsn.file, next_lsn.offset);
 				 */
 				if (!gbl_decoupled_logputs) {
-					if ((rc = __rep_send_message(dbenv, eid,
-							REP_LOG_REQ, &next_lsn, max_lsn_dbtp, 0,
-							NULL)) == 0) {
-						if (gbl_verbose_fills) {
-							logmsg(LOGMSG_USER, "%s line %d good REP_LOG_REQ "
-									"for %d:%d\n", __func__, __LINE__, 
-									next_lsn.file, next_lsn.offset);
-						}
-					} else if (gbl_verbose_fills){
-						logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ "
-								"for %d:%d, %d\n", __func__, __LINE__, 
-								next_lsn.file, next_lsn.offset, rc);
+					DB_LSN my_max_lsn = {0};
+					if (max_lsn_dbtp) {
+						memcpy(&my_max_lsn, max_lsn_dbtp->data, sizeof(DB_LSN));
 					}
+					send_rep_log_req(dbenv, eid, &next_lsn, max_lsn_dbtp ? &my_max_lsn : NULL, 0, __func__, __LINE__);
 				}
 			}
 		}
@@ -3714,33 +3703,12 @@ gap_check:		max_lsn_dbtp = NULL;
 				rep->stat.st_log_requested++;
 				MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 
-				if (max_lsn_dbtp) {
-                    memcpy(&tmp_lsn2, max_lsn_dbtp->data, sizeof(DB_LSN));
-					LOGCOPY_TOLSN(&tmp_lsn,
-						max_lsn_dbtp->data);
-					max_lsn_dbtp->data = &tmp_lsn;
-				}
-
-				/*
-				 * fprintf(stderr, "Requesting file %s line %d lsn %d:%d\n", 
-				 * __FILE__, __LINE__, next_lsn.file, next_lsn.offset);
-				 */
 				if (!gbl_decoupled_logputs) {
-					if ((rc = __rep_send_message(dbenv, eid,
-								REP_LOG_REQ, &next_lsn, max_lsn_dbtp, 0,
-								NULL)) == 0) {
-						if (gbl_verbose_fills) {
-							logmsg(LOGMSG_USER, "%s line %d good REP_LOG_REQ "
-									"for %d:%d to %d:%d\n", __func__, __LINE__, 
-									next_lsn.file, next_lsn.offset,
-                                    max_lsn_dbtp ? tmp_lsn2.file : -1,
-                                    max_lsn_dbtp ? tmp_lsn2.offset : -1);
-						}
-					} else if (gbl_verbose_fills) {
-						logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ "
-								"for %d:%d, %d\n", __func__, __LINE__, 
-								next_lsn.file, next_lsn.offset, rc);
+					DB_LSN my_max_lsn = {0};
+					if (max_lsn_dbtp) {
+						memcpy(&my_max_lsn, max_lsn_dbtp->data, sizeof(DB_LSN));
 					}
+					send_rep_log_req(dbenv, eid, &next_lsn, max_lsn_dbtp ? &my_max_lsn : NULL, 0, __func__, __LINE__);
 				}
 			} else {
 				MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
