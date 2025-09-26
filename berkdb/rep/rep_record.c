@@ -85,6 +85,7 @@ extern int gbl_dumptxn_at_commit;
 int gbl_rep_badgen_trace;
 int gbl_decoupled_logputs = 0;
 int gbl_use_seqnum_for_rep_all_req = 1;
+int gbl_use_seqnum_for_rep_log_req = 1;
 int gbl_inmem_repdb = 0;
 int gbl_max_apply_dequeue = 100000;
 int gbl_master_req_waitms = 200;
@@ -1530,22 +1531,17 @@ skip:				/*
             DB_LSN seq_lsn = {0};
             uint32_t seq_gen = 0;
             retrieve_host_seqnum(dbenv->app_private, *eidp, &seq_lsn, &seq_gen);
-            if (seq_gen == rep->gen && 
-                log_compare(&seq_lsn, &lsn) > 0) {
+            if (seq_gen == rp->gen && log_compare(&seq_lsn, &lsn) > 0) {
 
                     logmsg(LOGMSG_INFO, "%s:%d using seqno-lsn %d:%d rather than %d:%d for rep-all-req from %s\n",
                         __func__, __LINE__, seq_lsn.file, seq_lsn.offset, lsn.file, lsn.offset, *eidp);
 
                     oldfilelsn = lsn = seq_lsn;
-                    /*
-                if (gbl_verbose_fills) {
-                    logmsg(LOGMSG_USER, "%s line %d ignoring REP_ALL_REQ from %s "
-                            "for %d:%d seqnum is %d:%d\n", __func__, __LINE__,
-                            *eidp, lsn.file, lsn.offset, seq_lsn.file, seq_lsn.offset);
-                }
-                */
-                //goto errlock;
+            } else {
+                logmsg(LOGMSG_INFO, "%s:%d using requested lsn %d:%d gen %u rather than seqno-lsn %d:%d gen %u for rep-all-req from %s\n",
+                    __func__, __LINE__, lsn.file, lsn.offset, rp->gen, seq_lsn.file, seq_lsn.offset, seq_gen, *eidp);
             }
+
         }
 
 		/* REP_LOG_LOGPUT is almost the same as REP_LOG (the type gets reverted
@@ -1747,6 +1743,23 @@ more:
 			memcpy(&tmplsn, rec->data, sizeof(tmplsn));
 			LOGCOPY_FROMLSN(rec->data, &tmplsn);
 		}
+        if (gbl_use_seqnum_for_rep_log_req) {
+            DB_LSN seq_lsn = {0};
+            uint32_t seq_gen = 0;
+            DB_LSN *recdatalsn = (DB_LSN *)rec->data;
+            retrieve_host_seqnum(dbenv->app_private, *eidp, &seq_lsn, &seq_gen);
+            if (seq_gen == rp->gen && 
+                log_compare(&seq_lsn, recdatalsn) > 0) {
+
+                    logmsg(LOGMSG_INFO, "%s:%d using seqno-lsn %d:%d rather than %d:%d for rep-log-req from %s\n",
+                        __func__, __LINE__, seq_lsn.file, seq_lsn.offset, recdatalsn->file, recdatalsn->offset, *eidp);
+                    memcpy(rec->data, &seq_lsn, sizeof(DB_LSN));
+            } else {
+                logmsg(LOGMSG_INFO, "%s:%d using requested lsn %d:%d gen %u rather than seqno-lsn %d:%d gen %u for rep-log-req from %s\n",
+                    __func__, __LINE__, recdatalsn->file, recdatalsn->offset, rp->gen, seq_lsn.file, seq_lsn.offset, seq_gen, *eidp);
+            }
+
+        }
 #ifdef DIAGNOSTIC
 		if (FLD_ISSET(dbenv->verbose, DB_VERB_REPLICATION) &&
 			rec != NULL && rec->size != 0) {
@@ -3115,7 +3128,7 @@ __rep_apply_int(dbenv, rp, rec, ret_lsnp, commit_gen, decoupled)
 	DB *dbp;
 	DBC *dbc;
 	DB_LOG *dblp;
-	DB_LSN max_lsn, next_lsn, tmp_lsn;
+	DB_LSN max_lsn, next_lsn, tmp_lsn, tmp_lsn2;
 	LOG *lp;
 	REP *rep;
 	REP_CONTROL *grp;
@@ -3608,6 +3621,10 @@ gap_check:		max_lsn_dbtp = NULL;
 			 * If we've waited long enough, request the record
 			 * (or set of records) and double the wait interval.
 			 */
+            if (gbl_verbose_fills) {
+                logmsg(LOGMSG_USER, "%s line %d rcvd_recs %d >= wait_recs %d, requesting\n",
+                        __func__, __LINE__, lp->rcvd_recs, lp->wait_recs);
+            }
 			do_req = 1;
 			lp->rcvd_recs = 0;
 
@@ -3623,6 +3640,10 @@ gap_check:		max_lsn_dbtp = NULL;
 			 * this record, not the entire gap.
 			 */
 			if (IS_ZERO_LSN(lp->max_wait_lsn)) {
+                if (gbl_verbose_fills) {
+                    logmsg(LOGMSG_USER, "%s line %d max_wait_lsn is zero, setting to waiting_lsn %d:%d\n",
+                            __func__, __LINE__, lp->waiting_lsn.file, lp->waiting_lsn.offset);
+                }
 				lp->max_wait_lsn = lp->waiting_lsn;
 				memset(&max_lsn_dbt, 0, sizeof(max_lsn_dbt));
 				max_lsn_dbt.data = &lp->waiting_lsn;
@@ -3694,6 +3715,7 @@ gap_check:		max_lsn_dbtp = NULL;
 				MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 
 				if (max_lsn_dbtp) {
+                    memcpy(&tmp_lsn2, max_lsn_dbtp->data, sizeof(DB_LSN));
 					LOGCOPY_TOLSN(&tmp_lsn,
 						max_lsn_dbtp->data);
 					max_lsn_dbtp->data = &tmp_lsn;
@@ -3709,8 +3731,10 @@ gap_check:		max_lsn_dbtp = NULL;
 								NULL)) == 0) {
 						if (gbl_verbose_fills) {
 							logmsg(LOGMSG_USER, "%s line %d good REP_LOG_REQ "
-									"for %d:%d\n", __func__, __LINE__, 
-									next_lsn.file, next_lsn.offset);
+									"for %d:%d to %d:%d\n", __func__, __LINE__, 
+									next_lsn.file, next_lsn.offset,
+                                    max_lsn_dbtp ? tmp_lsn2.file : -1,
+                                    max_lsn_dbtp ? tmp_lsn2.offset : -1);
 						}
 					} else if (gbl_verbose_fills) {
 						logmsg(LOGMSG_USER, "%s line %d failed REP_LOG_REQ "
@@ -3738,18 +3762,19 @@ gap_check:		max_lsn_dbtp = NULL;
 		}
 		goto done;
 	} else {
-		static int lastpr = 0;
-		int now;
+		//static int lastpr = 0;
+		//int now;
 		/*
 		 * We may miscount if we race, since we
 		 * don't currently hold the rep mutex.
 		 */
 		rep->stat.st_log_duplicated++;
-		if (gbl_verbose_repdups && ((now = time(NULL)) - lastpr)) {
+		//if (gbl_verbose_repdups && ((now = time(NULL)) - lastpr)) {
+		if (gbl_verbose_repdups) {
 			logmsg(LOGMSG_USER, "%s dup for %d:%d count=%u\n",
 					__func__, rp->lsn.file, rp->lsn.offset, 
 					rep->stat.st_log_duplicated);
-			lastpr = now;
+			//lastpr = now;
 		}
 		goto done;
 	}
