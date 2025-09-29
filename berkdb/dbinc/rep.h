@@ -39,7 +39,7 @@ typedef struct __rep {
 
     // XXX trying some different settings
 #define	DB_REP_REQUEST_GAP	1024
-#define	DB_REP_MAX_GAP		8192
+#define	DB_REP_MAX_GAP		32768
 
 
 #if 0

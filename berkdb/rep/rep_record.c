@@ -96,7 +96,9 @@ int64_t gbl_inmem_repdb_memory = 0;
 int64_t gbl_apply_queue_memory = 0;
 
 /* Finish a fill if we are within 1.5 logfiles */
-int gbl_finish_fill_threshold = 60000000;
+//int gbl_finish_fill_threshold = 60000000;
+/* Finish a fill if we are within 0.25 logfiles */
+int gbl_finish_fill_threshold = 10000000;
 
 int gbl_max_logput_queue = 100000;
 int gbl_apply_thread_pollms = 100;
@@ -567,17 +569,20 @@ int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 		return 0;
 	}
 	int rc = __rep_send_message(dbenv, master_eid, REP_ALL_REQ, lsn, NULL, flags, NULL);
-	logmsg(LOGMSG_INFO, "SENDING rep_all_req from %s line %d rc=%d\n", func, line, rc);
+    if (gbl_verbose_fills) {
+	    logmsg(LOGMSG_USER, "%s rep_all_req from %s line %d -> %d:%d rc=%d\n", rc != 0 ? "FAILED SENDING" : "SENT", func, line, lsn->file, lsn->offset, rc);
+    }
 	return rc;
 }
 
 int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *startlsn, DB_LSN *maxlsn,
-                    int flags, const char *func, int line)
+					int flags, const char *func, int line)
 {
 	unsigned long long bytes = 0;
 	DBT *max_lsn_dbt_ptr = NULL, max_lsn_dbt = {0};
 	DB_LSN tmp_lsn = {0};
 	int req_all_threshold = gbl_req_all_threshold;
+	static unsigned long long cnt = 0;
 	if (maxlsn) {
 		bytes = subtract_lsn(dbenv->app_private, maxlsn, startlsn);
 		if (req_all_threshold > 0 && (bytes > req_all_threshold)) {
@@ -591,8 +596,13 @@ int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *startlsn, DB_LSN *
 		max_lsn_dbt.size = sizeof(tmp_lsn);
 		max_lsn_dbt_ptr = &max_lsn_dbt;
 	}
+	cnt++;
 	int rc = __rep_send_message(dbenv, master_eid, REP_LOG_REQ, startlsn, max_lsn_dbt_ptr, flags, NULL);
-	logmsg(LOGMSG_INFO, "%sSENDING rep_log_req from %s line %d rc=%d bytes=%llu\n", rc != 0 ? "FAILED " : "", func, line, rc, bytes);
+	if (gbl_verbose_fills) {
+		logmsg(LOGMSG_USER, "%s rep_log_req from %s line %d %d:%d -> %d:%d rc=%d bytes=%llu cnt=%llu\n",
+                rc != 0 ? "FAILED SENDING" : "SENT", func, line, startlsn->file, startlsn->offset,
+                maxlsn ? maxlsn->file : -1, maxlsn ? maxlsn->offset : -1, rc, bytes, cnt);
+	}
 	return rc;
 }
 
@@ -3610,10 +3620,12 @@ gap_check:		max_lsn_dbtp = NULL;
 			 * If we've waited long enough, request the record
 			 * (or set of records) and double the wait interval.
 			 */
+            /*
             if (gbl_verbose_fills) {
                 logmsg(LOGMSG_USER, "%s line %d rcvd_recs %d >= wait_recs %d, requesting\n",
                         __func__, __LINE__, lp->rcvd_recs, lp->wait_recs);
             }
+            */
 			do_req = 1;
 			lp->rcvd_recs = 0;
 
@@ -3629,10 +3641,12 @@ gap_check:		max_lsn_dbtp = NULL;
 			 * this record, not the entire gap.
 			 */
 			if (IS_ZERO_LSN(lp->max_wait_lsn)) {
+                /*
                 if (gbl_verbose_fills) {
                     logmsg(LOGMSG_USER, "%s line %d max_wait_lsn is zero, setting to waiting_lsn %d:%d\n",
                             __func__, __LINE__, lp->waiting_lsn.file, lp->waiting_lsn.offset);
                 }
+                */
 				lp->max_wait_lsn = lp->waiting_lsn;
 				memset(&max_lsn_dbt, 0, sizeof(max_lsn_dbt));
 				max_lsn_dbt.data = &lp->waiting_lsn;
@@ -3730,19 +3744,18 @@ gap_check:		max_lsn_dbtp = NULL;
 		}
 		goto done;
 	} else {
-		//static int lastpr = 0;
-		//int now;
+		static int lastpr = 0;
+		int now;
 		/*
 		 * We may miscount if we race, since we
 		 * don't currently hold the rep mutex.
 		 */
 		rep->stat.st_log_duplicated++;
-		//if (gbl_verbose_repdups && ((now = time(NULL)) - lastpr)) {
-		if (gbl_verbose_repdups) {
+		if (gbl_verbose_repdups && ((now = time(NULL)) - lastpr)) {
 			logmsg(LOGMSG_USER, "%s dup for %d:%d count=%u\n",
 					__func__, rp->lsn.file, rp->lsn.offset, 
 					rep->stat.st_log_duplicated);
-			//lastpr = now;
+			lastpr = now;
 		}
 		goto done;
 	}
@@ -4880,7 +4893,7 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 	int32_t timestamp = 0;
 	__txn_xa_regop_args *prep_args;
 	u_int32_t rectype;
-	int i, ret, t_ret, line = 0;
+	int i, ret, t_ret, line = 0, now;
 	u_int32_t txnid = 0;
 	u_int64_t utxnid = 0;
 	char *dist_txnid = NULL;
@@ -4891,9 +4904,15 @@ __rep_process_txn_int(dbenv, rctl, rec, ltrans, maxlsn, commit_gen, lockid, rp,
 	void *pglogs = NULL;
 	u_int32_t keycnt = 0;
 	int endianize = 0;
+    static int lastpr = 0;
+	static unsigned long long cnt = 0;
 
-	logmsg(LOGMSG_DEBUG, "%s processing [%d:%d]\n", __func__, maxlsn.file,
-			maxlsn.offset);
+	cnt++;
+	if (gbl_verbose_fills && (now = time(NULL)) - lastpr) {
+		logmsg(LOGMSG_USER, "%s processing [%d:%d], cnt=%llu\n", __func__, maxlsn.file,
+				maxlsn.offset, cnt);
+		lastpr = now;
+	}
 	db_rep = dbenv->rep_handle;
 	rep = db_rep->region;
 
