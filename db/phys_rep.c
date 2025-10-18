@@ -1959,9 +1959,9 @@ int stop_physrep_threads() {
     if (gbl_physrep_debug)
         physrep_logmsg(LOGMSG_USER, "Stopping all physrep threads\n");
 
+    stop_reverse_connections_manager();
     stop_physrep_worker_thread();
     stop_physrep_watcher_thread();
-    stop_reverse_connections_manager();
     return 0;
 }
 
