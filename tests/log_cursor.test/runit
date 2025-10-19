@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+export debug=0
+export force_timeout=0
+export select_retries=60
+export maxgen=1000
+export selectv_threads_per_node=3
+export insert_threads_per_node=3
+
+if [[ $debug == "1" ]] ; then
+    set -x
+fi
+
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+. ${TESTSROOTDIR}/tools/runit_common.sh
+
+export stopfile=./stopfile.txt
+
+function selectv_thread
+{
+    local instance=$1
+    local machine=$2
+    local opcnt=0
+    local successcnt=0
+    local failcnt=0
+    local rc=0
+    local randval=0
+
+    echo "Starting selectv_thread for $machine"
+
+    while [[ ! -f $stopfile ]]; do
+        randval=$(( ( RANDOM % maxgen ) + 1 ))
+        result=$($CDB2SQL_EXE $DBNAME $CDB2_OPTIONS --host $machine - <<EOF 2>&1
+set transaction serializable
+begin
+selectv * from t1 where a = $randval
+select case when abs(random() % 3) = 0 then (select sleep(1)) else 0 end
+commit
+EOF
+)
+        rc=$?
+        let opcnt=opcnt+1
+        if [[ $rc == 0 ]]; then
+            let successcnt=successcnt+1
+        else
+            let failcnt=failcnt+1
+        fi
+
+        if (( opcnt % 40 == 0 )); then
+            echo "selectv_thread $machine #$instance, success=$successcnt / fails=$failcnt"
+        fi
+    done
+    
+    echo "selectv_thread $machine #$instance completed success=$successcnt / fails=$failcnt"
+}
+
+function insert_thread
+{
+    local instance=$1
+    local machine=$2
+    local opcnt=0
+    local failcnt=0
+    local successcnt=0
+    local rc=0
+
+    echo "Starting insert_thread for $machine"
+
+    while [[ ! -f $stopfile ]]; do
+        result=$($CDB2SQL_EXE $DBNAME $CDB2_OPTIONS --host $machine "insert into t1 (a) select * from generate_series(1, $maxgen)" 2>&1)
+        rc=$?
+        let opcnt=opcnt+1
+        if [[ $rc == 0 ]]; then
+            let successcnt=successcnt+1
+        else
+            let failcnt=failcnt+1
+        fi
+        if (( opcnt % 10 == 0 )); then
+            echo "insert_thread #$instance $machine -> $successcnt inserts / $failcnt failures"
+        fi
+    done
+
+    echo "insert_thread #$instance $machine finished, $successcnt inserts / $failcnt failures"
+}
+
+function setup_test
+{
+    $CDB2SQL_EXE $DBNAME $CDB2_OPTIONS default "drop table if exists t1"
+    $CDB2SQL_EXE $DBNAME $CDB2_OPTIONS default "create table t1(a int)"
+    $CDB2SQL_EXE $DBNAME $CDB2_OPTIONS default "create index t1a on t1(a)"
+}
+
+function run_test
+{
+    local testlength=$(timeout_to_seconds)
+    local retry_length=$(( select_retries + 20 ))
+    local mylength=$(( testlength - select_retries ))
+    local now=$(date +%s)
+    local end=$(( now + mylength ))
+    local failed=0
+    local select_count=0
+    local failed_select=0
+    local failed_machines=""
+    local downgrade_count=0
+    local j=0
+
+    rm -Rf $stopfile >/dev/null 2>&1
+
+    for node in $CLUSTER; do
+
+        j=0
+        while [[ $j -lt $insert_threads_per_node ]]; do
+            insert_thread $j $node &
+            j=$(( j + 1 ))
+        done
+
+        j=0
+        while [[ $j -lt $selectv_threads_per_node ]]; do
+            selectv_thread $j $node &
+            j=$(( j + 1 ))
+        done
+    done
+
+    echo "Starting downgrade_master loop for $mylength seconds"
+    while [[ $(date +%s) -lt $end && ! -f $stopfile ]]; do
+        #special verison of downgrade_master
+        echo "Downgrading master"
+        downgrade_master
+        downgrade_count=$(( downgrade_count + 1 ))
+        sleep 5
+    done
+
+    echo "Completed $downgrade_count downgrades"
+
+    if [[ -f $stopfile ]]; then
+        failed=1
+    fi
+
+    touch $stopfile
+    wait
+
+    if [[ $failed -eq 0 ]]; then
+        echo "Verify that nothing has crashed"
+        while [[ $failed_select == 1 && $select_count -lt $select_retries ]]; do
+            failed_select=0
+            failed_machines=""
+            for $node in $CLUSTER; do
+                $CDB2SQL_EXE $DBNAME $CDB2_OPTIONS --host $node "select 1" >/dev/null 2>&1
+                if [[ $? != 0 ]]; then
+                    failed_select=1
+                    $failed_machines="$failed_machines $node"
+                fi
+            done
+            if [[ $failed_select == 1 ]]; then
+                sleep 1
+            fi
+        done
+        if [[ $select_count -ge $select_retries ]]; then
+            echo "Select failed on machines: $failed_machines"
+            failed=1
+        fi
+    fi
+
+    if [[ $failed -eq 1 ]]; then
+        while [[ $force_timeout -ne 0 ]]; do
+            echo "Test will timeout, core cluster to see deadlock"
+            sleep 10
+        done
+
+        failexit "Test failed"
+    fi
+}
+
+[[ -z "$CLUSTER" ]] && failexit "This test requires a cluster"
+
+setup_test
+run_test
+
+echo "Success"

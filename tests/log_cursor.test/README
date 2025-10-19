@@ -1,0 +1,2 @@
+Reproduces a crash in log-get that occurs because of a race with vtruncate 
+

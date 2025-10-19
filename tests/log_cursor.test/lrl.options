@@ -1,0 +1,8 @@
+enable_serial_isolation
+
+enable_selectv_range_check 1
+
+setattr REP_WORKERS 0
+setattr REP_PROCESSORS 0
+
+online_recovery 1
