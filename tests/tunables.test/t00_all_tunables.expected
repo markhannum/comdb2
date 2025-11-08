@@ -52,6 +52,7 @@
 (name='analyze_tbl_threads', description='Number of threads to go through generated samples when generating index statistics. (Default: 5)', type='INTEGER', value='5', read_only='Y')
 (name='apply_queue_memory', description='Current memory usage of apply-queue.  (Default: 0)', type='INTEGER', value='0', read_only='Y')
 (name='apprec_track_lsn_ranges', description='During recovery track lsn ranges', type='BOOLEAN', value='ON', read_only='N')
+(name='appsock_logfills', description='Request log-records via appsock.  (Default: on)', type='BOOLEAN', value='ON', read_only='N')
 (name='appsockpool.dump_on_full', description='Dump status on full queue.', type='BOOLEAN', value='OFF', read_only='N')
 (name='appsockpool.exit_on_error', description='Exit on pthread error.', type='BOOLEAN', value='ON', read_only='N')
 (name='appsockpool.linger', description='Thread linger time (in seconds).', type='INTEGER', value='10', read_only='N')

@@ -61,6 +61,7 @@ static const char revid[] =
 #include "thrman.h"
 #include "thread_util.h"
 #include "debug_switches.h"
+#include <sbuf2.h>
 
 #ifndef TESTSUITE
 
@@ -84,6 +85,7 @@ extern int gbl_dumptxn_at_commit;
 
 int gbl_rep_badgen_trace;
 int gbl_decoupled_logputs = 0;
+int gbl_appsock_logfills = 1;
 int gbl_inmem_repdb = 0;
 int gbl_max_apply_dequeue = 100000;
 int gbl_master_req_waitms = 200;
@@ -489,6 +491,7 @@ struct repdb_rec {
 	int size;
 };
 
+// TODO: if logfill-td works, delete decoupled 
 pthread_mutex_t rep_candidate_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t rep_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
@@ -497,6 +500,11 @@ static pthread_t apply_thd;
 static int apply_thd_created = 0;
 static LISTC_T(struct queued_log) log_queue;
 static LISTC_T(struct repdb_rec) repdb_queue;
+
+static pthread_mutex_t fill_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t fill_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t fill_thd;
+static int fill_thd_created = 0;
 
 void bdb_thread_start_rw(void);
 void bdb_thread_done_rw(void);
@@ -517,6 +525,54 @@ static pthread_mutex_t rep_all_lk = PTHREAD_MUTEX_INITIALIZER;
 static DB_LSN last_lsn = {0};
 static time_t last_time = 0;
 static char *last_master = NULL;
+
+/* Replace 'async' fills with synchronous appsock request */
+static void *logfill_thread(void *arg)
+{
+	struct bdb_state_tag *bdb_state = gbl_bdb_state;
+	DB_LSN master_lsn, my_lsn = {0}, my_last_lsn = {0}, first_repdb_lsn;
+	DB_ENV *dbenv = (DB_ENV *)arg;
+	DB_REP *db_rep = dbenv->rep_handle;
+	REP *rep = db_rep->region;
+	bdb_thread_start_rw();
+	thrman_register(THRTYPE_FILLREQ);
+
+	/* No cleverness.. look for holes & request records */
+	while (!db_is_exiting()) {
+		int pollms = 100;
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_nsec += (pollms * 1000000);
+		ts.tv_sec += (ts.tv_nsec / 1000000000);
+		ts.tv_nsec %= 1000000000;
+
+		Pthread_mutex_lock(&fill_lock);
+		pthread_cond_timedwait(&fill_cond, &fill_lock, &ts);
+		Pthread_mutex_unlock(&fill_lock);
+		if (BDB_TRYREADLOCK("request_fill") != 0) {
+			continue;
+		}
+		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
+		if (IN_ELECTION_TALLY_WAITSTART(rep) || bdb_the_lock_desired()) {
+			MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
+			goto cont;
+		}
+cont:
+		BDB_RELLOCK();
+
+	}
+}
+
+static void signal_logfill_thd(DB_ENV *dbenv)
+{
+	Pthread_mutex_lock(&fill_lock);
+	if (!fill_thd_created) {
+		pthread_create(&fill_thd, NULL, logfill_thread, dbenv);
+		fill_thd_created = 1;
+	}
+	Pthread_cond_signal(&fill_cond);
+	Pthread_mutex_unlock(&fill_lock);
+}
 
 static void reset_rep_all_req_dedup_counters()
 {
@@ -550,6 +606,10 @@ static int send_rep_all_req_dedup(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, 
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 					 const char *func, int line)
 {
+	if (gbl_appsock_logfills) {
+		signal_logfill_thd(dbenv);
+		return 0;
+	}
 	if (gbl_dedup_rep_all_reqs == 1) {
 		return send_rep_all_req_dedup(dbenv, master_eid, lsn, flags, func, line);
 	}
@@ -571,6 +631,12 @@ int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *startlsn, DB_LSN *
 	DBT *max_lsn_dbt_ptr = NULL, max_lsn_dbt = {0};
 	DB_LSN tmp_lsn = {0};
 	static unsigned long long cnt = 0;
+
+	if (gbl_appsock_logfills) {
+		signal_logfill_thd(dbenv);
+		return 0;
+	}
+
 	if (maxlsn) {
 		LOGCOPY_TOLSN(&tmp_lsn, maxlsn);
 		max_lsn_dbt.data = &tmp_lsn;
@@ -3626,6 +3692,10 @@ gap_check:		use_range = 0;
 			if (ret != 0)
 				abort();
 			disable_random_deadlocks = 0;
+
+			if (gbl_appsock_logfills) {
+				signal_logfill_thd(dbenv);
+			}
 		}
 
 		rep->stat.st_log_queued++;

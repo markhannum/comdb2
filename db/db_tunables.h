@@ -1416,6 +1416,8 @@ REGISTER_TUNABLE("dedup_rep_all_reqs", "Only allow a single rep-all on queue to 
                  TUNABLE_INTEGER, &gbl_dedup_rep_all_reqs, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("decoupled_logputs", "Perform logputs out-of-band. (Default: on)", TUNABLE_BOOLEAN,
                  &gbl_decoupled_logputs, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("appsock_logfills", "Request log-records via appsock.  (Default: on)", TUNABLE_BOOLEAN,
+                 &gbl_appsock_logfills, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("apply_pollms",
                  "Apply-thread poll time before checking queue. "
                  "(Default: 100ms)",

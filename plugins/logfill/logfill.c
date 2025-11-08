@@ -33,7 +33,7 @@ static int retrieve_range(struct sbuf2 *sb, uint32_t gen, int sfile, int soffset
     DBT data = {0};
     uint32_t my_gen;
     int64_t cnt = 0;
-    int rc;
+    int rc, all_req = (efile == 0);
 
     if (BDB_TRYREADLOCK("logfill_retrieve_range") != 0) {
         logmsg(LOGMSG_ERROR, "logfill retrieve_range failed to get readlock\n");
@@ -63,7 +63,7 @@ static int retrieve_range(struct sbuf2 *sb, uint32_t gen, int sfile, int soffset
 
     data.flags = DB_DBT_REALLOC;
 
-    while (!bdb_lock_desired(bdb_state) && log_compare(&lsn, &elsn) <= 0 && !rc) {
+    while (!bdb_lock_desired(bdb_state) && (all_req || (log_compare(&lsn, &elsn) <= 0)) && !rc) {
         uint32_t flags = (cnt == 0) ? DB_SET : DB_NEXT;
         if ((rc = logc->get(logc, &lsn, &data, flags)) == 0) {
             sbuf2printf(sb, "LOG %u %u %u\n", lsn.file, lsn.offset, (unsigned int)data.size);
@@ -102,6 +102,43 @@ static int handle_logfill_request(comdb2_appsock_arg_t *arg)
         tok = strtok_r(line, delims, &lasts);
         if (!tok) {
             continue;
+
+        // getall <generation> <startfile> <startoffset>
+        // XXX maybe never do getall?
+        } else if (strcmp(tok, "getall") == 0) {
+            uint32_t generation;
+            int sfile, soffset, efile, eoffset;
+
+            // generation
+            tok = strtok_r(NULL, delims, &lasts);
+            if (!tok) {
+                logmsg(LOGMSG_ERROR, "logfill thread missing generation\n");
+                sbuf2printf(sb, "ERROR missing generation\n");
+                sbuf2flush(sb);
+                continue;
+            }
+            generation = strtoul(tok, NULL, 10);
+
+            // startfile
+            tok = strtok_r(NULL, delims, &lasts);
+            if (!tok) {
+                logmsg(LOGMSG_ERROR, "logfill thread missing start-file\n");
+                sbuf2printf(sb, "ERROR missing start-file\n");
+                sbuf2flush(sb);
+                continue;
+            }
+            sfile = strtol(tok, NULL, 10);
+
+            // startoffset
+            tok = strtok_r(NULL, delims, &lasts);
+            if (!tok) {
+                logmsg(LOGMSG_ERROR, "logfill thread missing start-offset\n");
+                sbuf2printf(sb, "ERROR missing start-offset\n");
+                sbuf2flush(sb);
+                continue;
+            }
+            soffset = strtol(tok, NULL, 10);
+            retrieve_range(sb, generation, sfile, soffset, 0, 0);
 
         // getrange <generation> <startfile> <startoffset> <endfile> <endoffset>
         } else if (strcmp(tok, "getrange") == 0) {

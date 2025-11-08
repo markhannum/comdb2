@@ -49,6 +49,7 @@ enum thrtype {
     THRTYPE_CLEANEXIT = 25,
     THRTYPE_GENERIC = 26,
     THRTYPE_LOGFILL = 27,
+    THRTYPE_FILLREQ = 28,
     THRTYPE_MAX
 };
 
