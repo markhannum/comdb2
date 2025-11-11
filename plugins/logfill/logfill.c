@@ -107,7 +107,7 @@ static int handle_logfill_request(comdb2_appsock_arg_t *arg)
         // XXX maybe never do getall?
         } else if (strcmp(tok, "getall") == 0) {
             uint32_t generation;
-            int sfile, soffset, efile, eoffset;
+            int sfile, soffset;
 
             // generation
             tok = strtok_r(NULL, delims, &lasts);

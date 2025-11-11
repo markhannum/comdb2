@@ -530,10 +530,12 @@ static char *last_master = NULL;
 static void *logfill_thread(void *arg)
 {
 	struct bdb_state_tag *bdb_state = gbl_bdb_state;
-	DB_LSN master_lsn, my_lsn = {0}, my_last_lsn = {0}, first_repdb_lsn;
+	//DB_LSN master_lsn, my_lsn = {0}, my_last_lsn = {0}, first_repdb_lsn;
 	DB_ENV *dbenv = (DB_ENV *)arg;
 	DB_REP *db_rep = dbenv->rep_handle;
 	REP *rep = db_rep->region;
+	//char *host = NULL, *master = NULL;
+	//int fd = -1;
 	bdb_thread_start_rw();
 	thrman_register(THRTYPE_FILLREQ);
 
@@ -549,18 +551,20 @@ static void *logfill_thread(void *arg)
 		Pthread_mutex_lock(&fill_lock);
 		pthread_cond_timedwait(&fill_cond, &fill_lock, &ts);
 		Pthread_mutex_unlock(&fill_lock);
+
 		if (BDB_TRYREADLOCK("request_fill") != 0) {
 			continue;
 		}
 		MUTEX_LOCK(dbenv, db_rep->rep_mutexp);
-		if (IN_ELECTION_TALLY_WAITSTART(rep) || bdb_the_lock_desired()) {
+		if (IN_ELECTION_TALLY_WAITSTART(rep) || rep->in_recovery ||
+				F_ISSET(rep, REP_F_READY | REP_F_RECOVER) || bdb_the_lock_desired()) {
 			MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 			goto cont;
 		}
 cont:
 		BDB_RELLOCK();
-
 	}
+    return NULL;
 }
 
 static void signal_logfill_thd(DB_ENV *dbenv)
