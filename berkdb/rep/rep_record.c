@@ -81,6 +81,7 @@ extern int gbl_rep_process_txn_time;
 extern int gbl_is_physical_replicant;
 extern int gbl_physrep_debug;
 extern int gbl_dumptxn_at_commit;
+extern int gbl_sql_logfills;
 
 int gbl_rep_badgen_trace;
 int gbl_decoupled_logputs = 0;
@@ -550,6 +551,9 @@ static int send_rep_all_req_dedup(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, 
 int send_rep_all_req(DB_ENV *dbenv, char *master_eid, DB_LSN *lsn, int flags,
 					 const char *func, int line)
 {
+	if (gbl_sql_logfills) {
+   		return 0;
+	}
 	if (gbl_dedup_rep_all_reqs == 1) {
 		return send_rep_all_req_dedup(dbenv, master_eid, lsn, flags, func, line);
 	}
@@ -571,6 +575,9 @@ int send_rep_log_req(DB_ENV *dbenv, char *master_eid, DB_LSN *startlsn, DB_LSN *
 	DBT *max_lsn_dbt_ptr = NULL, max_lsn_dbt = {0};
 	DB_LSN tmp_lsn = {0};
 	static unsigned long long cnt = 0;
+	if (gbl_sql_logfills) {
+   		return 0;
+	}
 	if (maxlsn) {
 		LOGCOPY_TOLSN(&tmp_lsn, maxlsn);
 		max_lsn_dbt.data = &tmp_lsn;
@@ -3422,6 +3429,9 @@ gap_check:		use_range = 0;
 				}
 				grp = r->repctl;
 				lp->waiting_lsn = grp->lsn;
+				if (dbenv->rep_signal_logfill) {
+					dbenv->rep_signal_logfill(dbenv, &lp->waiting_lsn);
+				}
 			} else {
 				memset(&nextrec_dbt, 0, sizeof(nextrec_dbt));
 				F_SET(&nextrec_dbt, DB_DBT_PARTIAL);
@@ -3448,6 +3458,9 @@ gap_check:		use_range = 0;
 				}
 				grp = (REP_CONTROL *)lsn_dbt.data;
 				lp->waiting_lsn = grp->lsn;
+				if (dbenv->rep_signal_logfill) {
+					dbenv->rep_signal_logfill(dbenv, &lp->waiting_lsn);
+				}
 			}
 
 			/*
@@ -3640,6 +3653,9 @@ gap_check:		use_range = 0;
 		if (IS_ZERO_LSN(lp->waiting_lsn) ||
 			log_compare(&rp->lsn, &lp->waiting_lsn) < 0) {
 			lp->waiting_lsn = rp->lsn;
+			if (dbenv->rep_signal_logfill) {
+				dbenv->rep_signal_logfill(dbenv, &lp->waiting_lsn);
+			}
 		}
 
 		if (do_req) {
