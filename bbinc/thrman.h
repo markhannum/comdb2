@@ -48,6 +48,7 @@ enum thrtype {
     THRTYPE_WATCHDOG = 24,
     THRTYPE_CLEANEXIT = 25,
     THRTYPE_GENERIC = 26,
+    THRTYPE_LOGFILL = 27,
     THRTYPE_MAX
 };
 

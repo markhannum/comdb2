@@ -3146,6 +3146,12 @@ int serial_check_callback(char *tbname, int idxnum, void *key, int keylen,
     return 0;
 }
 
+int signal_logfill(bdb_state_type *bdb_state, int sfile, int soffset, int efile, int eoffset)
+{
+    logmsg(LOGMSG_USER, "Signaling logfill\n");
+    return 0;
+}
+
 int getroom_callback(void *dummy, const char *host) { return machine_dc(host); }
 
 static int nodeup_drtest_callback(void *bdb_handle, const char *host, int *is_drtest)
@@ -3756,6 +3762,8 @@ int open_bdb_env(struct dbenv *dbenv)
                      serial_check_callback);
     bdb_callback_set(dbenv->bdb_callback, BDB_CALLBACK_SYNCMODE,
                      syncmode_callback);
+    bdb_callback_set(dbenv->bdb_callback, BDB_CALLBACK_SIGNAL_LOGFILL, signal_logfill);
+
 #if 0
     bdb_callback_set(dbenv->bdb_callback, BDB_CALLBACK_CATCHUP, 
             catchup_callback);
