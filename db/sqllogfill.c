@@ -25,6 +25,7 @@
 /* Tunables */
 int gbl_sql_logfills = 1;
 int gbl_debug_sql_logfill = 1;
+int gbl_sql_logfill_stats = 1;
 int gbl_sql_logfill_only_gaps = 0;
 static int sql_logfill_thd_created = 0;
 
@@ -44,6 +45,12 @@ static int is_connected = 0;
 extern int db_is_exiting(void);
 extern char gbl_dbname[MAX_DBNAME_LENGTH];
 extern int bdb_get_lsn_node(bdb_state_type *bdb_state, char *host, uint32_t *logfile, uint32_t *offset);
+
+/* Counters */
+static int64_t records_applied = 0;
+static int64_t bytes_applied = 0;
+static int64_t finds = 0;
+static int64_t nexts = 0;
 
 static void disconnect_from_master(void)
 {
@@ -113,6 +120,18 @@ static int apply_log(bdb_state_type *bdb_state, unsigned int file, unsigned int 
     return rc;
 }
 
+static void printstats(void)
+{
+    static int lastpr = 0;
+    int now = comdb2_time_epoch();
+    if (now - lastpr > 0) {
+        logmsg(LOGMSG_USER, "sqllogfill records_applied=%" PRId64 " bytes_applied=%" PRId64
+                        " finds=%" PRId64 " nexts=%" PRId64 "\n",
+               records_applied, bytes_applied, finds, nexts);
+        lastpr = now;
+    }
+}
+
 static int apply_record(bdb_state_type *bdb_state, cdb2_hndl_tp *hndl, LOG_INFO *last_lsn, DB_LSN *gap_lsn)
 {
     char *lsn;
@@ -147,10 +166,12 @@ static int apply_record(bdb_state_type *bdb_state, cdb2_hndl_tp *hndl, LOG_INFO 
     /* Don't apply the gap: it should be applied already */
     if (!gap_lsn || log_compare(&mylsn, gap_lsn) < 0) {
         rc = apply_log(bdb_state, mylsn.file, mylsn.offset, REP_LOG, blob, blob_len);
-        if (rc != 0) {
+        if (rc != 0 && rc != DB_REP_ISPERM) {
             logmsg(LOGMSG_FATAL, "%s error applying log record, %d\n", __func__, rc);
             exit(1);
         }
+        records_applied++;
+        bytes_applied+= blob_len;
     }
     return 0;
 }
@@ -226,6 +247,7 @@ static void request_logs_from_master(bdb_state_type *bdb_state)
             disconnect_from_master();
             return;
         }
+        finds++;
 
         if ((rc = cdb2_next_record(hndl)) != CDB2_OK) {
             if (gbl_debug_sql_logfill) {
@@ -234,10 +256,12 @@ static void request_logs_from_master(bdb_state_type *bdb_state)
             disconnect_from_master();
             return;
         }
+        nexts++;
 
         while (!bdb_lock_desired(bdb_state) && !db_is_exiting() && 
                (rc = cdb2_next_record(hndl)) == CDB2_OK) {
 
+            nexts++;
             rc = apply_record(bdb_state, hndl, &last_lsn, have_gap ? &gap_lsn : NULL);
             if (rc != 0) {
                 logmsg(LOGMSG_FATAL, "%s: apply_record failed rc=%d\n", __func__, rc);
@@ -248,6 +272,10 @@ static void request_logs_from_master(bdb_state_type *bdb_state)
 
             if (log_compare(&last_db_lsn, &gap_lsn) >= 0) {
                 break;
+            }
+
+            if (gbl_sql_logfill_stats) {
+                printstats();
             }
         }
     }
@@ -275,7 +303,14 @@ static void *sql_logfill_thread(void *arg)
     bdb_state_type *bdb_state = (bdb_state_type *)arg;
 
     comdb2_name_thread(__func__);
-    backend_thread_event(thedb, COMDB2_THR_EVENT_START_RDONLY);
+
+    /*
+    while(!backend_open(thedb)) {
+        sleep(1);
+    }
+
+    */
+    bdb_thread_event(bdb_state, COMDB2_THR_EVENT_START_RDONLY);
 
     while (!db_is_exiting()) {
         BDB_READLOCK(__func__);
@@ -295,8 +330,8 @@ static void *sql_logfill_thread(void *arg)
         sleep_for_gap_lsn(bdb_state);
     }
 
-    backend_thread_event(thedb, COMDB2_THR_EVENT_DONE_RDONLY);
-    Pthread_mutex_lock(&sql_logfill_lock);
+    bdb_thread_event(bdb_state, COMDB2_THR_EVENT_DONE_RDONLY);
+    //Pthread_mutex_lock(&sql_logfill_lock);
     return NULL;
 }
 
