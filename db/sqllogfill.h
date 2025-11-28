@@ -21,6 +21,6 @@
 
 void sql_logfill_signal(bdb_state_type *bdb_state);
 
-void create_sql_logfill_thread(bdb_state_type *bdb_state);
+void create_sql_logfill_threads(bdb_state_type *bdb_state);
 
 #endif

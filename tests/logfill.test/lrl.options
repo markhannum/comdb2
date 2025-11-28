@@ -81,3 +81,7 @@ cache 1 gb
 
 # No need to pstack after SIGSTOP
 pstack_self 0
+
+# Doesn't work with online recovery
+online_recovery off
+
