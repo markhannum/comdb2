@@ -947,6 +947,10 @@ __rep_set_rep_truncate_callback(dbenv, rep_truncate_callback)
 }
 
 #if DEBUG_RECOVERY_LOCK
+pthread_mutex_t prlk = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+#if DEBUG_RECOVERY_LOCK
 void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
 #endif
 
@@ -975,10 +979,6 @@ __rep_wrlock_recovery_blocked(dbenv)
 {
     return recoverlk_blocked;
 }
-
-#if DEBUG_RECOVERY_LOCK
-pthread_mutex_t prlk = PTHREAD_MUTEX_INITIALIZER;
-#endif
 
 static int
 __rep_lock_recovery_lock(dbenv, func, line)

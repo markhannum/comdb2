@@ -29,7 +29,9 @@ int gbl_debug_sql_logfill = 0;
 int gbl_sql_logfill_stats = 0;
 int gbl_sql_logfill_only_gaps = 1;
 int gbl_sql_logfill_dedicated_apply_thread = 1;
-int gbl_sql_logfill_lookahead_records = 10000;
+int gbl_sql_logfill_lookahead_records = 20000;
+int gbl_sql_logfill_lock_desired_allow_ms = 2000;
+
 static int sql_logfill_thds_created = 0;
 
 struct log_record {
@@ -74,6 +76,28 @@ static int64_t bytes_applied = 0;
 static int64_t finds = 0;
 static int64_t nexts = 0;
 static int64_t enque_blocks = 0;
+
+/* Allow lock-desired for lock-desired-allow-ms milliseconds */
+static int lock_desired_timed(bdb_state_type *bdb_state)
+{
+    int ret = 0;
+    static int lock_desired_start = 0;
+    static pthread_mutex_t lock_desired_lock = PTHREAD_MUTEX_INITIALIZER;
+    Pthread_mutex_lock(&lock_desired_lock);
+    int desired = bdb_lock_desired(bdb_state);
+    if (desired) {
+        int now = comdb2_time_epochms();
+        if (lock_desired_start > 0 && (now - lock_desired_start)) {
+            ret = (now - lock_desired_start) > gbl_sql_logfill_lock_desired_allow_ms;
+        } else {
+            lock_desired_start = now;
+        }
+    } else {
+        lock_desired_start = 0;
+    }
+    Pthread_mutex_unlock(&lock_desired_lock);
+    return ret;
+}
 
 static void disconnect_from_master(void)
 {
@@ -161,14 +185,14 @@ static void enque_log_record(bdb_state_type *bdb_state, unsigned int file, unsig
     }
 
     while (((apply_queue_head + 1) % gbl_sql_logfill_lookahead_records) == apply_queue_tail && !db_is_exiting() &&
-           !bdb_lock_desired(bdb_state)) {
+           !lock_desired_timed(bdb_state)) {
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_sec += 1;
         pthread_cond_timedwait(&sql_apply_queue_cond, &sql_apply_queue_lock, &ts);
     }
 
-    if (db_is_exiting() || bdb_lock_desired(bdb_state)) {
+    if (db_is_exiting() || lock_desired_timed(bdb_state)) {
         Pthread_mutex_unlock(&sql_apply_queue_lock);
         return;
     }
@@ -280,7 +304,7 @@ static void request_logs_from_master(bdb_state_type *bdb_state)
     int nrecs = 0, rc;
     u_int32_t gen;
 
-    while (!db_is_exiting() && !bdb_lock_desired(bdb_state)) {
+    while (!db_is_exiting() && !lock_desired_timed(bdb_state)) {
 
         int have_gap = 1;
 
@@ -403,7 +427,7 @@ static void request_logs_from_master(bdb_state_type *bdb_state)
         nexts++;
 
         int desired = 0, exiting = 0;
-        while (!(desired = bdb_lock_desired(bdb_state)) && !(exiting = db_is_exiting()) &&
+        while (!(desired = lock_desired_timed(bdb_state)) && !(exiting = db_is_exiting()) &&
                (rc = cdb2_next_record(hndl)) == CDB2_OK) {
 
             nexts++;
@@ -465,7 +489,7 @@ static void *sql_logfill_thread(void *arg)
             request_logs_from_master(bdb_state);
         }
 
-        if (bdb_lock_desired(bdb_state)) {
+        if (lock_desired_timed(bdb_state)) {
             Pthread_mutex_lock(&sql_apply_queue_lock);
             apply_queue[apply_queue_tail].file = 0;
             apply_queue_head = apply_queue_tail = 0;
@@ -475,7 +499,7 @@ static void *sql_logfill_thread(void *arg)
         BDB_RELLOCK();
 
         /* Wait for new master to be resolved */
-        while ((desired = bdb_lock_desired(bdb_state)) && !(exiting = db_is_exiting())) {
+        while ((desired = lock_desired_timed(bdb_state)) && !(exiting = db_is_exiting())) {
             if (gbl_debug_sql_logfill) {
                 logmsg(LOGMSG_USER, "%s: bdb_lock_desired=%d, exiting=%d sleeping\n", __func__, desired, exiting);
             }
@@ -503,7 +527,7 @@ static void *apply_thread(void *arg)
 
         int tail = -1, apply_log = 0;
         Pthread_mutex_lock(&sql_apply_queue_lock);
-        while (apply_queue_head == apply_queue_tail && !bdb_lock_desired(bdb_state) && !db_is_exiting()) {
+        while (apply_queue_head == apply_queue_tail && !lock_desired_timed(bdb_state) && !db_is_exiting()) {
             struct timespec ts;
             clock_gettime(CLOCK_REALTIME, &ts);
             pthread_cond_timedwait(&sql_apply_queue_cond, &sql_apply_queue_lock, &ts);
@@ -526,7 +550,7 @@ static void *apply_thread(void *arg)
 
         Pthread_mutex_unlock(&sql_apply_queue_lock);
 
-        if (bdb_lock_desired(bdb_state)) {
+        if (lock_desired_timed(bdb_state)) {
             BDB_RELLOCK();
             while (bdb_lock_desired(bdb_state) && !db_is_exiting()) {
                 sleep(1);

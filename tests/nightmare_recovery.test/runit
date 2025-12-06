@@ -34,7 +34,7 @@ function findmaster
 
 function current_log_file
 {
-    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "exec procedure sys.cmd.send('bdb logstat')" | egrep st_cur_file)
+    x=$($CDB2SQL_EXE --admin --tabs $CDB2_OPTIONS $DBNAME default "exec procedure sys.cmd.send('bdb logstat')" | egrep st_cur_file)
     echo "${x##* }"
 }
 
@@ -42,7 +42,7 @@ function oldest_txn_file
 {
     typeset oldest=-1
     master=$(findmaster)
-    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME --host $master  "exec procedure sys.cmd.send('bdb txnstat')"  | egrep -A 1 "active transactions"  2>&1 | egrep -v "active transactions" | awk '{print $NF}')
+    x=$($CDB2SQL_EXE --admin --tabs $CDB2_OPTIONS $DBNAME --host $master  "exec procedure sys.cmd.send('bdb txnstat')"  | egrep -A 1 "active transactions"  2>&1 | egrep -v "active transactions" | awk '{print $NF}')
     for l in $x ; do
         f=${l%%:*}
         if [[ "$oldest" == "-1" || "$f" -lt "$oldest" ]]; then
@@ -70,13 +70,20 @@ function run_test
 
     while [[ ! -f $stopfile && "$(date +%s)" -lt "$endtime" ]]; do
         master=$(findmaster)
-        $CDB2SQL_EXE $CDB2_OPTIONS --host $master $DBNAME "exec procedure sys.cmd.send('leaktxn')";
+        $CDB2SQL_EXE --admin $CDB2_OPTIONS --host $master $DBNAME "exec procedure sys.cmd.send('leaktxn')";
         oldest=$(oldest_txn_file)
         clog=$(current_log_file)
         if [[ $(( clog - oldest )) -gt "$logtarget" ]]; then
             echo "met log-target, unleak & downgrade"
-            $CDB2SQL_EXE $CDB2_OPTIONS --host $master $DBNAME "exec procedure sys.cmd.send('unleaktxn')";
-            $CDB2SQL_EXE $CDB2_OPTIONS --host $master $DBNAME "exec procedure sys.cmd.send('downgrade')";
+            k=0
+            while [[ $k -lt 5 ]]; do
+                for node in $CLUSTER ; do 
+                    $CDB2SQL_EXE --admin $CDB2_OPTIONS --host $node $DBNAME "exec procedure sys.cmd.send('unleaktxn')";
+                done
+                let k=k+1
+                sleep 1
+            done
+            $CDB2SQL_EXE --admin $CDB2_OPTIONS --host $master $DBNAME "exec procedure sys.cmd.send('downgrade')";
         else
             echo "oldest txn file is $oldest, current is $clog, logtarget is $logtarget, not downgrading"
             echo "Need current to be older than $(( oldest + logtarget ))"
@@ -103,7 +110,7 @@ function run_test
 
     echo "Tell everything to unleak-txn"
     for n in $CLUSTER ; do
-        $CDB2SQL_EXE $CDB2_OPTIONS --host $n $DBNAME "exec procedure sys.cmd.send('unleaktxn')"
+        $CDB2SQL_EXE --admin $CDB2_OPTIONS --host $n $DBNAME "exec procedure sys.cmd.send('unleaktxn')"
     done
 
     echo "Nothing recovered- success!"
