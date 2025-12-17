@@ -101,6 +101,12 @@ extern int gbl_merge_table_enabled;
 timepart_views_t *timepart_views_init(struct dbenv *dbenv);
 
 /**
+ * Reload time partition views from llmeta during log truncation recovery.
+ *
+ */
+int timepart_views_reload(struct dbenv *dbenv);
+
+/**
  * Process a cson command
  *
  * Format:

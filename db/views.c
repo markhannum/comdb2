@@ -215,6 +215,57 @@ timepart_views_t *timepart_views_init(struct dbenv *dbenv)
     return dbenv->timepart_views;
 }
 
+/* Forward declaration */
+static void timepart_free_views_unlocked(timepart_views_t *views);
+
+/**
+ * Reload time partition views from llmeta during log truncation recovery.
+ * Unlike timepart_views_init, this does NOT reinitialize the rwlock or cron
+ * scheduler - it only reloads the view data.
+ */
+int timepart_views_reload(struct dbenv *dbenv)
+{
+    timepart_views_t *new_views;
+    timepart_views_t *old_views = dbenv->timepart_views;
+
+    if (!old_views) {
+        logmsg(LOGMSG_ERROR, "%s: timepart_views not initialized\n", __func__);
+        return -1;
+    }
+
+    logmsg(LOGMSG_INFO, "Reloading time partitions\n");
+
+    /* Read new views from llmeta - do this BEFORE acquiring lock since
+     * views_create_all_views internally acquires locks for shard registration */
+    new_views = views_create_all_views();
+    if (!new_views) {
+        logmsg(LOGMSG_ERROR, "%s: failed to reload views from llmeta\n", __func__);
+        return -1;
+    }
+
+    /* Now acquire lock to swap old views with new */
+    Pthread_rwlock_wrlock(&views_lk);
+
+    /* Free the old view entries */
+    timepart_free_views_unlocked(old_views);
+
+    /* Copy the new views into the existing structure */
+    old_views->views = new_views->views;
+    old_views->nviews = new_views->nviews;
+    old_views->preemptive_rolltime = new_views->preemptive_rolltime;
+    old_views->rollout_delete_lag = new_views->rollout_delete_lag;
+
+    /* Free just the container, not the contents (we moved them) */
+    free(new_views);
+
+    /* Bump the views generation so sqlite engines refresh */
+    ++gbl_views_gen;
+
+    Pthread_rwlock_unlock(&views_lk);
+
+    return 0;
+}
+
 static int _get_preemptive_rolltime(timepart_view_t *view)
 {
     if (IS_TIMEPARTITION(view->period)) {

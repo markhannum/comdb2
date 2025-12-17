@@ -6438,8 +6438,8 @@ retry_tran:
         abort();
     }
 
-    if (llmeta_load_timepart(thedb)) {
-        logmsg(LOGMSG_ERROR, "could not load time partitions\n");
+    if (timepart_views_reload(thedb)) {
+        logmsg(LOGMSG_ERROR, "could not reload time partitions\n");
         abort();
     }
 

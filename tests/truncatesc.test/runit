@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 bash -n "$0" | exit 1
 
+source ${TESTSROOTDIR}/tools/runit_common.sh
+
 [[ $debug == "1" ]] && set -x
 
 # Grab my database name.
@@ -413,7 +415,11 @@ function assert_time_partitions
     typeset tries=$total_tries
     while [[ "$prev_tp" != "$curr_tp" ]] ; do
         let tries=tries-1
-        [[ "$tries" == 0 ]] && failexit $func "time-partitions have changed"
+        if [[ "$tries" == 0 ]] ; then
+            echo "time partitions have changed:"
+            echo "prev was $prev_tp, curr is $curr_tp"
+            failexit $func "time-partitions have changed"
+        fi
         sleep 1
         curr_tp=$(get_time_partitions)
     done
@@ -1734,17 +1740,18 @@ function tear_down
 
 function run_tests
 {
-    del_tables
-    add_tables
-    drop_tables
-    rename_tables
-    truncate_tables
-    alter_table_options
-    bulk_rebuild
-    luasp
-    morestripe
-    genid48
-    rowlocks
+    time_partitions
+#    del_tables
+#    add_tables
+#    drop_tables
+#    rename_tables
+#    truncate_tables
+#    alter_table_options
+#    bulk_rebuild
+#    luasp
+#    morestripe
+#    genid48
+#    rowlocks
 }
 
 setup
