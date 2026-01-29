@@ -360,7 +360,6 @@ static int do_finalize(ddl_t func, struct ireq *iq,
             sc_errf(s, "Failed to start finalize transaction %d\n", -rc);
             return -1;
         }
-        ltran->no_distributed_commit = 1;
     }
     uint64_t sc_nrecs = 0;
     if (s->db)
@@ -1682,8 +1681,7 @@ int do_setcompr(struct ireq *iq, const char *rec, const char *blob)
     tran = NULL;
 
     int bdberr = 0;
-    if ((rc = bdb_llog_scdone_flags(thedb->bdb_env, setcompr, db->tablename, strlen(db->tablename) + 1, 0, &bdberr,
-                                    NO_DISTRIBUTED_COMMIT)) != 0) {
+    if ((rc = bdb_llog_scdone(thedb->bdb_env, setcompr, db->tablename, strlen(db->tablename) + 1, 0, &bdberr)) != 0) {
         logmsg(LOGMSG_ERROR, "%s -- bdb_llog_scdone rc:%d bdberr:%d\n", __func__, rc, bdberr);
     }
 
