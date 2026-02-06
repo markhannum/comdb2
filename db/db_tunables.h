@@ -1813,7 +1813,7 @@ REGISTER_TUNABLE("match_on_ckp", "Allow rep_verify_match on ckp records.  (Defau
                  &gbl_match_on_ckp, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 
 /* physical replication */
-REGISTER_TUNABLE("blocking_physrep", "Physical replicant blocks on select. (Default: on)", TUNABLE_BOOLEAN,
+REGISTER_TUNABLE("blocking_physrep", "Physical replicant blocks on select. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_blocking_physrep, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("tranlog_default_timeout", "Default timeout for tranlog queries.  (Default: 30)", TUNABLE_INTEGER,
                  &gbl_tranlog_default_timeout, 0, NULL, NULL, NULL, NULL);
