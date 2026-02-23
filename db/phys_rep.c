@@ -1330,15 +1330,14 @@ static int update_min_logfile_int(cdb2_hndl_tp *metadb)
         return 1;
     }
 
-    bytes_written +=
-        snprintf(buf+bytes_written, buf_len-bytes_written,
-                "     ) "
-                "     UNION "
-                "     SELECT p.dbname, p.host, p.file FROM comdb2_physreps p, "
-                "         comdb2_physrep_connections c, replication_tree t "
-                "         WHERE p.state = 'ACTIVE' AND p.file <> 0 AND "
-                "             t.dbname = c.source_dbname AND c.dbname = p.dbname) "
-                "    SELECT file FROM replication_tree WHERE file IS NOT NULL ORDER BY file LIMIT 1");
+    bytes_written += snprintf(buf + bytes_written, buf_len - bytes_written,
+                              "     ) "
+                              "     UNION "
+                              "     SELECT p.dbname, p.host, p.file FROM comdb2_physreps p, "
+                              "         comdb2_physrep_connections c, replication_tree t "
+                              "         WHERE p.state = 'Active' AND p.file <> 0 AND "
+                              "             t.dbname = c.source_dbname AND c.dbname = p.dbname) "
+                              "    SELECT file FROM replication_tree WHERE file IS NOT NULL ORDER BY file LIMIT 1");
     if (bytes_written >= buf_len) {
         physrep_logmsg(LOGMSG_ERROR, "%s:%d Buffer is not long enough!\n", __func__, __LINE__);
         return 1;
