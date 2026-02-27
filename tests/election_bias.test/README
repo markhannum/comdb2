@@ -1,0 +1,8 @@
+This test verifies elect-highest-committed-gen behavior for the case where
+there is no regop-gen.  In this case, each replicant should cast an old-style
+vote, which only considers the end-of-log.
+
+The test addtionally verifies behavior in a mixed cluster when an 
+elect-highest-gen master writes a regop-gen record.  Election will then be
+biased to only allow replicants with elect-highest-committed-gen enabled to win
+an election.
