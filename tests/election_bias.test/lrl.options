@@ -1,0 +1,5 @@
+# bb defaults
+berkattr elect_highest_committed_gen 0
+retrieve_gen_from_ckp 0
+recovery_ckp 0
+online_recovery off

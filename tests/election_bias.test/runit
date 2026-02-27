@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+bash -n "$0" | exit 1
+
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+. ${TESTSROOTDIR}/tools/runit_common.sh
+. ${TESTSROOTDIR}/tools/hrtime.sh
+
+export stopfile=./stopfile
+export debug=1
+
+[[ $debug == "1" ]] && set -x
+
+function create_table
+{
+    $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} default "create table t1(a int)"
+    [[ $? -ne 0 ]] && failexit "Failed to create table"
+}
+
+function elect_highest_is_disabled
+{
+    for node in $CLUSTER ; do
+        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "select count(*) from comdb2_tunables where name='elect_highest_committed_gen' and value='OFF'")
+        if [[ $x -ne 1 ]] ; then
+            failexit "elect_highest_committed_gen is not disabled on $node"
+        fi
+    done
+}
+
+function block_on_cluster
+{
+    local found_error=1
+
+    while [[ "$found_error" -ne 0 ]]; do
+        found_error=0
+        for node in $CLUSTER ; do
+            $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} --host $node "select 1" >/dev/null 2>&1
+            if [[ $? -ne 0 ]] ; then
+                found_error=1
+                break
+            fi
+        done
+        if [[ "$found_error" -ne 0 ]] ; then
+            sleep 1
+        fi
+    done
+}
+
+function downgrade_master_should_not_swing
+{
+    local maxcount=${1:-10}
+    local sawswing=0
+    local original_master=$(getmaster)
+    local master=""
+    local cnt=0
+
+    while [[ "$cnt" -lt "$maxcount" ]]; do
+        master=$(getmaster)
+        if [[ "$master" != "$original_master" ]] ; then
+            sawswing=1
+            break
+        fi
+        let cnt=cnt+1
+        sleep 5
+        block_on_cluster
+    done
+
+    [[ "$sawswing" -ne 0 ]] && failexit "Master did not swing after $cnt attempts"
+}
+
+function downgrade_master_should_swing
+{
+    local maxcount=${1:-10}
+    local sawswing=0
+    local original_master=$(getmaster)
+    local master=""
+    local cnt=0
+
+    while [[ "$cnt" -lt "$maxcount" ]]; do
+        master=$(getmaster)
+        if [[ "$master" != "$original_master" ]] ; then
+            sawswing=1
+            break
+        fi
+        let cnt=cnt+1
+        sleep 5
+        block_on_cluster
+    done
+
+    [[ "$sawswing" -eq 0 ]] && failexit "Master did not swing after $cnt attempts"
+}
+
+function enable_elect_highest_on_all
+{
+    for node in $CLUSTER ; do
+        $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr elect_highest_committed_gen 1')"
+    done
+}
+
+function write_record
+{
+    $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} default "insert into t1 values(1)"
+    [[ $? -ne 0 ]] && failexit "Failed to write record"
+}
+
+function enable_elect_highest_on_all_but_master
+{
+    local master=$(getmaster)
+
+    for node in $CLUSTER ; do
+        if [[ "$node" == "$master" ]] ; then
+            continue
+        fi
+        $CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr elect_highest_committed_gen 1')"
+    done
+
+    # Verify that this is set correctly
+    for node in $CLUSTER ; do
+        x=$(CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "select count(*) from comdb2_tunables where name='elect_highest_committed_gen' and value='OFF'")
+        [[ "$node" == "$master" ]] && "$x" -ne 1 && failexit "elect_highest_committed_gen is not disabled on master-node $master"
+        [[ "$node" != "$master" ]] && "$x" -ne 0 && failexit "elect_highest_committed_gen is not enabled on $node"
+    done
+}
+
+function disable_elect_highest_on_all_but_master
+{
+    local master=$(getmaster)
+
+    for node in $CLUSTER ; do
+        if [[ "$node" == "$master" ]] ; then
+            continue
+        fi
+        $CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr elect_highest_committed_gen 0')"
+    done
+}
+
+function run_test
+{
+    # Setup
+    create_table
+    elect_highest_is_disabled
+    enable_elect_highest_on_all_but_master
+
+    # Downgrade
+    downgrade_master_should_swing
+
+    # Enable everywhere
+    enable_elect_highest_on_all
+
+    # Emit a regop-gen
+    write_record
+
+    # Disable 
+    disable_elect_highest_on_all_but_master
+
+    # Downgrade
+    downgrade_master_should_not_swing
+}
+
+rm $stopfile >/dev/null 2>&1 
+[[ -z "$CLUSTER" ]] && failexit "This test requires a cluster"
+
+run_test
