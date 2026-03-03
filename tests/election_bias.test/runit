@@ -54,17 +54,25 @@ function downgrade_master_should_not_swing
     local cnt=0
 
     while [[ "$cnt" -lt "$maxcount" ]]; do
+        write_record
         master=$(getmaster)
         if [[ "$master" != "$original_master" ]] ; then
             sawswing=1
             break
         fi
+        $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} --host $master "exec procedure sys.cmd.send('downgrade')"
         let cnt=cnt+1
         sleep 5
         block_on_cluster
     done
 
-    [[ "$sawswing" -ne 0 ]] && failexit "Master did not swing after $cnt attempts"
+    if [[ "$sawswing" -ne 0 ]] ; then
+        for node in $CLUSTER ; do
+            $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('flush')"
+        done
+        sleep 5
+        failexit "Master did not swing after $cnt attempts"
+    fi
 }
 
 function downgrade_master_should_swing
@@ -81,9 +89,11 @@ function downgrade_master_should_swing
             sawswing=1
             break
         fi
+        $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} --host $master "exec procedure sys.cmd.send('downgrade')"
         let cnt=cnt+1
-        sleep 5
         block_on_cluster
+        write_record
+        sleep 5
     done
 
     [[ "$sawswing" -eq 0 ]] && failexit "Master did not swing after $cnt attempts"
@@ -92,7 +102,12 @@ function downgrade_master_should_swing
 function enable_elect_highest_on_all
 {
     for node in $CLUSTER ; do
-        $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr elect_highest_committed_gen 1')"
+        $CDB2SQL_EXE ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr set elect_highest_committed_gen 1')"
+    done
+
+    for node in $CLUSTER ; do
+        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "select count(*) from comdb2_tunables where name='elect_highest_committed_gen' and value='OFF'")
+        [[ "$x" -ne 0 ]] && failexit "elect_highest_committed_gen is not enabled on $node"
     done
 }
 
@@ -110,14 +125,14 @@ function enable_elect_highest_on_all_but_master
         if [[ "$node" == "$master" ]] ; then
             continue
         fi
-        $CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr elect_highest_committed_gen 1')"
+        $CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr set elect_highest_committed_gen 1')"
     done
 
     # Verify that this is set correctly
     for node in $CLUSTER ; do
-        x=$(CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "select count(*) from comdb2_tunables where name='elect_highest_committed_gen' and value='OFF'")
-        [[ "$node" == "$master" ]] && "$x" -ne 1 && failexit "elect_highest_committed_gen is not disabled on master-node $master"
-        [[ "$node" != "$master" ]] && "$x" -ne 0 && failexit "elect_highest_committed_gen is not enabled on $node"
+        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "select count(*) from comdb2_tunables where name='elect_highest_committed_gen' and value='OFF'")
+        [[ "$node" == "$master" ]] && [[ "$x" -ne 1 ]] && failexit "elect_highest_committed_gen is not disabled on master-node $master"
+        [[ "$node" != "$master" ]] && [[ "$x" -ne 0 ]] && failexit "elect_highest_committed_gen is not enabled on $node"
     done
 }
 
@@ -129,7 +144,14 @@ function disable_elect_highest_on_all_but_master
         if [[ "$node" == "$master" ]] ; then
             continue
         fi
-        $CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr elect_highest_committed_gen 0')"
+        $CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "exec procedure sys.cmd.send('berkattr set elect_highest_committed_gen 0')"
+    done
+
+    # Verify that this is set correctly
+    for node in $CLUSTER ; do
+        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} ${DBNAME} --host $node "select count(*) from comdb2_tunables where name='elect_highest_committed_gen' and value='OFF'")
+        [[ "$node" == "$master" ]] && "$x" -ne 0 && failexit "elect_highest_committed_gen is not disabled on master-node $master"
+        [[ "$node" != "$master" ]] && "$x" -ne 1 && failexit "elect_highest_committed_gen is not enabled on $node"
     done
 }
 

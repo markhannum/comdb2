@@ -1117,7 +1117,7 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 	DB_LSN lastlsn, curlsn;
 	REP *rep;
 	u_int32_t rectype;
-	int ret;
+	int ret = -1;
 
 	PANIC_CHECK(dbenv);
 	ENV_REQUIRES_CONFIG(dbenv, dbenv->rep_handle,
@@ -1169,7 +1169,7 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 			 * guarantee that a ckp is only ever emitted by the cluster-master */
 
             if (regop_cnt > 100) {
-				logmsg(LOGMSG_USER, "%s failing after %d txn-regop records\n",
+				logmsg(LOGMSG_DEBUG, "%s failing after %d txn-regop records\n",
 						__func__, regop_cnt);
 				goto err;
 			}
@@ -1253,6 +1253,11 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 
 err:
 	__log_c_close(logc);
+	if (lsn->file == 0) {
+		logmsg(LOGMSG_INFO, "%s line %d special-case last-lsn %d:%d for no committed gen\n",
+				__func__, __LINE__, lastlsn.file, lastlsn.offset);
+		*lsn = lastlsn;
+	}
 	return ret;
 }
 

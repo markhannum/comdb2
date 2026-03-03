@@ -1,5 +1,10 @@
 # bb defaults
 berkattr elect_highest_committed_gen 0
+endianize_locklist 0
 retrieve_gen_from_ckp 0
 recovery_ckp 0
+
+sql_logfill 1
+logmsg level debug
+
 online_recovery off
