@@ -82,3 +82,5 @@ allow_coordinator foobardb/prod
 allow_coordinator dbeefdb/prod
 
 #setattr SOSQL_MAX_COMMIT_WAIT_SEC 30
+extended_sql_debug_trace 1
+on extended_sql_debug_trace

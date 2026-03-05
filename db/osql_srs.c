@@ -179,7 +179,9 @@ int srs_tran_del_last_query(struct sqlclntstate *clnt)
 
 static inline int srs_tran_do_not_retry(struct sqlclntstate *clnt)
 {
-    return (clnt->verifyretry_off || clnt->isselect || clnt->dbtran.trans_has_sp || clnt->has_recording);
+    int notretry = (clnt->verifyretry_off || clnt->isselect || clnt->dbtran.trans_has_sp || clnt->has_recording);
+    sql_debug_logf(clnt, __func__, __LINE__, "%s '%s' verifyretry_off=%d, isselect=%d trans_has_sp=%d, has_recording=%d\n", notretry ? "DONT-RETRY" : "RETRY", clnt->sql, clnt->verifyretry_off, clnt->isselect, clnt->dbtran.trans_has_sp, clnt->has_recording);
+    return notretry;
 }
 
 /**
@@ -191,8 +193,9 @@ int srs_tran_add_query(struct sqlclntstate *clnt)
     osqlstate_t *osql = &clnt->osql;
     srs_tran_query_t *item = NULL;
 
-    if (srs_tran_do_not_retry(clnt))
+    if (srs_tran_do_not_retry(clnt)) {
         return 0;
+    }
 
     /* don't grow session when the transaction is simply repeated */
     if (osql->replay != OSQL_RETRY_NONE) {
@@ -322,6 +325,7 @@ static int srs_tran_replay_int(struct sqlclntstate *clnt, int(dispatch_fn)(struc
         LISTC_FOR_EACH(&osql->history->lst, item, lnk)
         {
             restore_stmt(clnt, item);
+            sql_debug_logf(clnt, __func__, __LINE__, "Dispatching stmt: '%s'\n", clnt->sql ? clnt->sql : "(?)");
             if ((rc = dispatch_fn(clnt)) != 0)
                 break;
             if (!osql->history)

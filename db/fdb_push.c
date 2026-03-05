@@ -147,9 +147,13 @@ int fdb_push_write_setup(Parse *pParse, enum ast_type type, Table *pTab)
     struct Db *pDb = &pParse->db->aDb[pTab->iDb];
 
     assert(pTab->iDb > 1);
+    sql_debug_logf(clnt, __func__, __LINE__, "query %s (fdb_push_remote_write=%d)\n", clnt->sql,
+            clnt->fdb_push_remote_write);
+    /*
     logmsg(LOGMSG_DEBUG,
            "%s query %s (fdb_push_remote_write=%d)\n",
            __func__, clnt->sql, clnt->fdb_push_remote_write);
+           */
     if (!clnt->fdb_push_remote || !clnt->fdb_push_remote_write)
         return -1;
 

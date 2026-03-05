@@ -2080,6 +2080,7 @@ commit
 function coordinator_constraint_violation
 {
     typeset j=0
+    typeset target=0
     while [[ $j -lt 10 ]]; do
     startms=$(timems)
     echo "begin
@@ -2099,6 +2100,22 @@ commit
     if [[ "$(( donems - startms ))" -gt $maxtime ]]; then
         fail_exit "coordinator took excessive time to insert good record"
     fi
+
+    target=$(( j + 1 ))
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $SECONDARY_DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $TERTIARY_DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $QUATERNARY_DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $QUINARY_DBNAME, expected $target, got $x"
 
     startms=$(timems)
     output=$(echo "set verifyretry off
@@ -2125,6 +2142,22 @@ commit
         echo "coordinator_constraint_violation failed with incorrect rcode: $output"
         fail_exit "coordinator_constraint_violation failed with incorrect rcode"
     fi
+
+    # Once again, verify record counts
+    x=$($CDB2SQL_EXE --tabs $CDB2_OPTIONS $DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $SECONDARY_CDB2_OPTIONS $SECONDARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $SECONDARY_DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $TERTIARY_CDB2_OPTIONS $TERTIARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $TERTIARY_DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $QUATERNARY_CDB2_OPTIONS $QUATERNARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $QUATERNARY_DBNAME, expected $target, got $x"
+
+    x=$($CDB2SQL_EXE --tabs $QUINARY_CDB2_OPTIONS $QUINARY_DBNAME default "select count(*) from t1")
+    [[ "$x" == "$target" ]] || fail_exit "coordinator_constraint_violation failed to insert record into $QUINARY_DBNAME, expected $target, got $x"
 
     let j=j+1
     done
@@ -3707,23 +3740,22 @@ function run_test
 
 function run_some_tests
 {
-    testcase="no_coordinator_writes"
-    testcase_preamble $testcase
-    no_coordinator_writes
-    testcase_finish $testcase
-
-    testcase="verify_no_distcommit"
-    testcase_preamble $testcase
-    verify_no_distcommit
-    testcase_finish $testcase
+    local j=0
+    while [[ $j -lt 20 ]]; do
+        testcase="test_verify_coordinator_constraint_violation"
+        testcase_preamble $testcase
+        test_verify_coordinator_constraint_violation
+        testcase_finish $testcase
+        let j=j+1
+    done
 }
 
 rm $stopfile >/dev/null 2>&1 
 [[ -z "$CLUSTER" ]] && fail_exit "This test requires a 3-node cluster"
 
 setup
-#run_some_tests
-run_test
+run_some_tests
+#run_test
 stop_all_databases
 
 if [[ -f $stopfile ]]; then
