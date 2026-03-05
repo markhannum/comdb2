@@ -3753,6 +3753,11 @@ function run_some_tests
         test_verify_participant_constraint_violation
         testcase_finish $testcase
 
+        testcase="verify_no_distcommit"
+        testcase_preamble $testcase
+        verify_no_distcommit
+        testcase_finish $testcase
+
         let j=j+1
     done
 }
