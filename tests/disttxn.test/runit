@@ -3742,10 +3742,17 @@ function run_some_tests
 {
     local j=0
     while [[ $j -lt 20 ]]; do
+
         testcase="test_verify_coordinator_constraint_violation"
         testcase_preamble $testcase
         test_verify_coordinator_constraint_violation
         testcase_finish $testcase
+
+        testcase="test_verify_participant_constraint_violation"
+        testcase_preamble $testcase
+        test_verify_participant_constraint_violation
+        testcase_finish $testcase
+
         let j=j+1
     done
 }
