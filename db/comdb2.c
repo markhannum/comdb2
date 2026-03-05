@@ -432,7 +432,7 @@ int gbl_max_columns_soft_limit = 255; /* this is the old hard limit */
 
 int gbl_dispatch_rowlocks_bench = 1;
 int gbl_rowlocks_bench_logical_rectype = 1;
-int gbl_verbose_toblock_backouts = 0;
+int gbl_verbose_toblock_backouts = 1;
 /* TODO */
 int gbl_page_latches = 0;
 int gbl_replicant_latches = 0;

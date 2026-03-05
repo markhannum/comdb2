@@ -514,6 +514,7 @@ int add_record(struct ireq *iq, void *trans, const uint8_t *p_buf_tag_name,
         }
         if (retrc) {
             *opfailcode = OP_FAILED_INTERNAL + ERR_ADD_RRN;
+            abort();
             ERR("add genid %"PRIx64" rc %d", *genid, rc);
         }
     }
