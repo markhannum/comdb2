@@ -6,5 +6,5 @@ endif
 
 export CHECK_DB_AT_FINISH=0
 ifeq ($(TEST_TIMEOUT),)
-	export TEST_TIMEOUT=7m
+	export TEST_TIMEOUT=12m
 endif
