@@ -38,6 +38,10 @@
 #include "bdb_int.h"
 #include "sqlanalyze.h"
 #define VIEWS_MAX_RETENTION 1000
+#ifdef COMDB2_TEST
+#include <unistd.h>
+int gbl_debug_sleep_in_rollout = 0;
+#endif
 
 extern int gbl_is_physical_replicant;
 int gbl_partitioned_table_enabled = 1;
@@ -3501,6 +3505,10 @@ done:
     return rc;
 }
 
+#ifdef COMDB2_TEST
+__thread int have_views_lk = 0;
+#endif
+
 int timepart_analyze_partition(char *name, void *td, struct sqlclntstate *clnt,
                                struct errstat *err)
 {
@@ -3510,6 +3518,9 @@ int timepart_analyze_partition(char *name, void *td, struct sqlclntstate *clnt,
     int i = 0;
 
     Pthread_rwlock_rdlock(&views_lk);
+#ifdef COMDB2_TEST
+    have_views_lk = 1;
+#endif
 
     view = _get_view(views, name);
     if (!view) {
@@ -3529,6 +3540,9 @@ int timepart_analyze_partition(char *name, void *td, struct sqlclntstate *clnt,
         }
     }
 done:
+#ifdef COMDB2_TEST
+    have_views_lk = 0;
+#endif
     Pthread_rwlock_unlock(&views_lk);
     return rc;
 }
