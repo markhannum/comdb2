@@ -2770,6 +2770,8 @@ int64_t gbl_durable_latest_cnt = 0;
 
 int bdb_blkseq_is_durable(void *in_bdb_state, void *blkseq, int seqlen)
 {
+    return bdb_latest_commit_is_durable(in_bdb_state);
+    /*
     bdb_state_type *bdb_state = (bdb_state_type *)in_bdb_state;
     DB_LSN lsn;
     void *replay_data = NULL;
@@ -2786,6 +2788,7 @@ int bdb_blkseq_is_durable(void *in_bdb_state, void *blkseq, int seqlen)
     free(replay_data);
     ATOMIC_ADD64(gbl_durable_blkseq_cnt, 1);
     return bdb_commit_is_durable(bdb_state, lsn, 0);
+    */
 }
 
 int bdb_get_lsn_context_from_timestamp(bdb_state_type *bdb_state,
