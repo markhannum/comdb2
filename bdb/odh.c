@@ -64,7 +64,7 @@ static void write_odh(void *buf, const struct odh *odh, uint8_t flags);
  *    flags             . idx 0, byte 1
  *                      .
  *                      .
- *                      .
+ *                      . 3 -+- ODH2
  *                      . 2 -+
  *                      . 1  |- Compress
  *                      . 0 _+
@@ -116,7 +116,23 @@ static void write_odh(void *buf, const struct odh *odh, uint8_t flags);
  *                      .
  *                      .
  *                      .
- * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _
+ * _ _ _ _ _ _ _ _ _ _ _._ _ _ _ _ _ _ _ 
+ *                      . idx 7, byte 8  (
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ *                      .
+ * _ _ _ _ _ _ _ _ _ _ _.
+ 
+ *
+ * OKAY NOTE TO SELF:
+ * Not sure if i want to put insert-timestamp
+ * where length used to be so that length can remain
+ * at the end .. instead i could keep length in-place
+ * and expand it a bit so we get 4Gb records & blobs.
+ *
  */
 
 /* Return 1 if ip-updates are enabled.  Does not care about schema-change */
