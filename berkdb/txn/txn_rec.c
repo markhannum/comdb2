@@ -1052,6 +1052,8 @@ __txn_ckp_recover(dbenv, dbtp, lsnp, op, info)
 	if ((ret = __txn_ckp_read(dbenv, dbtp->data, &argp)) != 0)
 		return (ret);
 
+	normalize_rectype(&argp->type);
+
 	if (op == DB_TXN_BACKWARD_ROLL) {
 		DB_LOGC *logc;
 		DB_LSN last_ckp = argp->last_ckp;
@@ -1093,14 +1095,14 @@ __txn_ckp_recover(dbenv, dbtp, lsnp, op, info)
 			if (argp->rep_gen > rep->gen) {
 			/* Tunable because without txn_ckp_recovery, a normal ckp can cause
 			 * a fresh full-recovered database to become master incorrectly */
-				if (gbl_retrieve_gen_from_ckp) {
+				if (gbl_retrieve_gen_from_ckp && argp->type == DB___txn_ckp) {
 					__rep_set_gen(dbenv, __func__, __LINE__, argp->rep_gen);
 					__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 					gbl_recovery_gen = rep->gen;
 				}
 			}
 
-			if (argp->rep_gen > rep->recover_gen)
+			if (argp->rep_gen > rep->recover_gen && argp->type == DB___txn_ckp)
 				rep->recover_gen = argp->rep_gen;
 		}
 		__log_flush(dbenv, NULL);
