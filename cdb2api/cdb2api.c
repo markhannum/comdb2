@@ -8888,12 +8888,17 @@ static int cdb2_add_ssl_session(cdb2_hndl_tp *hndl)
     return 0;
 }
 
+int comdb2_cheapstack_char_array(char *str, int maxln);
+static char last_open[1024];
+
 int cdb2_open(cdb2_hndl_tp **handle, const char *dbname, const char *type,
               int flags)
 {
     cdb2_hndl_tp *hndl;
     void *callbackrc;
     cdb2_event *e = NULL;
+
+    comdb2_cheapstack_char_array(last_open, sizeof(last_open));
 
     do_init_once(1);
 
