@@ -424,14 +424,15 @@ __rep_print_logmsg(dbenv, logdbt, lsnp)
  *  Called as a utility function to see places where an instance's 
  * replication generation can be changed.
  *
- * PUBLIC: void __rep_set_gen __P((DB_ENV *, const char *func, int line, int gen));
+ * PUBLIC: void __rep_set_gen __P((DB_ENV *, const char *func, int line, int gen, DB_LSN *lsn));
  */
 void
-__rep_set_gen(dbenv, func, line, gen)
+__rep_set_gen(dbenv, func, line, gen, lsn)
 	DB_ENV *dbenv;
 	const char *func;
 	int line;
 	int gen;
+    DB_LSN *lsn;
 {
 	DB_REP *db_rep;
 	REP *rep;
@@ -443,8 +444,8 @@ __rep_set_gen(dbenv, func, line, gen)
 		egen = gen + 1;
 	if (!gbl_create_mode) {
 		logmsg(LOGMSG_USER,
-				"%s line %d setting rep->gen from %d to %d, egen from %d to %d\n",
-				func, line, rep->gen, gen, rep->egen, egen);
+				"%s line %d setting rep->gen from %d to %d, egen from %d to %d LSN %d:%d\n",
+				func, line, rep->gen, gen, rep->egen, egen, lsn ? lsn->file : -1, lsn ? lsn->offset : -1);
 	}
 	rep->gen = gen;
 	rep->egen = egen;
@@ -461,7 +462,7 @@ __rep_set_gen_pp(dbenv, gen)
 	DB_ENV *dbenv;
 	uint32_t gen;
 {
-    __rep_set_gen(dbenv, __func__, __LINE__, gen);
+    __rep_set_gen(dbenv, __func__, __LINE__, gen, NULL);
 }
 
 
@@ -587,7 +588,7 @@ __rep_new_master(dbenv, cntrl, eid)
 				__db_err(dbenv, "Updating gen from %lu to %lu from master %d",
 						 (u_long)rep->gen, (u_long)cntrl->gen, eid);
 #endif
-		__rep_set_gen(dbenv, __func__, __LINE__, cntrl->gen);
+		__rep_set_gen(dbenv, __func__, __LINE__, cntrl->gen, NULL);
 		if (rep->egen <= rep->gen)
 			__rep_set_egen(dbenv, __func__, __LINE__, rep->gen + 1);
 #ifdef DIAGNOSTIC

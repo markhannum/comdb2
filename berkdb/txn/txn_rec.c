@@ -206,7 +206,7 @@ __txn_dist_commit_recover(dbenv, dbtp, lsnp, op, info)
 		rep->committed_gen = argp->generation;
 		rep->committed_lsn = *lsnp;
 		if (argp->generation > rep->gen) {
-			__rep_set_gen(dbenv, __func__, __LINE__, argp->generation);
+			__rep_set_gen(dbenv, __func__, __LINE__, argp->generation, lsnp);
 			__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 			gbl_recovery_gen = rep->gen;
 		}
@@ -379,7 +379,7 @@ __txn_dist_prepare_recover(dbenv, dbtp, lsnp, op, info)
 					rep->committed_gen = argp->generation;
 					rep->committed_lsn = *lsnp;
 					if (argp->generation > rep->gen) {
-						__rep_set_gen(dbenv, __func__, __LINE__, argp->generation);
+						__rep_set_gen(dbenv, __func__, __LINE__, argp->generation, lsnp);
 						__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 						gbl_recovery_gen = rep->gen;
 					}
@@ -472,7 +472,7 @@ __txn_regop_gen_recover(dbenv, dbtp, lsnp, op, info)
 		rep->committed_gen = argp->generation;
 		rep->committed_lsn = *lsnp;
 		if (argp->generation > rep->gen) {
-			__rep_set_gen(dbenv, __func__, __LINE__, argp->generation);
+			__rep_set_gen(dbenv, __func__, __LINE__, argp->generation, lsnp);
 			__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 			gbl_recovery_gen = rep->gen;
 		}
@@ -801,7 +801,7 @@ __txn_regop_rowlocks_recover(dbenv, dbtp, lsnp, op, info)
 		rep->committed_gen = argp->generation;
 		rep->committed_lsn = *lsnp;
 		if (argp->generation > rep->gen) {
-			__rep_set_gen(dbenv, __func__, __LINE__, argp->generation);
+			__rep_set_gen(dbenv, __func__, __LINE__, argp->generation, lsnp);
 			__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 			gbl_recovery_gen = rep->gen;
 		}
@@ -1094,7 +1094,7 @@ __txn_ckp_recover(dbenv, dbtp, lsnp, op, info)
 			/* Tunable because without txn_ckp_recovery, a normal ckp can cause
 			 * a fresh full-recovered database to become master incorrectly */
 				if (gbl_retrieve_gen_from_ckp) {
-					__rep_set_gen(dbenv, __func__, __LINE__, argp->rep_gen);
+					__rep_set_gen(dbenv, __func__, __LINE__, argp->rep_gen, lsnp);
 					__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 					gbl_recovery_gen = rep->gen;
 				}

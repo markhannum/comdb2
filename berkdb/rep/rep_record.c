@@ -1358,7 +1358,7 @@ __rep_process_message(dbenv, control, rec, eidp, ret_lsnp, commit_gen, newgen, n
 			logmsg(LOGMSG_USER,
 					"%s line %d setting rep->gen to %d for rectype "
 					"%d\n", __func__, __LINE__, rp->gen, rp->rectype);
-			__rep_set_gen(dbenv, __func__, __LINE__, rp->gen);
+			__rep_set_gen(dbenv, __func__, __LINE__, rp->gen, &rp->lsn);
 			gen = rp->gen;
 			if (rep->egen <= gen)
 				__rep_set_egen(dbenv, __func__, __LINE__, rep->gen + 1);
@@ -7537,7 +7537,7 @@ restart:
 	/* Increase generation before releasing recovery lock */
 	if (i_am_master) {
 		uint32_t newgen = rep->gen+(20+rand()%20);
-		__rep_set_gen(dbenv, __func__, __LINE__, newgen);
+		__rep_set_gen(dbenv, __func__, __LINE__, newgen, lsnp);
 	}
 
 	logmsg(LOGMSG_INFO, "%s finished truncate, trunclsnp is [%d:%d]\n", __func__,

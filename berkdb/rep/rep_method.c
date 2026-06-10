@@ -341,12 +341,12 @@ __rep_start(dbenv, dbt, gen, flags)
 				if (!gbl_fullrecovery || gbl_reproduce_ckp_bug) {
 					if (rep->w_gen > rep->recover_gen) {
 						++rep->w_gen;
-						__rep_set_gen(dbenv, __func__, __LINE__, rep->w_gen);
+						__rep_set_gen(dbenv, __func__, __LINE__, rep->w_gen, NULL);
 					} else if (rep->gen > rep->recover_gen) {
-						__rep_set_gen(dbenv, __func__, __LINE__, rep->gen + 1);
+						__rep_set_gen(dbenv, __func__, __LINE__, rep->gen + 1, NULL);
 					} else {
 						__rep_set_gen(dbenv, __func__, __LINE__, 
-								rep->recover_gen + 1);
+								rep->recover_gen + 1, NULL);
 					}
 				} else {
 					logmsg(LOGMSG_USER, "%s line %d keeping gen %d for full recovery\n", __func__, __LINE__, rep->gen);
@@ -359,12 +359,12 @@ __rep_start(dbenv, dbt, gen, flags)
 					logmsg(LOGMSG_DEBUG, "%s line %d setting gen to arg %d "
 							"current egen is %d\n", __func__, __LINE__, gen, 
 							rep->egen);
-					__rep_set_gen(dbenv, __func__, __LINE__, gen);
+					__rep_set_gen(dbenv, __func__, __LINE__, gen, NULL);
 				} else if (rep->egen > rep->gen) {
 					if (!gbl_fullrecovery || gbl_reproduce_ckp_bug) {
 						logmsg(LOGMSG_DEBUG, "%s line %d setting gen to rep->egen "
 								"%d\n", __func__, __LINE__, rep->egen);
-						__rep_set_gen(dbenv, __func__, __LINE__, rep->egen);
+						__rep_set_gen(dbenv, __func__, __LINE__, rep->egen, NULL);
 					} else {
 						logmsg(LOGMSG_USER, "%s line %d keeping gen %d for full recovery\n", __func__, __LINE__, rep->gen);
 					}
@@ -374,7 +374,7 @@ __rep_start(dbenv, dbt, gen, flags)
 			} else if (rep->gen == 0) {
 				logmsg(LOGMSG_DEBUG, "%s line %d setting gen to recover_gen + 1 "
 						"%d\n", __func__, __LINE__, rep->recover_gen + 1);
-				__rep_set_gen(dbenv, __func__, __LINE__, rep->recover_gen + 1);
+				__rep_set_gen(dbenv, __func__, __LINE__, rep->recover_gen + 1, NULL);
 			}
 			if (F_ISSET(rep, REP_F_MASTERELECT)) {
 				__rep_elect_done(dbenv, rep, 0, __func__, __LINE__);
@@ -1190,7 +1190,7 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 		rep->committed_lsn = *lsn = curlsn;
 		rep->committed_gen = *gen = txn_ckp_args->rep_gen;
 		if (rep->gen < rep->committed_gen) {
-			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen);
+			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen, NULL);
 			__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 		}
 		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
@@ -1204,7 +1204,7 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 		rep->committed_lsn = *lsn = curlsn;
 		rep->committed_gen = *gen = txn_gen_args->generation;
 		if (rep->gen < rep->committed_gen) {
-			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen);
+			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen, NULL);
 			__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 		}
 		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
@@ -1219,7 +1219,7 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 		rep->committed_lsn = *lsn = curlsn;
 		rep->committed_gen = *gen = txn_dist_prepare_args->generation;
 		if (rep->gen < rep->committed_gen)
-			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen);
+			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen, NULL);
 		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 		__os_free(dbenv, txn_dist_prepare_args);
 	} else if (rectype == DB___txn_regop_rowlocks ||
@@ -1232,7 +1232,7 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 		rep->committed_lsn = *lsn = curlsn;
 		rep->committed_gen = *gen = txn_rl_args->generation;
 		if (rep->gen < rep->committed_gen) {
-			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen);
+			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen, NULL);
 			__rep_set_log_gen(dbenv, __func__, __LINE__, rep->gen);
 		}
 		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
@@ -1246,7 +1246,7 @@ __retrieve_logged_generation_commitlsn(dbenv, lsn, gen)
 		rep->committed_lsn = *lsn = curlsn;
 		rep->committed_gen = *gen = txn_dist_commit_args->generation;
 		if (rep->gen < rep->committed_gen)
-			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen);
+			__rep_set_gen(dbenv, __func__, __LINE__, rep->committed_gen, NULL);
 		MUTEX_UNLOCK(dbenv, db_rep->rep_mutexp);
 		__os_free(dbenv, txn_dist_commit_args);
 	}
