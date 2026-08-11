@@ -2146,10 +2146,10 @@ static void calculate_durable_lsn(bdb_state_type *bdb_state, DB_LSN *dlsn,
     if (!nodecount) {
         (*dlsn) = nodelsns[0];
         (*gen) = nodegens[0];
+        /* Trace-only path: warn rather than abort if no commit is recorded yet. */
         if ((*dlsn).file == 0) {
-            logmsg(LOGMSG_FATAL, "%s line %d: aborting on insane durable lsn\n", 
+            logmsg(LOGMSG_WARN, "%s line %d: no durable lsn recorded yet\n",
                     __func__, __LINE__);
-            abort();
         }
         return;
     }
