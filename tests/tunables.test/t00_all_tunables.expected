@@ -780,6 +780,7 @@
 (name='physrep_source_dbnum', description='Physical replication source cluster db number.', type='INTEGER', value='0', read_only='Y')
 (name='physrep_source_host', description='List of physical replication source cluster hosts.', type='STRING', value=NULL, read_only='Y')
 (name='physrep_update_registry_interval', description='Physrep update-registry interval. (Default: 60)', type='INTEGER', value='60', read_only='N')
+(name='physrep_verify_cksum_chain', description='Physrep checks that each record it applies chains to its own last record, when the source writes log_cksum_prev.  On a mismatch it re-anchors against the source. (Default: on)', type='BOOLEAN', value='ON', read_only='N')
 (name='physrep_verify_source_range', description='Physrep verifies a candidate source's live log range covers its LSN before connecting. Schema-independent (queries the source directly); no compatibility concerns. (Default: on)', type='BOOLEAN', value='ON', read_only='N')
 (name='plannedsc', description='Use planned schema change by default', type='BOOLEAN', value='ON', read_only='N')
 (name='planner_effort', description='Planner effort (try harder) levels. (Default: 1)', type='INTEGER', value='1', read_only='N')

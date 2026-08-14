@@ -767,6 +767,19 @@ static LOG_INFO handle_record(cdb2_hndl_tp *repl_db, LOG_INFO prev_info)
         physrep_out_of_order = 1;
         return prev_info;
     }
+
+    /*
+     * Verify the record follows on from our own last one before applying it.
+     * Re-anchoring is the established response, and handle_truncation() will
+     * find where we actually diverge.
+     */
+    if (physrep_verify_prev_cksum(thedb->bdb_env, blob, blob_len)) {
+        physrep_logmsg(LOGMSG_WARN, "%s:%d: record {%u:%u} does not follow our log, re-anchoring\n", __func__,
+                       __LINE__, file, offset);
+        physrep_out_of_order = 1;
+        return prev_info;
+    }
+
     if (gbl_physrep_debug) {
         physrep_logmsg(LOGMSG_USER, "%s:%d: Processing record (lsn %d:%d)\n",
                        __func__, __LINE__, file, offset);

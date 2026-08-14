@@ -1150,6 +1150,32 @@ __log_region_destroy(dbenv, infop)
 }
 
 /*
+ * __log_last_cksum --
+ *	Checksum of the last record in the log: what the next record's
+ *	prev_cksum has to match.
+ *
+ * PUBLIC: int __log_last_cksum __P((DB_ENV *, u_int32_t *));
+ */
+int
+__log_last_cksum(dbenv, cksump)
+	DB_ENV *dbenv;
+	u_int32_t *cksump;
+{
+	DB_LOG *dblp;
+	LOG *lp;
+
+	if ((dblp = dbenv->lg_handle) == NULL)
+		return (EINVAL);
+	lp = dblp->reginfo.primary;
+
+	R_LOCK(dbenv, &dblp->reginfo);
+	*cksump = lp->last_cksum;
+	R_UNLOCK(dbenv, &dblp->reginfo);
+
+	return (0);
+}
+
+/*
  * __log_vtruncate
  *	This is a virtual truncate.  We set up the log indicators to
  * make everyone believe that the given record is the last one in the

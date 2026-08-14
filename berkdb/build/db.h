@@ -3382,6 +3382,8 @@ void __log_txn_lsn(DB_ENV *, DB_LSN *, u_int32_t *, u_int32_t *);
 
 int normalize_rectype(u_int32_t* rectype);
 
+int __log_last_cksum(DB_ENV *dbenv, u_int32_t *cksump);
+
 int bless_btree(char *input_file, char *output_file);
 
 //#################################### THREAD POOL FOR LOADING PAGES ASYNCHRNOUSLY (WELL NO CALLBACK YET.....) 

@@ -553,6 +553,7 @@ extern int gbl_physrep_max_rollback;
 extern int gbl_physrep_filter_by_class;
 extern int gbl_physrep_pollms;
 extern int gbl_physrep_verify_source_range;
+extern int gbl_physrep_verify_cksum_chain;
 extern int gbl_physrep_no_source_alarm_threshold;
 
 /* source-name / host is from lrl */

@@ -677,6 +677,78 @@ int physrep_bdb_wait_for_seqnum(bdb_state_type *bdb_state, DB_LSN *lsn, void *da
     return bdb_wait_for_seqnum_from_all(bdb_state, (seqnum_type *)&seqnum);
 }
 
+int gbl_physrep_verify_cksum_chain = 1;
+
+/* Consecutive mismatches before we stop believing the chain check. */
+#define PHYSREP_MAX_CKSUM_CHAIN_FAILURES 3
+static __thread int cksum_chain_failures = 0;
+
+/*
+ * physrep_verify_prev_cksum --
+ *
+ * Does this record follow on from the last one we wrote?
+ *
+ * A chained record carries the checksum of the record before it, so a
+ * mismatch says the source's history diverges from ours right here.  Without
+ * this we would only notice by proxy -- the source's log-cursor generation
+ * changing, a generation bump, a sentinel lsn -- none of which sees a record
+ * from a different history arriving at an LSN we happen to expect.
+ *
+ * Returns 1 on a mismatch.  Returns 0 when the record follows on, when it
+ * carries no checksum (an unchained source), or when we have nothing to chain
+ * to: a spurious re-anchor is the exact cost this feature exists to avoid, so
+ * anything ambiguous is allowed through.
+ */
+int physrep_verify_prev_cksum(bdb_state_type *bdb_state, void *blob, int blob_len)
+{
+    u_int32_t rectype, prev_cksum, last_cksum = 0, off;
+
+    if (!gbl_physrep_verify_cksum_chain || blob == NULL || blob_len < (int)sizeof(rectype))
+        return 0;
+
+    LOGCOPY_32(&rectype, blob);
+    if (!DB_RECTYPE_HAS_CKSUM_PREV(rectype))
+        return 0;
+
+    off = DB_RECTYPE_CKSUM_PREV_OFF(rectype);
+    if (blob_len < (int)(off + sizeof(prev_cksum)))
+        return 0;
+    LOGCOPY_32(&prev_cksum, (u_int8_t *)blob + off);
+
+    if (__log_last_cksum(bdb_state->dbenv, &last_cksum) != 0)
+        return 0;
+
+    /* Chain root: our log starts here, so there is nothing to follow on from. */
+    if (last_cksum == 0)
+        return 0;
+
+    if (prev_cksum == last_cksum) {
+        cksum_chain_failures = 0;
+        return 0;
+    }
+
+    /*
+     * Re-anchoring is only useful if it changes something.  If the source and
+     * our log genuinely agree byte for byte, handle_truncation() will decide
+     * there is nothing to unwind, last_cksum will not move, and we would land
+     * back here on the same record forever.  That can only happen if
+     * last_cksum is wrong for a reason divergence cannot explain, so after a
+     * few attempts stop believing the check and let the record through: a
+     * physrep that ignores this is exactly a physrep from before it existed.
+     */
+    if (++cksum_chain_failures > PHYSREP_MAX_CKSUM_CHAIN_FAILURES) {
+        physrep_logmsg(LOGMSG_ERROR,
+                       "%s: chain check failed %d times running (record chains to %08x, my last is %08x); "
+                       "ignoring it rather than re-anchoring forever\n",
+                       __func__, cksum_chain_failures, prev_cksum, last_cksum);
+        return 0;
+    }
+
+    physrep_logmsg(LOGMSG_WARN, "%s: record chains to %08x, my last record is %08x\n", __func__, prev_cksum,
+                   last_cksum);
+    return 1;
+}
+
 /* physrep logic to ignore replication traffic for some tables */
 static hash_t *table_hash = NULL;
 static pthread_mutex_t ignore_lk = PTHREAD_MUTEX_INITIALIZER;

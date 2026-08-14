@@ -1884,6 +1884,11 @@ REGISTER_TUNABLE("tranlog_maxpoll", "Tranlog timeout in seconds for blocking pol
                  &gbl_tranlog_maxpoll, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("physrep_debug", "Print extended physrep trace. (Default: off)", TUNABLE_BOOLEAN, &gbl_physrep_debug,
                  0, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("physrep_verify_cksum_chain",
+                 "Physrep checks that each record it applies chains to its own last record, when the source writes "
+                 "log_cksum_prev.  On a mismatch it re-anchors against the source. (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_physrep_verify_cksum_chain, 0, NULL, NULL, NULL, NULL);
+
 REGISTER_TUNABLE("physrep_exit_on_invalid_logstream", "Exit physreps on invalid logstream.  (Default: off)",
                  TUNABLE_BOOLEAN, &gbl_physrep_exit_on_invalid_logstream, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("physrep_fanout",

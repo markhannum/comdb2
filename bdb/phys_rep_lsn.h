@@ -33,4 +33,7 @@ int truncate_log_lock(struct bdb_state_tag *, unsigned int file,
 int find_log_timestamp(struct bdb_state_tag *, time_t time, unsigned int *file,
                        unsigned int *offset);
 
+/* Return 1 if this record does not chain to our own last log record */
+int physrep_verify_prev_cksum(struct bdb_state_tag *, void *blob, int blob_len);
+
 #endif
