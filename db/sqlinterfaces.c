@@ -4908,6 +4908,17 @@ void sqlengine_work_appsock(struct sqlthdstate *thd, struct sqlclntstate *clnt)
         clnt->osql.timings.query_finished = osql_log_time();
         osql_log_time_done(clnt);
         clnt_change_state(clnt, CONNECTION_IDLE);
+        /* clear before signal: signal hands clnt back to the event thread.
+         * nested replay call: outer frame still owns thd */
+        if (!clnt->osql.in_replay_nested) {
+            Pthread_mutex_lock(&gbl_sql_lock);
+            sqlthd->clnt = NULL;
+            Pthread_mutex_unlock(&gbl_sql_lock);
+            /* sql_lk: watchdog reads clnt->thd under it */
+            Pthread_mutex_lock(&clnt->sql_lk);
+            clnt->thd = NULL; /* thd is about to go away */
+            Pthread_mutex_unlock(&clnt->sql_lk);
+        }
         signal_clnt_as_done(clnt);
         return;
     }
@@ -4960,6 +4971,17 @@ done:
     osql_log_time_done(clnt);
     clnt_change_state(clnt, CONNECTION_IDLE);
     debug_close_clnt(clnt);
+    /* clear before signal: signal hands clnt back to the event thread.
+     * nested replay call: outer frame still owns thd */
+    if (!clnt->osql.in_replay_nested) {
+        Pthread_mutex_lock(&gbl_sql_lock);
+        sqlthd->clnt = NULL;
+        Pthread_mutex_unlock(&gbl_sql_lock);
+        /* sql_lk: watchdog reads clnt->thd under it */
+        Pthread_mutex_lock(&clnt->sql_lk);
+        clnt->thd = NULL; /* thd is about to go away */
+        Pthread_mutex_unlock(&clnt->sql_lk);
+    }
     signal_clnt_as_done(clnt);
 
     thrman_setid(thrman_self(), "[done]");
