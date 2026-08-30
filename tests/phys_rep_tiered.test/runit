@@ -2312,64 +2312,143 @@ function physrep_skip_noop_truncation_test
     rm -f $stopfile
 }
 
-# A clustered physrep must not skip while log_gen is ahead of rep->gen: only the
-# rewind lifts rep->gen and lets its own replicants move again.  Bump the source
-# generation, then check every node of the physrep cluster still advances.
+# Count "Rewind to lsn" across every node of the physrep cluster.
+function count_clus_rewinds()
+{
+    local total=0 node
+    for node in $CLUSTER ; do
+        let total=total+$(egrep "Rewind to lsn" $TESTDIR/logs/${REPL_CLUS_DBNAME}.${node}.log | wc -l)
+    done
+    echo $total
+}
+
+# Block until every node of the physrep cluster sees $1 rows of ckgenguard.
+function block_clus_ckgenguard()
+{
+    local want=$1 ctx=$2 node cnt x
+    for node in $CLUSTER ; do
+        cnt=0
+        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} --host $node $REPL_CLUS_DBNAME "select count(*) from ckgenguard" 2>/dev/null)
+        while [[ "$x" != "$want" ]]; do
+            sleep 1
+            let cnt=cnt+1
+            if [[ $cnt -gt 120 ]]; then
+                cleanFailExit "$REPL_CLUS_DBNAME on $node stalled at '$x' (want $want) $ctx"
+            fi
+            x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} --host $node $REPL_CLUS_DBNAME "select count(*) from ckgenguard" 2>/dev/null)
+        done
+        echo "$REPL_CLUS_DBNAME on $node reached $want $ctx"
+    done
+}
+
+# A clustered physrep only freezes once the source's generation passes rep->gen,
+# so while the headroom recovery left behind lasts, a source generation change
+# needs no rewind.  Bump it and check the cluster advances -- then disable the
+# skip to prove the guard is still there.
 function physrep_gen_guard_test
 {
     echo "== physrep_gen_guard_test =="
     local name="${REPL_CLUS_DBNAME}"
-    local rw_before rw_after x cnt
+    local hdrmsg="rewinding to move my cluster to a higher generation"
+    local rw_before rw_after hdr_before hdr_after node
 
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table if not exists ckgenguard(a int)"
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into ckgenguard select * from generate_series(1, 100)"
+    block_clus_ckgenguard 100 "before the generation change"
 
-    for node in $CLUSTER ; do
-        cnt=0
-        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} --host $node $name "select count(*) from ckgenguard" 2>/dev/null)
-        while [[ "$x" != "100" ]]; do
-            sleep 1
-            let cnt=cnt+1
-            if [[ $cnt -gt 60 ]]; then
-                cleanFailExit "$name on $node never caught up (count='$x')"
-            fi
-            x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} --host $node $name "select count(*) from ckgenguard" 2>/dev/null)
-        done
-    done
+    rw_before=$(count_clus_rewinds)
+    hdr_before=$(egrep "$hdrmsg" $TESTDIR/logs/${name}.*.log | wc -l)
 
-    rw_before=0
-    for node in $CLUSTER ; do
-        let rw_before=rw_before+$(egrep "Rewind to lsn" $TESTDIR/logs/${name}.${node}.log | wc -l)
-    done
-
-    # New source generation: the physrep sees a higher rec-gen and re-truncates.
+    # New source generation.  With headroom left this must not rewind for gen.
     downgradeonce $DBNAME
     sleep 10
     $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into ckgenguard select * from generate_series(1, 100)"
 
-    # The whole physrep cluster must reach 200, not just its master.
+    # The freeze detector: a stuck replicant never reaches 200 and hangs here.
+    block_clus_ckgenguard 200 "after the source changed generation"
+
+    rw_after=$(count_clus_rewinds)
+    hdr_after=$(egrep "$hdrmsg" $TESTDIR/logs/${name}.*.log | wc -l)
+
+    # Not the raw rewind count: the source downgrade truncates the source's own
+    # log, so a trim to the anchor here is legitimate.  Only a gen-forced rewind
+    # is wrong -- with headroom left, a source generation change is not our problem.
+    echo "$name rewinds across the generation change: $rw_before -> $rw_after"
+    if [[ "$hdr_after" != "$hdr_before" ]]; then
+        cleanFailExit "$name rewound for generation headroom after a single source downgrade ($hdr_before -> $hdr_after)"
+    fi
+    echo "$name advanced past the generation change without a headroom rewind"
+
+    # The guard itself: with the skip disabled we must fall back to the old
+    # unconditional rewind, and the cluster must still converge.
+    echo "== physrep_gen_guard_test: skip disabled =="
     for node in $CLUSTER ; do
-        cnt=0
-        x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} --host $node $name "select count(*) from ckgenguard" 2>/dev/null)
-        while [[ "$x" != "200" ]]; do
-            sleep 1
-            let cnt=cnt+1
-            if [[ $cnt -gt 120 ]]; then
-                cleanFailExit "$name on $node stalled at '$x' after the source changed generation"
-            fi
-            x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} --host $node $name "select count(*) from ckgenguard" 2>/dev/null)
-        done
-        echo "$name on $node advanced past the generation change"
+        $CDB2SQL_EXE ${CDB2_OPTIONS} --host $node $name "put tunable physrep_skip_noop_truncation 0"
     done
 
-    rw_after=0
-    for node in $CLUSTER ; do
-        let rw_after=rw_after+$(egrep "Rewind to lsn" $TESTDIR/logs/${name}.${node}.log | wc -l)
-    done
+    rw_before=$(count_clus_rewinds)
+    downgradeonce $DBNAME
+    sleep 10
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into ckgenguard select * from generate_series(1, 100)"
+    block_clus_ckgenguard 300 "with the skip disabled"
+
+    rw_after=$(count_clus_rewinds)
     if [[ "$rw_after" == "$rw_before" ]]; then
-        cleanFailExit "$name skipped the rewind across a generation change (rewinds=$rw_after)"
+        cleanFailExit "$name skipped the rewind with physrep_skip_noop_truncation off (rewinds=$rw_after)"
     fi
-    echo "$name rewound across the generation change ($rw_before -> $rw_after)"
+    echo "$name rewound with the skip disabled ($rw_before -> $rw_after)"
+
+    for node in $CLUSTER ; do
+        $CDB2SQL_EXE ${CDB2_OPTIONS} --host $node $name "put tunable physrep_skip_noop_truncation 1"
+    done
+}
+
+# The worker only runs on the physrep cluster's own master, so a master swing
+# starts a fresh one.  Unless its highest_gen is seeded from the anchor, the first
+# record it streams reads as a source master change and it rewinds for nothing.
+function physrep_cluster_master_swing_test
+{
+    echo "== physrep_cluster_master_swing_test =="
+    local name="${REPL_CLUS_DBNAME}"
+    local hdrmsg="rewinding to move my cluster to a higher generation"
+    local clus_master newmaster rw_before rw_after hdr_before hdr_after cnt
+
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "create table if not exists ckgenguard(a int)"
+    block_clus_ckgenguard 300 "before the physrep master swing"
+
+    clus_master=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} $name --host $firstNode "select host from comdb2_cluster where is_master='Y'")
+    echo "physrep cluster master is $clus_master"
+
+    rw_before=$(count_clus_rewinds)
+    hdr_before=$(egrep "$hdrmsg" $TESTDIR/logs/${name}.*.log | wc -l)
+
+    newmaster=$clus_master
+    cnt=0
+    while [[ "$newmaster" == "$clus_master" ]]; do
+        $CDB2SQL_EXE ${CDB2_OPTIONS} --host $clus_master $name "exec procedure sys.cmd.send('downgrade')"
+        sleep 5
+        let cnt=cnt+1
+        if [[ $cnt -gt 12 ]]; then
+            cleanFailExit "$name never moved off master $clus_master"
+        fi
+        newmaster=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} $name --host $firstNode "select host from comdb2_cluster where is_master='Y'")
+    done
+    echo "physrep cluster master moved $clus_master -> $newmaster"
+
+    # The new master's worker picks up the stream; the cluster must follow it.
+    $CDB2SQL_EXE $CDB2_OPTIONS $DBNAME default "insert into ckgenguard select * from generate_series(1, 100)"
+    block_clus_ckgenguard 400 "after the physrep master swing"
+
+    rw_after=$(count_clus_rewinds)
+    hdr_after=$(egrep "$hdrmsg" $TESTDIR/logs/${name}.*.log | wc -l)
+
+    # As above -- a re-registering worker can land on a source node behind our
+    # end-of-log and legitimately trim.  The seeded highest_gen is what must hold.
+    echo "$name rewinds across its own master swing: $rw_before -> $rw_after"
+    if [[ "$hdr_after" != "$hdr_before" ]]; then
+        cleanFailExit "$name rewound for generation headroom across its own master swing ($hdr_before -> $hdr_after)"
+    fi
+    echo "$name followed its own master swing without a headroom rewind"
 }
 
 # DRQS 185276960: exercise the production rollout end to end, in the order it will
@@ -3562,6 +3641,12 @@ function run_tests
     testcase="physrep_gen_guard_test"
     testcase_preamble $testcase
     physrep_gen_guard_test
+    testcase_finish $testcase
+
+    # Runs after physrep_gen_guard_test: it inherits its ckgenguard row count.
+    testcase="physrep_cluster_master_swing_test"
+    testcase_preamble $testcase
+    physrep_cluster_master_swing_test
     testcase_finish $testcase
 
     testcase="tranlog_timeout"
