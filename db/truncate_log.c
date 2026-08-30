@@ -24,8 +24,9 @@ void truncate_unlock(void)
     Pthread_mutex_unlock(&physrep_truncate_lock);
 }
 
-LOG_INFO handle_truncation(cdb2_hndl_tp *repl_db, LOG_INFO latest_info, int source_gen_changed)
+LOG_INFO handle_truncation(cdb2_hndl_tp *repl_db, LOG_INFO latest_info, int64_t source_gen)
 {
+    uint32_t my_gen = bdb_get_rep_gen(thedb->bdb_env);
     LOG_INFO match_lsn = find_match_lsn(thedb->bdb_env, repl_db, latest_info);
 
     if (match_lsn.file == 0) {
@@ -34,13 +35,13 @@ LOG_INFO handle_truncation(cdb2_hndl_tp *repl_db, LOG_INFO latest_info, int sour
         return match_lsn;
     }
 
-    /* Only the rewind's recovery + rep_start lift rep->gen and broadcast a new
-     * source generation to our replicants; until then we ignore their messages
-     * and they sit at their current LSN.  A standalone physrep has none, so the
-     * skew is harmless.  The worker flags the gen change before applying the
-     * record that carries it, so logged-gen is not ahead yet -- check both. */
+    /* Our cluster runs at rep->gen but applying a source commit lifts only log_gen, so the
+     * physrep gen check freezes us once the source's generation passes rep->gen.  What
+     * unfreezes us is the generation bump recovery leaves behind, not the rewind's log work:
+     * while that headroom lasts there is nothing to fix.  The worker reports the new
+     * generation before applying the record carrying it, so log_gen lags -- check both. */
     int clustered = (thedb->nsiblings > 1);
-    int rewind_for_gen = clustered && (source_gen_changed || physrep_logged_gen_ahead(thedb->bdb_env));
+    int rewind_for_gen = clustered && (source_gen > my_gen || physrep_logged_gen_ahead(thedb->bdb_env));
 
     /* The anchor is only the last commit; the tail past it normally matches the
      * source too.  Compare forward: a full match means nothing to unwind, and a
@@ -56,8 +57,9 @@ LOG_INFO handle_truncation(cdb2_hndl_tp *repl_db, LOG_INFO latest_info, int sour
         }
         match_lsn = last_match;
     } else if (gbl_physrep_skip_noop_truncation) {
-        logmsg(LOGMSG_USER, "%s: %s, rewinding to move my cluster to the new generation\n", __func__,
-               source_gen_changed ? "source generation changed" : "log_gen ahead of rep-gen");
+        logmsg(LOGMSG_USER, "%s: %s my cluster's generation %u, rewinding to move my cluster to a higher generation\n",
+               __func__, (source_gen > my_gen) ? "source generation has passed" : "logged generation is ahead of",
+               my_gen);
     }
 
     if (gbl_physrep_debug) {
