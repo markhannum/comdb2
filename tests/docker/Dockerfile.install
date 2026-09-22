@@ -45,6 +45,7 @@ RUN apt-get update && \
     tcl-dev \
     time \
     tzdata \
+    tzdata-legacy \
     valgrind \
     vim \
     uuid-dev && \
