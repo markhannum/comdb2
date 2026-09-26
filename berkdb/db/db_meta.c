@@ -298,6 +298,74 @@ __db_dump_freepages(DB *dbp, FILE *out)
     return rc;
 }
 
+#define	FS_ISSET(bm, pg)	((bm)[(pg) >> 3] & (1 << ((pg) & 7)))
+#define	FS_SET(bm, pg)		((bm)[(pg) >> 3] |= (1 << ((pg) & 7)))
+
+/*
+ * __db_freespace_stat --
+ *	Walk the free list and summarize how much of the file is reclaimable.
+ */
+int
+__db_freespace_stat(DB *dbp, struct __db_freespace_stat *st)
+{
+	DB_ENV *dbenv;
+	DB_MPOOLFILE *mpf;
+	DBMETA *meta;
+	PAGE *h;
+	db_pgno_t pg, next, last_pgno;
+	u_int32_t mbytes, bytes;
+	u_int8_t *bitmap;
+	int ret;
+
+	dbenv = dbp->dbenv;
+	mpf = dbp->mpf;
+	memset(st, 0, sizeof(*st));
+
+	pg = PGNO_BASE_MD;
+	if ((ret = __memp_fget(mpf, &pg, 0, &meta)) != 0)
+		return (ret);
+	st->pagesize = meta->pagesize;
+	st->last_pgno = last_pgno = meta->last_pgno;
+	st->free_head = pg = meta->free;
+	if ((ret = __memp_fput(mpf, meta, 0)) != 0)
+		return (ret);
+
+	if (__os_ioinfo(dbenv, NULL, mpf->fhp, &mbytes, &bytes, NULL) == 0)
+		st->file_bytes = (u_int64_t)mbytes * MEGABYTE + bytes;
+
+	if ((ret = __os_calloc(dbenv, 1, last_pgno / 8 + 1, &bitmap)) != 0)
+		return (ret);
+
+	/* No locks are held, so stop on a racing allocation or a cycle. */
+	while (pg != PGNO_INVALID) {
+		if (pg > last_pgno || FS_ISSET(bitmap, pg)) {
+			st->incomplete = 1;
+			break;
+		}
+		if ((ret = __memp_fget(mpf, &pg, 0, &h)) != 0)
+			goto err;
+		if (TYPE(h) != P_INVALID) {
+			st->incomplete = 1;
+			ret = __memp_fput(mpf, h, 0);
+			goto tail;
+		}
+		next = NEXT_PGNO(h);
+		if ((ret = __memp_fput(mpf, h, 0)) != 0)
+			goto err;
+		FS_SET(bitmap, pg);
+		st->nfree++;
+		if (next != PGNO_INVALID && next > pg)
+			st->nascending++;
+		pg = next;
+	}
+
+tail:	for (pg = last_pgno; pg > PGNO_BASE_MD && FS_ISSET(bitmap, pg); pg--)
+		st->ntail_free++;
+
+err:	__os_free(dbenv, bitmap);
+	return (ret);
+}
+
 /* for debugging */
 int __lock_dump_region_int(DB_ENV *, const char *area, FILE *,
     int just_active_locks);

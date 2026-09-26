@@ -3400,6 +3400,19 @@ int __rep_get_eid(DB_ENV *dbenv,char **eid);
 unsigned int __berkdb_count_freepages(int fd);
 void __berkdb_count_freeepages_abort(void);
 
+/* Free-list summary used to judge how much of a btree file is reclaimable. */
+struct __db_freespace_stat {
+	u_int32_t pagesize;
+	db_pgno_t last_pgno;
+	db_pgno_t free_head;
+	u_int64_t nfree;	/* pages on the free list */
+	u_int64_t ntail_free;	/* free pages contiguous with last_pgno */
+	u_int64_t nascending;	/* free-list links which point to a higher pgno */
+	u_int64_t file_bytes;
+	int incomplete;		/* walk raced with an allocation; counts are partial */
+};
+int __db_freespace_stat(DB *dbp, struct __db_freespace_stat *st);
+
 int get_committed_lsns(DB_ENV *dbenv, DB_LSN **lsns, int *n_lsns,
 	int epoch, int file, int offset);
 

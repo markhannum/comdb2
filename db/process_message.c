@@ -134,6 +134,7 @@ int bdb_dump_logical_tranlist(void *state, FILE *f);
 void replay_stat(void);
 void bdb_dump_freelist(FILE *out, int datafile, int stripe, int ixnum,
                        bdb_state_type *bdb_state);
+void bdb_dump_freespace(FILE *out, bdb_state_type *bdb_state);
 void comdb2_dump_blockers(DB_ENV *);
 void delete_log_files(bdb_state_type *bdb_state);
 void malloc_stats();
@@ -811,6 +812,27 @@ clipper_usage:
            logmsg(LOGMSG_USER, "freelist <tablename> datafile <number>  stripe <number>\n");
            logmsg(LOGMSG_USER, "freelist <tablename> index    <number>\n");
            logmsg(LOGMSG_USER, "freelist <tablename> all\n");
+        }
+    }
+    /* freespace [tablename]: free-list stats for a table's btrees (all tables if omitted) */
+    else if (tokcmp(tok, ltok, "freespace") == 0) {
+        char table[MAXTABLELEN];
+        struct dbtable *db;
+        int ii;
+
+        tok = segtok(line, lline, &st, &ltok);
+        if (ltok > 0) {
+            tokcpy0(tok, ltok, table, sizeof(table));
+            if (!(db = get_dbtable_by_name(table))) {
+                logmsg(LOGMSG_ERROR, "Couldn't open table '%s'\n", table);
+            } else {
+                bdb_dump_freespace(stdout, db->handle);
+            }
+        } else {
+            for (ii = 0; ii < thedb->num_dbs; ii++) {
+                if (thedb->dbs[ii]->dbtype == DBTYPE_TAGGED_TABLE)
+                    bdb_dump_freespace(stdout, thedb->dbs[ii]->handle);
+            }
         }
     }
     /*
