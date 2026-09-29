@@ -41,6 +41,7 @@ set(BERK_C
   db/db_conv.c
   db/db_dispatch.c
   db/db_dup.c
+  db/db_freelist.c
   db/db_iface.c
   db/db_join.c
   db/db_meta.c

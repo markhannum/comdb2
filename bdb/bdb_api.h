@@ -1028,6 +1028,10 @@ int bdb_wait_for_seqnum_from_n(bdb_state_type *bdb_state, seqnum_type *seqnum,
 /* returns 1 if you are the master, 0 if you are not */
 int bdb_amimaster(bdb_state_type *bdb_handle);
 
+/* Free-list stats for a table's btrees (the 'freespace' message trap) */
+void bdb_dump_freespace(FILE *out, bdb_state_type *bdb_state);
+
+
 /* returns nodeid of master, -1 if there is no master */
 char *bdb_whoismaster(bdb_state_type *bdb_handle);
 

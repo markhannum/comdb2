@@ -506,6 +506,41 @@ void bdb_dump_freelist(FILE *out, int datafile, int stripe, int ixnum,
     }
 }
 
+static void bdb_dump_freespace_file(FILE *out, bdb_state_type *bdb_state, const char *what, int num, int stripe,
+                                    DB *dbp)
+{
+    struct __db_freespace_stat st;
+    int rc;
+
+    if (dbp == NULL)
+        return;
+    if ((rc = __db_freespace_stat(dbp, &st)) != 0) {
+        logmsgf(LOGMSG_ERROR, out, "%s %s %d stripe %d: freespace rc %d\n", bdb_state->name, what, num, stripe, rc);
+        return;
+    }
+    logmsgf(LOGMSG_USER, out,
+            "%s %s %d stripe %d: pagesize %u last_pgno %u free %" PRIu64 " (%.1f%%) tail_free %" PRIu64
+            " sorted %.1f%% file_bytes %" PRIu64 "%s\n",
+            bdb_state->name, what, num, stripe, st.pagesize, st.last_pgno, st.nfree,
+            st.last_pgno ? 100.0 * st.nfree / st.last_pgno : 0.0, st.ntail_free,
+            st.nfree > 1 ? 100.0 * st.nascending / (st.nfree - 1) : 100.0, st.file_bytes,
+            st.incomplete ? " (incomplete)" : "");
+}
+
+/* Print free-list stats for every btree belonging to a table */
+void bdb_dump_freespace(FILE *out, bdb_state_type *bdb_state)
+{
+    int ix, df, st;
+    int numstripes = bdb_state->attr->dtastripe ? bdb_state->attr->dtastripe : 1;
+
+    for (df = 0; df < bdb_state->numdtafiles; df++) {
+        for (st = 0; st < numstripes; st++)
+            bdb_dump_freespace_file(out, bdb_state, df ? "blob" : "data", df, st, bdb_state->dbp_data[df][st]);
+    }
+    for (ix = 0; ix < bdb_state->numix; ix++)
+        bdb_dump_freespace_file(out, bdb_state, "index", ix, 0, bdb_state->dbp_ix[ix]);
+}
+
 static void bdb_state_dump(FILE *out, const char *prefix,
                            bdb_state_type *bdb_state)
 {
