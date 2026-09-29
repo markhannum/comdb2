@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+bash -n "$0" || exit 1
+
+# Snapshot reads of blobs on overflow pages must not see later updates.
+
+dbname=$1
+host=$(cdb2sql ${CDB2_OPTIONS} -tabs ${dbname} default "select comdb2_host()")
+sql="cdb2sql ${CDB2_OPTIONS} -tabs ${dbname} --host ${host}"
+nrows=20
+blobsz=100000
+
+snapsum="select id, hex(b) from t order by id"
+
+$sql "create table t(id int primary key, b blob)" || exit 1
+for i in $(seq 1 $nrows); do
+    $sql "insert into t values($i, randomblob($blobsz))" > /dev/null || exit 1
+done
+
+# Snapshot reader: read all blobs, sleep while the blobs are rewritten, read again
+$sql - > snap.out 2>&1 <<SQL &
+set transaction snapshot isolation
+begin
+$snapsum
+select sleep(10)
+$snapsum
+commit
+SQL
+pid=$!
+
+sleep 3
+for pass in 1 2 3; do
+    for i in $(seq 1 $nrows); do
+        $sql "update t set b = randomblob($blobsz) where id = $i" > /dev/null || exit 1
+    done
+done
+wait $pid || { echo "FAIL: snapshot session failed"; cat snap.out; exit 1; }
+
+# Keep only the "id<tab>hex" rows: first read, then second read
+grep -P '^\d+\t' snap.out > rows.out
+lines=$(wc -l < rows.out)
+if [[ $lines -ne $((2 * nrows)) ]]; then
+    echo "FAIL: unexpected snapshot output ($lines rows)"
+    cut -c1-80 snap.out
+    exit 1
+fi
+if ! diff <(head -n $nrows rows.out) <(tail -n $nrows rows.out) > /dev/null; then
+    echo "FAIL: snapshot read of overflow blobs changed within transaction"
+    diff <(head -n $nrows rows.out | cut -c1-40) <(tail -n $nrows rows.out | cut -c1-40)
+    exit 1
+fi
+
+
+echo "Success"
