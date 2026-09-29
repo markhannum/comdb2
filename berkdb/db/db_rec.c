@@ -1441,6 +1441,135 @@ out:
 }
 
 /*
+ * __db_pg_flmove_prior_lsn -- pgno's LSN before the pg_flmove, or NULL if untouched.
+ * PUBLIC: DB_LSN *__db_pg_flmove_prior_lsn
+ * PUBLIC:    __P((__db_pg_flmove_args *, db_pgno_t));
+ */
+DB_LSN *
+__db_pg_flmove_prior_lsn(__db_pg_flmove_args *argp, db_pgno_t pgno)
+{
+	if (pgno == PGNO_BASE_MD)
+		return (&argp->meta_lsn);
+	if (pgno == argp->pgno)
+		return (&argp->pgno_lsn);
+	if (pgno == argp->prev_pgno)
+		return (&argp->prevpg_lsn);
+	if (pgno == argp->dest_pgno)
+		return (&argp->destpg_lsn);
+	return (NULL);
+}
+
+/*
+ * __db_pg_flmove_apply -- redo or undo a pg_flmove on one page.
+ * PUBLIC: int __db_pg_flmove_apply
+ * PUBLIC:    __P((PAGE *, db_pgno_t, __db_pg_flmove_args *, DB_LSN *, int));
+ */
+int
+__db_pg_flmove_apply(PAGE *pagep, db_pgno_t pgno, __db_pg_flmove_args *argp,
+    DB_LSN *lsnp, int redo)
+{
+	DB_LSN *prior;
+	db_pgno_t next;
+
+	if ((prior = __db_pg_flmove_prior_lsn(argp, pgno)) == NULL)
+		return (ENOENT);
+
+	/* Relink: prev -> old_next, pgno -> dest_old_next, dest -> pgno */
+	if (pgno == argp->pgno)
+		next = redo ? argp->dest_old_next : argp->old_next;
+	else if (pgno == argp->prev_pgno)
+		next = redo ? argp->old_next : argp->pgno;
+	else if (pgno == argp->dest_pgno)
+		next = redo ? argp->pgno : argp->dest_old_next;
+	else
+		next = PGNO_INVALID;	/* meta which isn't prev or dest: LSN only */
+
+	if (pgno == PGNO_BASE_MD) {
+		if (argp->prev_pgno == PGNO_BASE_MD ||
+		    argp->dest_pgno == PGNO_BASE_MD)
+			((DBMETA *)pagep)->free = next;
+	} else
+		NEXT_PGNO(pagep) = next;
+
+	LSN(pagep) = redo ? *lsnp : *prior;
+	return (0);
+}
+
+/*
+ * __db_pg_flmove_recover -- recovery function for pg_flmove.
+ * PUBLIC: int __db_pg_flmove_recover
+ * PUBLIC:   __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
+ */
+int
+__db_pg_flmove_recover(dbenv, dbtp, lsnp, op, info)
+	DB_ENV *dbenv;
+	DBT *dbtp;
+	DB_LSN *lsnp;
+	db_recops op;
+	void *info;
+{
+	__db_pg_flmove_args *argp;
+	DB *file_dbp;
+	DBC *dbc;
+	DB_MPOOLFILE *mpf;
+	DB_LSN *prior;
+	PAGE *pagep;
+	db_pgno_t pgnos[4];
+	int cmp_n, cmp_p, i, modified, npgnos, ret;
+
+	pagep = NULL;
+	COMPQUIET(info, NULL);
+	REC_PRINT(__db_pg_flmove_print);
+	REC_INTRO(__db_pg_flmove_read, 1);
+
+	npgnos = 0;
+	pgnos[npgnos++] = PGNO_BASE_MD;
+	pgnos[npgnos++] = argp->pgno;
+	if (argp->prev_pgno != PGNO_BASE_MD)
+		pgnos[npgnos++] = argp->prev_pgno;
+	if (argp->dest_pgno != PGNO_BASE_MD)
+		pgnos[npgnos++] = argp->dest_pgno;
+
+	for (i = 0; i < npgnos; i++) {
+		if ((ret = __memp_fget(mpf, &pgnos[i], 0, &pagep)) != 0) {
+			/* A page not yet in the file has nothing to undo. */
+			if (DB_UNDO(op)) {
+				ret = 0;
+				continue;
+			}
+			ret = __db_pgerr(file_dbp, pgnos[i], ret);
+			goto out;
+		}
+		prior = __db_pg_flmove_prior_lsn(argp, pgnos[i]);
+		modified = 0;
+		cmp_n = log_compare(lsnp, &LSN(pagep));
+		cmp_p = log_compare(&LSN(pagep), prior);
+		/* Like pg_alloc/pg_free, tolerate unlogged meta changes. */
+		if (pgnos[i] != PGNO_BASE_MD)
+			CHECK_LSN(op, cmp_p, &LSN(pagep), prior, lsnp,
+			    argp->fileid, pgnos[i]);
+		if (cmp_p == 0 && DB_REDO(op)) {
+			(void)__db_pg_flmove_apply(pagep, pgnos[i], argp, lsnp, 1);
+			modified = 1;
+		} else if (cmp_n == 0 && DB_UNDO(op)) {
+			(void)__db_pg_flmove_apply(pagep, pgnos[i], argp, lsnp, 0);
+			modified = 1;
+		}
+		if ((ret = __memp_fput(mpf,
+		    pagep, modified ? DB_MPOOL_DIRTY : 0)) != 0)
+			goto out;
+		pagep = NULL;
+	}
+
+done:	*lsnp = argp->prev_lsn;
+	ret = 0;
+
+out:	if (pagep != NULL)
+		(void)__memp_fput(mpf, pagep, 0);
+	REC_CLOSE;
+}
+
+/*
  * __db_pg_new_recover --
  *	A new page from the file was put on the free list.
  * This record is only generated during a LIMBO_COMPENSATE.

@@ -1950,6 +1950,18 @@ extern int gbl_pg_compact_latency_ms;
 extern int gbl_disable_backward_scan;
 extern int gbl_compress_page_compact_log;
 extern unsigned int gbl_max_num_compact_pages_per_txn;
+
+/* tunables for gradual btree shrinking */
+extern int gbl_btree_shrink;
+extern int gbl_btree_shrink_sleep_ms;
+extern int gbl_btree_shrink_pass_interval_sec;
+extern int gbl_btree_shrink_min_file_mb;
+extern int gbl_btree_shrink_min_free_pct;
+extern int gbl_btree_shrink_moves_per_txn;
+extern int gbl_btree_shrink_plan_max_pages;
+extern int gbl_btree_shrink_verbose;
+extern int gbl_btree_shrink_debug_abort;
+extern int gbl_btree_shrink_btree_budget_sec;
 extern char *gbl_dbdir;
 
 extern double gbl_cpupercent;
@@ -3059,6 +3071,7 @@ void watchdog_disable(void);
 void watchdog_enable(void);
 
 void create_old_blkseq_thread(struct dbenv *dbenv);
+void create_btree_shrink_thread(void);
 void debug_traverse_data(char *tbl);
 int add_gtid(struct ireq *iq, int source_db, tranid_t id);
 int rem_gtid(struct ireq *iq, tranid_t id);

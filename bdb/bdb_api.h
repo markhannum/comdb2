@@ -1031,6 +1031,13 @@ int bdb_amimaster(bdb_state_type *bdb_handle);
 /* Free-list stats for a table's btrees (the 'freespace' message trap) */
 void bdb_dump_freespace(FILE *out, bdb_state_type *bdb_state);
 
+/* Gradual btree shrinking; see bdb/shrink.c */
+struct bdb_shrink_ctx;
+struct bdb_shrink_ctx *bdb_shrink_ctx_create(void);
+void bdb_shrink_ctx_reset(struct bdb_shrink_ctx *ctx);
+void bdb_shrink_ctx_destroy(struct bdb_shrink_ctx *ctx);
+int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx);
+void bdb_shrink_dump(FILE *out);
 
 /* returns nodeid of master, -1 if there is no master */
 char *bdb_whoismaster(bdb_state_type *bdb_handle);

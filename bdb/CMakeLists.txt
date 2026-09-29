@@ -53,6 +53,7 @@ add_library(bdb
   rowlocks.c
   rowlocks_util.c
   serializable.c
+  shrink.c
   signallogfill.c
   summarize.c
   temphash.c

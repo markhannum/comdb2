@@ -112,7 +112,8 @@ dump_log_event_counts(void)
 			DB___db_debug,
 		DB___db_noop, DB___db_pg_alloc, DB___db_pg_free, DB___db_cksum,
 			DB___db_pg_freedata,
-		DB___db_pg_prepare, DB___db_pg_new, DB___dbreg_register,
+		DB___db_pg_prepare, DB___db_pg_new, DB___db_pg_flmove,
+			DB___dbreg_register,
 			DB___fop_create,
 		DB___fop_remove, DB___fop_write, DB___fop_rename,
 			DB___fop_file_remove, DB___ham_insdel,
@@ -137,7 +138,8 @@ dump_log_event_counts(void)
 			"DB___db_relink", "DB___db_debug",
 		"DB___db_noop", "DB___db_pg_alloc", "DB___db_pg_free",
 			"DB___db_cksum", "DB___db_pg_freedata",
-		"DB___db_pg_prepare", "DB___db_pg_new", "DB___dbreg_register",
+		"DB___db_pg_prepare", "DB___db_pg_new", "DB___db_pg_flmove",
+			"DB___dbreg_register",
 			"DB___fop_create",
 		"DB___fop_remove", "DB___fop_write", "DB___fop_rename",
 			"DB___fop_file_remove", "DB___ham_insdel",
@@ -211,6 +213,8 @@ optostr(int op)
 		return "DB___db_pg_prepare";
 	case DB___db_pg_new:
 		return "DB___db_pg_new";
+	case DB___db_pg_flmove:
+		return "DB___db_pg_flmove";
 	case DB___dbreg_register:
 		return "DB___dbreg_register";
 	case DB___fop_create:
@@ -326,6 +330,7 @@ ufid_for_recovery_record(DB_ENV *env, DB_LSN *lsn, int rectype,
 	case DB___db_pg_freedata:
 	case DB___db_pg_prepare:
 	case DB___db_pg_new:
+	case DB___db_pg_flmove:
 	case DB___ham_splitdata:
 	case DB___ham_replace:
 	case DB___ham_copypage:

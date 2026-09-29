@@ -112,6 +112,36 @@ REGISTER_TUNABLE("broken_max_rec_sz", NULL, TUNABLE_INTEGER,
 REGISTER_TUNABLE("broken_num_parser", NULL, TUNABLE_BOOLEAN,
                  &gbl_broken_num_parser, READONLY | NOARG | READEARLY, NULL,
                  NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink",
+                 "Gradually shrink btree files online. "
+                 "Writes new log records: enable only once every node runs a version that understands them, "
+                 "and downgrade only once every node has cut its trimmed pages ('shrink status'). "
+                 "Page-order table scans must be off on every node. "
+                 "(Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_min_file_mb", "Only work on btrees at least this large. (Default: 100)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_min_file_mb, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_min_free_pct",
+                 "Only work on btrees with at least this percentage of their pages free. (Default: 10)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_min_free_pct, EXPERIMENTAL, NULL, percent_verify, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_moves_per_txn", "Free-list moves per btree_shrink transaction. (Default: 16)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_moves_per_txn, EXPERIMENTAL, NULL, positive_int_verify, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_plan_max_pages",
+                 "Max free pages btree_shrink sorts to the front of a free list per plan. (Default: 1000000)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_plan_max_pages, EXPERIMENTAL, NULL, positive_int_verify, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_sleep_ms", "Pause between btree_shrink units of work. (Default: 10)", TUNABLE_INTEGER,
+                 &gbl_btree_shrink_sleep_ms, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_pass_interval_sec",
+                 "Pause between btree_shrink passes over all tables. (Default: 60)", TUNABLE_INTEGER,
+                 &gbl_btree_shrink_pass_interval_sec, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_btree_budget_sec",
+                 "Seconds btree_shrink works on one btree before moving on to the others; it resumes on a later "
+                 "pass. 0 means no limit. (Default: 30)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_btree_budget_sec, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_debug_abort", "Abort each btree_shrink batch after making its moves (test only).",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink_debug_abort, INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_verbose", "Log btree_shrink progress. (Default: off)", TUNABLE_BOOLEAN,
+                 &gbl_btree_shrink_verbose, EXPERIMENTAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("buffers_per_context", NULL, TUNABLE_INTEGER,
                  &gbl_buffers_per_context, READONLY | NOZERO, NULL, NULL, NULL,
                  NULL);

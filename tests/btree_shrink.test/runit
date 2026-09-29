@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+bash -n "$0" || exit 1
+
+# btree_shrink: each phase checks free lists and data on every node.
+
+source ${TESTSROOTDIR}/tools/runit_common.sh
+source ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+dbnm=$1
+[[ "$debug" == 1 ]] && set -x
+
+function sql { $CDB2SQL_EXE ${CDB2_OPTIONS} --tabs $dbnm default "$@"; }
+function sqlh { local h=$1; shift; $CDB2SQL_EXE ${CDB2_OPTIONS} --tabs --host $h $dbnm "$@"; }
+# Only btree lines (other messages share the output), without file_bytes (preallocation)
+function freespace { sqlh $1 "exec procedure sys.cmd.send('freespace $2')" | grep "^$2 " | sed 's/ file_bytes [0-9]*//'; }
+function shrink_status { sqlh $1 "exec procedure sys.cmd.send('shrink status')" | grep "^btree_shrink: "; }
+function status { shrink_status $1 | head -1; }
+function moves { status $1 | sed 's/.* moves \([0-9]*\).*/\1/'; }
+function nodes { getclusternodes; }
+function tun { local h=$1; shift; for t in "$@"; do sqlh $h "put tunable $t" >/dev/null || failexit "put tunable $t"; done; }
+
+function load
+{
+    local lo=$1 hi=$2
+    for ((i = lo; i < hi; i += 5000)); do
+        sql "insert into t1 select value, printf('%0190d', value) from generate_series($i, $((i + 4999)))" >/dev/null || failexit "insert t1"
+    done
+}
+
+# Btrees with little free space may be skipped, so they can stay unsorted
+function unsorted_lines {
+    freespace $1 $2 | grep -v "sorted 100.0%" | grep -v " free 0 " |
+        awk '{ if (match($0, /\(([0-9.]+)%\)/)) { p = substr($0, RSTART + 1, RLENGTH - 3); if (p + 0 >= 2) print } }'
+}
+
+# The worker's progress counters; others tick on every idle pass
+function progress { shrink_status $1 | tr ' ' '\n' | awk 'k { print k, $0; k = "" } /^moves$/ { k = $0 }'; }
+function quiesce
+{
+    local m=$1 prev="" cur
+    for ((q = 0; q < 60; q++)); do
+        cur=$(progress $m | tr '\n' ' ')
+        [[ "$cur" == "$prev" ]] && return 0
+        prev=$cur
+        sleep 5
+    done
+    failexit "worker never went idle on $m"
+}
+
+function wait_sorted
+{
+    local m=$1
+    for ((w = 0; w < 300; w++)); do
+        if [[ -z "$(unsorted_lines $m t1)" && -z "$(unsorted_lines $m t2)" ]]; then
+            return 0
+        fi
+        sleep 1
+    done
+    freespace $m t1; freespace $m t2; status $m
+    failexit "free lists not sorted after 300s"
+}
+
+function check_replicas
+{
+    local m=$1
+    quiesce $m
+    # A final write, then give replicas time to apply everything
+    sql "insert into t1 values (-1, 'sync')" >/dev/null
+    sleep 5
+    freespace $m t1 > fs.master.t1; freespace $m t2 > fs.master.t2
+    for n in $(nodes); do
+        freespace $n t1 > fs.$n.t1; freespace $n t2 > fs.$n.t2
+        diff fs.master.t1 fs.$n.t1 || failexit "t1 free lists differ on $n"
+        diff fs.master.t2 fs.$n.t2 || failexit "t2 free lists differ on $n"
+        grep -q incomplete fs.$n.t1 fs.$n.t2 && failexit "incomplete free-list walk on $n"
+    done
+    do_verify t1
+    do_verify t2
+}
+
+sql "create table t1 (a int, b cstring(200))" >/dev/null || failexit "create t1"
+sql "create index t1_a on t1(a)" >/dev/null || failexit "create index"
+sql "create table t2 (a int, b blob)" >/dev/null || failexit "create t2"
+
+load 1 200000
+for ((i = 1; i <= 2000; i += 250)); do
+    sql "insert into t2 select value, randomblob(20000) from generate_series($i, $((i + 249)))" >/dev/null || failexit "insert t2"
+done
+# Free the top half of t1 and most of t2: the LIFO free lists end up high-to-low
+for ((i = 100000; i < 200000; i += 10000)); do
+    sql "delete from t1 where a >= $i and a < $((i + 10000))" >/dev/null
+done
+sql "delete from t2 where a > 400" >/dev/null
+
+master=$(getmaster)
+echo "master is $master"
+freespace $master t1
+
+echo "== undo: every batch aborts after moving; free lists must be unchanged"
+freespace $master t1 > fs.before.t1; freespace $master t2 > fs.before.t2
+tun $master "btree_shrink_debug_abort 1" "btree_shrink 1"
+sleep 10
+tun $master "btree_shrink 0"
+sleep 2
+status $master
+freespace $master t1 | diff fs.before.t1 - || failexit "t1 free lists changed by aborted batches"
+freespace $master t2 | diff fs.before.t2 - || failexit "t2 free lists changed by aborted batches"
+tun $master "btree_shrink_debug_abort 0"
+
+echo "== sort under traffic"
+(
+    for ((r = 1; r <= 40; r++)); do
+        base=$((300000 + r * 1000))
+        sql "insert into t1 select value, printf('%0190d', value) from generate_series($base, $((base + 999)))" >/dev/null
+        sql "delete from t1 where a >= $((base - 1000)) and a < $((base - 500))" >/dev/null
+    done
+) &
+tun $master "btree_shrink_moves_per_txn 4" "btree_shrink_sleep_ms 1" "btree_shrink 1"
+wait
+wait_sorted $master
+status $master
+check_replicas $master
+
+echo "== kill the master mid-sort"
+# Slow the worker before freeing pages, or it sorts them before we look
+tun $master "btree_shrink 0" "btree_shrink_moves_per_txn 1" "btree_shrink_sleep_ms 50"
+for ((i = 20000; i < 50000; i += 5000)); do
+    sql "delete from t1 where a >= $i and a < $((i + 5000))" >/dev/null
+done
+tun $master "btree_shrink 1"
+sleep 2
+m0=$(moves $master)
+sleep 5
+m1=$(moves $master)
+[[ "$m1" -gt "$m0" ]] || failexit "no moves in flight before kill ($m0 -> $m1)"
+kill_restart_node $master 1
+if [[ -n "$CLUSTER" ]]; then
+    wait_for_cluster
+fi
+sleep 5
+
+master=$(getmaster)
+echo "master is now $master"
+for n in $(nodes); do
+    tun $n "btree_shrink_min_file_mb 0" "btree_shrink_min_free_pct 1" "btree_shrink_pass_interval_sec 1"
+done
+tun $master "btree_shrink 1"
+wait_sorted $master
+check_replicas $master
+
+echo "Success"

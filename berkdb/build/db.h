@@ -3412,6 +3412,16 @@ struct __db_freespace_stat {
 };
 int __db_freespace_stat(DB *dbp, struct __db_freespace_stat *st);
 
+/* btree_shrink's free-list plans; see db_freelist.c */
+struct __db_flsort;
+int __db_freelist_peek(DB *dbp, DB_LSN *meta_lsnp, db_pgno_t *last_pgnop);
+int __db_flsort_create(DB *dbp, u_int32_t max, struct __db_flsort **fsp);
+void __db_flsort_destroy(struct __db_flsort *fs);
+void __db_flsort_info(struct __db_flsort *fs, u_int64_t *nfree,
+	db_pgno_t *last_pgno, u_int32_t *placed, u_int32_t *planned);
+int __db_flsort_step(DB *dbp, struct __db_flsort *fs, u_int32_t max_moves,
+	u_int32_t *movedp, int *donep, DB_LSN *meta_lsnp);
+
 int get_committed_lsns(DB_ENV *dbenv, DB_LSN **lsns, int *n_lsns,
 	int epoch, int file, int offset);
 

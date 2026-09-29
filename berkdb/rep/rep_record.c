@@ -2751,7 +2751,8 @@ __rep_classify_type(u_int32_t type, int *had_serializable_records)
 		type == DB___fop_file_remove ||
 		(!gbl_allow_parallel_rep_on_pagesplit &&
 			(type == DB___db_pg_alloc ||
-			type == DB___db_pg_free || type == DB___db_pg_freedata)
+			type == DB___db_pg_free || type == DB___db_pg_freedata ||
+			type == DB___db_pg_flmove)
 		) ||
 		type == DB___qam_incfirst ||
 		type == DB___qam_mvptr ||

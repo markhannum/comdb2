@@ -5920,6 +5920,7 @@ int main(int argc, char **argv)
 
     create_watchdog_thread(thedb);
     create_old_blkseq_thread(thedb);
+    create_btree_shrink_thread();
     create_stat_thread(thedb);
 
     /* create the offloadsql repository */

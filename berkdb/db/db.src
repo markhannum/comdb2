@@ -260,3 +260,20 @@ ARG	pgno		db_pgno_t	lu
 ARG	vec_len		u_int32_t	lu
 ARG	ptype		u_int32_t	lu
 END
+
+/* pg_flmove: move free page pgno from after prev_pgno to after dest_pgno (0: head). */
+BEGIN pg_flmove		70
+DB	fileid		int32_t		ld
+ARG	meta_pgno	db_pgno_t	lu
+POINTER	meta_lsn	DB_LSN *	lu
+ARG	pgno		db_pgno_t	lu
+POINTER	pgno_lsn	DB_LSN *	lu
+ARG	prev_pgno	db_pgno_t	lu
+POINTER	prevpg_lsn	DB_LSN *	lu
+ARG	dest_pgno	db_pgno_t	lu
+POINTER	destpg_lsn	DB_LSN *	lu
+/* old_next: pgno's next before the move */
+ARG	old_next	u_int32_t	lu
+/* dest_old_next: dest_pgno's next (or meta->free, for the head) before the move */
+ARG	dest_old_next	u_int32_t	lu
+END

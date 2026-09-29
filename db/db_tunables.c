@@ -970,6 +970,11 @@ static int maxretries_verify(void *context, void *value)
     return 0;
 }
 
+static int positive_int_verify(void *context, void *value)
+{
+    return *(int *)value <= 0;
+}
+
 static int maxcolumns_verify(void *context, void *value)
 {
     if (*(int *)value <= 0 || *(int *)value > MAXCOLUMNS) {

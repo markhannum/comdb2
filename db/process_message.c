@@ -813,6 +813,14 @@ clipper_usage:
            logmsg(LOGMSG_USER, "freelist <tablename> all\n");
         }
     }
+    /* shrink status: progress of the btree_shrink thread */
+    else if (tokcmp(tok, ltok, "shrink") == 0) {
+        tok = segtok(line, lline, &st, &ltok);
+        if (tokcmp(tok, ltok, "status") == 0)
+            bdb_shrink_dump(stdout);
+        else
+            logmsg(LOGMSG_USER, "Usage: shrink status\n");
+    }
     /* freespace [table]: free-list stats for a table's btrees, or all tables */
     else if (tokcmp(tok, ltok, "freespace") == 0) {
         char table[MAXTABLELEN];

@@ -1,0 +1,4 @@
+btree_shrink_min_file_mb 0
+btree_shrink_min_free_pct 1
+btree_shrink_pass_interval_sec 1
+btree_shrink_verbose on
