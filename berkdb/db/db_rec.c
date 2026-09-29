@@ -1003,9 +1003,10 @@ void __db_pg_alloc_target_undo(DB *file_dbp, PAGE *pagep, __db_pg_alloc_args *ar
  * PUBLIC:    __P((DB *, PAGE *, __db_pg_alloc_args *, DB_LSN *));
  */
 void __db_pg_alloc_target_redo(DB *file_dbp, PAGE *pagep, __db_pg_alloc_args *argp, DB_LSN *lsnp) {
+	u_int32_t ptype = argp->ptype & ~DB_PG_ALLOC_TRIMMED;
 	int level;
 
-	switch (argp->ptype) {
+	switch (ptype) {
 	case P_LBTREE:
 	case P_LRECNO:
 	case P_LDUP:
@@ -1016,7 +1017,7 @@ void __db_pg_alloc_target_redo(DB *file_dbp, PAGE *pagep, __db_pg_alloc_args *ar
 		break;
 	}
 	P_INIT(pagep, file_dbp->pgsize,
-		argp->pgno, PGNO_INVALID, PGNO_INVALID, level, argp->ptype);
+		argp->pgno, PGNO_INVALID, PGNO_INVALID, level, ptype);
 
 	pagep->lsn = *lsnp;
 }
@@ -1043,6 +1044,13 @@ void __db_pg_alloc_meta_redo(DBMETA *meta, __db_pg_alloc_args *argp, DB_LSN *lsn
  */
 void __db_pg_alloc_meta_undo(DB *file_dbp, DBMETA *meta, __db_pg_alloc_args *argp) {
 	LSN(meta) = argp->meta_lsn;
+
+	/* Reusing a trimmed page left the free list alone; just lower last_pgno again. */
+	if (argp->ptype & DB_PG_ALLOC_TRIMMED) {
+		if (meta->last_pgno == argp->pgno)
+			meta->last_pgno = argp->pgno - 1;
+		return;
+	}
 
 	/*
 	 * If the page has a zero LSN then its newly created
@@ -1081,6 +1089,9 @@ __db_pg_alloc_recover(dbenv, dbtp, lsnp, op, info)
 	pagep = NULL;
 	REC_PRINT(__db_pg_alloc_print);
 	REC_INTRO(__db_pg_alloc_read, 0);
+	/* This log references a trimmed page: don't cut it until the log is gone. */
+	if (argp->ptype & DB_PG_ALLOC_TRIMMED)
+		__memp_set_trunc_wait(mpf, lsnp->file);
 
 	/*
 	 * Fix up the allocated page.  If we're redoing the operation, we have
@@ -1139,6 +1150,10 @@ __db_pg_alloc_recover(dbenv, dbtp, lsnp, op, info)
 	 * an LSN for the page but the page will be empty.
 	 */
 	if (IS_ZERO_LSN(LSN(pagep)))
+		cmp_p = 0;
+	/* A stale image of a new page, or of a reused trimmed page, is garbage: reinitialize. */
+	if (DB_REDO(op) && cmp_n > 0 && (IS_ZERO_LSN(argp->page_lsn) ||
+	    (argp->ptype & DB_PG_ALLOC_TRIMMED)))
 		cmp_p = 0;
 	CHECK_LSN(op, cmp_p, &LSN(pagep), &argp->page_lsn, lsnp, argp->fileid,
 	    argp->pgno);
@@ -1215,9 +1230,13 @@ do_meta:
 
 	/*
 	 * Make sure that meta->last_pgno always reflects the largest page
-	 * that we've ever allocated.
+	 * that we've ever allocated.  A newer trimmed meta page already
+	 * reflects this allocation unless a later pg_trunc lowered it.
 	 */
-	if (argp->pgno > meta->last_pgno) {
+	if (argp->pgno > meta->last_pgno &&
+	    !((argp->ptype & DB_PG_ALLOC_TRIMMED) && !DB_REDO(op)) &&
+	    !(FLD_ISSET(meta->metaflags, DBMETA_TRIMMED) &&
+	    log_compare(&LSN(meta), lsnp) > 0)) {
 		meta->last_pgno = argp->pgno;
 		modified = 1;
 	}
@@ -1560,6 +1579,111 @@ __db_pg_flmove_recover(dbenv, dbtp, lsnp, op, info)
 			goto out;
 		pagep = NULL;
 	}
+
+done:	*lsnp = argp->prev_lsn;
+	ret = 0;
+
+out:	if (pagep != NULL)
+		(void)__memp_fput(mpf, pagep, 0);
+	REC_CLOSE;
+}
+
+/*
+ * __db_pg_trunc_apply -- redo or undo a pg_trunc on the meta page or prev_pgno.
+ * PUBLIC: int __db_pg_trunc_apply
+ * PUBLIC:    __P((PAGE *, db_pgno_t, __db_pg_trunc_args *, DB_LSN *, int));
+ */
+int
+__db_pg_trunc_apply(PAGE *pagep, db_pgno_t pgno, __db_pg_trunc_args *argp,
+    DB_LSN *lsnp, int redo)
+{
+	DBMETA *meta;
+	db_pgno_t next;
+
+	next = redo ? PGNO_INVALID : argp->first_pgno;
+	if (pgno == PGNO_BASE_MD) {
+		meta = (DBMETA *)pagep;
+		if (argp->prev_pgno == PGNO_BASE_MD)
+			meta->free = next;
+		meta->last_pgno = redo ? argp->new_last : argp->old_last;
+		meta->metaflags = (u_int8_t)(redo ?
+		    (argp->old_metaflags | DBMETA_TRIMMED) : argp->old_metaflags);
+		LSN(meta) = redo ? *lsnp : argp->meta_lsn;
+	} else if (pgno == argp->prev_pgno) {
+		NEXT_PGNO(pagep) = next;
+		LSN(pagep) = redo ? *lsnp : argp->prevpg_lsn;
+	} else
+		return (ENOENT);
+	return (0);
+}
+
+/*
+ * __db_pg_trunc_recover -- recovery function for pg_trunc.
+ * PUBLIC: int __db_pg_trunc_recover
+ * PUBLIC:   __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
+ */
+int
+__db_pg_trunc_recover(dbenv, dbtp, lsnp, op, info)
+	DB_ENV *dbenv;
+	DBT *dbtp;
+	DB_LSN *lsnp;
+	db_recops op;
+	void *info;
+{
+	__db_pg_trunc_args *argp;
+	DB *file_dbp;
+	DBC *dbc;
+	DB_MPOOLFILE *mpf;
+	DB_LSN *prior;
+	PAGE *pagep;
+	db_pgno_t pgnos[2];
+	int cmp_n, cmp_p, i, modified, npgnos, ret;
+
+	pagep = NULL;
+	COMPQUIET(info, NULL);
+	REC_PRINT(__db_pg_trunc_print);
+	REC_INTRO(__db_pg_trunc_read, 1);
+
+	npgnos = 0;
+	pgnos[npgnos++] = PGNO_BASE_MD;
+	if (argp->prev_pgno != PGNO_BASE_MD)
+		pgnos[npgnos++] = argp->prev_pgno;
+
+	for (i = 0; i < npgnos; i++) {
+		if ((ret = __memp_fget(mpf, &pgnos[i], 0, &pagep)) != 0) {
+			/* A page not yet in the file has nothing to undo. */
+			if (DB_UNDO(op)) {
+				ret = 0;
+				continue;
+			}
+			ret = __db_pgerr(file_dbp, pgnos[i], ret);
+			goto out;
+		}
+		prior = pgnos[i] == PGNO_BASE_MD ?
+		    &argp->meta_lsn : &argp->prevpg_lsn;
+		modified = 0;
+		cmp_n = log_compare(lsnp, &LSN(pagep));
+		cmp_p = log_compare(&LSN(pagep), prior);
+		/* Like pg_alloc/pg_free, tolerate unlogged meta changes. */
+		if (pgnos[i] != PGNO_BASE_MD)
+			CHECK_LSN(op, cmp_p, &LSN(pagep), prior, lsnp,
+			    argp->fileid, pgnos[i]);
+		if (cmp_p == 0 && DB_REDO(op)) {
+			(void)__db_pg_trunc_apply(pagep, pgnos[i], argp, lsnp, 1);
+			modified = 1;
+		} else if (cmp_n == 0 && DB_UNDO(op)) {
+			(void)__db_pg_trunc_apply(pagep, pgnos[i], argp, lsnp, 0);
+			modified = 1;
+		}
+		if ((ret = __memp_fput(mpf,
+		    pagep, modified ? DB_MPOOL_DIRTY : 0)) != 0)
+			goto out;
+		pagep = NULL;
+	}
+
+	/* The trimmed pages can't be cut from the file until this log is gone. */
+	if (DB_REDO(op))
+		__memp_set_trunc_wait(mpf, lsnp->file);
 
 done:	*lsnp = argp->prev_lsn;
 	ret = 0;

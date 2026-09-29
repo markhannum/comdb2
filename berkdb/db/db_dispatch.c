@@ -113,6 +113,7 @@ dump_log_event_counts(void)
 		DB___db_noop, DB___db_pg_alloc, DB___db_pg_free, DB___db_cksum,
 			DB___db_pg_freedata,
 		DB___db_pg_prepare, DB___db_pg_new, DB___db_pg_flmove,
+			DB___db_pg_trunc,
 			DB___dbreg_register,
 			DB___fop_create,
 		DB___fop_remove, DB___fop_write, DB___fop_rename,
@@ -139,6 +140,7 @@ dump_log_event_counts(void)
 		"DB___db_noop", "DB___db_pg_alloc", "DB___db_pg_free",
 			"DB___db_cksum", "DB___db_pg_freedata",
 		"DB___db_pg_prepare", "DB___db_pg_new", "DB___db_pg_flmove",
+			"DB___db_pg_trunc",
 			"DB___dbreg_register",
 			"DB___fop_create",
 		"DB___fop_remove", "DB___fop_write", "DB___fop_rename",
@@ -215,6 +217,8 @@ optostr(int op)
 		return "DB___db_pg_new";
 	case DB___db_pg_flmove:
 		return "DB___db_pg_flmove";
+	case DB___db_pg_trunc:
+		return "DB___db_pg_trunc";
 	case DB___dbreg_register:
 		return "DB___dbreg_register";
 	case DB___fop_create:
@@ -331,6 +335,7 @@ ufid_for_recovery_record(DB_ENV *env, DB_LSN *lsn, int rectype,
 	case DB___db_pg_prepare:
 	case DB___db_pg_new:
 	case DB___db_pg_flmove:
+	case DB___db_pg_trunc:
 	case DB___ham_splitdata:
 	case DB___ham_replace:
 	case DB___ham_copypage:
@@ -1966,6 +1971,10 @@ __db_limbo_fix(dbp, txn, ctxn, elp, lastp, meta, state)
 		pgno = elp->u.p.pgno_array[i];
 
 		if (pgno == PGNO_INVALID)
+			continue;
+		/* Don't resurrect pages btree_shrink trimmed. */
+		if (meta != NULL && FLD_ISSET(meta->metaflags, DBMETA_TRIMMED) &&
+		    pgno > meta->last_pgno)
 			continue;
 
 		if ((ret =

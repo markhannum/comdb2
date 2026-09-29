@@ -293,6 +293,19 @@ __db_verify(dbp, name, subdb, handle, callback, flags)
 	/* Find out the page number of the last page in the database. */
 	__memp_last_pgno(dbp->mpf, &vdp->last_pgno);
 
+	/* Pages past a trimmed btree's last_pgno only await truncation. */
+	{
+		DBMETA *tmeta;
+		db_pgno_t tpgno = PGNO_BASE_MD;
+
+		if (__memp_fget(dbp->mpf, &tpgno, 0, &tmeta) == 0) {
+			if (FLD_ISSET(tmeta->metaflags, DBMETA_TRIMMED) &&
+			    tmeta->last_pgno < vdp->last_pgno)
+				vdp->last_pgno = tmeta->last_pgno;
+			(void)__memp_fput(dbp->mpf, tmeta, 0);
+		}
+	}
+
 	/*
 	 * DB_ORDERCHKONLY is a special case;  our file consists of
 	 * several subdatabases, which use different hash, bt_compare,

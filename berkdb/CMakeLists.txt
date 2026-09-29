@@ -112,6 +112,7 @@ set(BERK_C
   mp/mp_fopen.c
   mp/mp_fput.c
   mp/mp_fset.c
+  mp/mp_ftruncate.c
   mp/mp_method.c
   mp/mp_region.c
   mp/mp_register.c

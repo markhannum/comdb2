@@ -140,6 +140,18 @@ REGISTER_TUNABLE("btree_shrink_btree_budget_sec",
                  TUNABLE_INTEGER, &gbl_btree_shrink_btree_budget_sec, EXPERIMENTAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("btree_shrink_debug_abort", "Abort each btree_shrink batch after making its moves (test only).",
                  TUNABLE_BOOLEAN, &gbl_btree_shrink_debug_abort, INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_trim",
+                 "Once btree_shrink has sorted a free list, trim the free pages at the end of the file. (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink_trim, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_trim_pages_per_txn", "Pages btree_shrink trims per transaction. (Default: 256)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_trim_pages_per_txn, EXPERIMENTAL, NULL, positive_int_verify, NULL,
+                 NULL);
+REGISTER_TUNABLE("btree_shrink_truncate_interval_sec",
+                 "How often every node cuts trimmed pages from files once no log it keeps references them. "
+                 "(Default: 30)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_truncate_interval_sec, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_trim_debug_abort", "Abort each btree_shrink trim after logging it (test only).",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink_trim_debug_abort, INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("btree_shrink_verbose", "Log btree_shrink progress. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_btree_shrink_verbose, EXPERIMENTAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("buffers_per_context", NULL, TUNABLE_INTEGER,

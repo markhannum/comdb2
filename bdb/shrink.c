@@ -34,8 +34,17 @@ int gbl_btree_shrink_moves_per_txn = 16;
 int gbl_btree_shrink_plan_max_pages = 1000000;
 int gbl_btree_shrink_verbose = 0;
 int gbl_btree_shrink_btree_budget_sec = 30; /* then give other btrees a turn (0: never) */
+int gbl_btree_shrink_trim = 1;
+int gbl_btree_shrink_trim_pages_per_txn = 256;
 
 extern int gbl_btree_shrink_debug_abort;
+extern int gbl_btree_shrink_trim_debug_abort;
+extern int log_delete_is_stopped(void);
+extern int gbl_truncating_log;
+int bdb_get_first_logfile(bdb_state_type *bdb_state, int *bdberr);
+int bdb_get_last_logfile(bdb_state_type *bdb_state, int *bdberr);
+void logdelete_lock(const char *func, int line);
+void logdelete_unlock(const char *func, int line);
 
 /* Meta LSN of btrees already sorted or found ineligible, to skip re-walks */
 #define SHRINK_SEEN_SIZE 4096
@@ -52,6 +61,7 @@ struct bdb_shrink_ctx {
     struct __db_flsort *plan;
     int busy;                 /* consecutive busy steps on this btree */
     int visit_start;          /* epoch ms when work on this btree began, or 0 */
+    int trimming;             /* plan is sorted; trimming the free tail */
     struct shrink_seen seen[SHRINK_SEEN_SIZE];
 };
 
@@ -94,6 +104,12 @@ static struct {
     uint64_t aborted; /* by the debug hooks */
     uint64_t sorted;
     uint64_t rotated;
+    uint64_t trimmed;
+    uint64_t truncated;
+    uint64_t truncate_busy;
+    uint32_t trunc_waiting;       /* last truncate pass: btrees waiting on logs */
+    uint32_t trunc_wait_file;     /* ... for this log to be deleted */
+    uint32_t trunc_first_logfile; /* ... while this was the oldest log */
     char desc[64];
     uint64_t nfree;
     db_pgno_t last_pgno;
@@ -130,6 +146,7 @@ static void shrink_ctx_drop_plan(struct bdb_shrink_ctx *ctx)
 {
     __db_flsort_destroy(ctx->plan);
     ctx->plan = NULL;
+    ctx->trimming = 0;
     ctx->busy = 0;
 }
 
@@ -289,6 +306,35 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         done = 1;
         goto out;
     }
+    if (ctx->trimming) {
+        uint32_t trimmed = 0;
+        rc = __db_fltrim_step(dbp, ctx->plan, gbl_btree_shrink_trim_pages_per_txn, &trimmed, &plan_done, &lsn);
+        shrink_stats.trimmed += trimmed;
+        if (rc != DB_LOCK_NOTGRANTED)
+            ctx->busy = 0;
+        if (rc == DB_LOCK_NOTGRANTED) {
+            shrink_stats.busy++;
+            if (++ctx->busy > SHRINK_MAX_BUSY)
+                shrink_skip_btree(ctx);
+        } else if (rc == DB_NOTFOUND && gbl_btree_shrink_trim_debug_abort) {
+            shrink_stats.aborted++;
+            shrink_ctx_drop_plan(ctx);
+            shrink_next_btree(ctx);
+        } else if (rc != 0) {
+            /* Move on so a trim which keeps failing can't stall the pass */
+            shrink_stats.stale++;
+            if (gbl_btree_shrink_verbose)
+                logmsg(LOGMSG_USER, "btree_shrink: %s trim failed rc %d, revisit next pass\n", ctx->desc, rc);
+            shrink_ctx_drop_plan(ctx);
+            shrink_next_btree(ctx);
+        } else if (plan_done) {
+            if (gbl_btree_shrink_verbose)
+                logmsg(LOGMSG_USER, "btree_shrink: trimmed %s\n", ctx->desc);
+            shrink_finish_btree(ctx, dbp, &lsn);
+        }
+        goto out;
+    }
+
     rc = __db_flsort_step(dbp, ctx->plan, gbl_btree_shrink_moves_per_txn, &moved, &plan_done, &lsn);
     shrink_stats.moves += moved;
     if (rc != DB_LOCK_NOTGRANTED)
@@ -309,7 +355,10 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         shrink_stats.sorted++;
         if (gbl_btree_shrink_verbose)
             logmsg(LOGMSG_USER, "btree_shrink: sorted %s\n", ctx->desc);
-        shrink_finish_btree(ctx, dbp, &lsn);
+        if (gbl_btree_shrink_trim)
+            ctx->trimming = 1;
+        else
+            shrink_finish_btree(ctx, dbp, &lsn);
     }
 out:
     BDB_RELLOCK();
@@ -323,9 +372,15 @@ void bdb_shrink_dump(FILE *out)
     Pthread_mutex_lock(&shrink_stats_lk);
     logmsgf(LOGMSG_USER, out,
             "btree_shrink: plans %" PRIu64 " ineligible %" PRIu64 " unchanged %" PRIu64 " moves %" PRIu64
-            " busy %" PRIu64 " stale %" PRIu64 " aborted %" PRIu64 " sorted %" PRIu64 " rotated %" PRIu64 "\n",
+            " busy %" PRIu64 " stale %" PRIu64 " aborted %" PRIu64 " sorted %" PRIu64 " rotated %" PRIu64
+            " trimmed %" PRIu64 " truncated %" PRIu64 " truncate_busy %" PRIu64 "\n",
             shrink_stats.plans, shrink_stats.ineligible, shrink_stats.unchanged, shrink_stats.moves, shrink_stats.busy,
-            shrink_stats.stale, shrink_stats.aborted, shrink_stats.sorted, shrink_stats.rotated);
+            shrink_stats.stale, shrink_stats.aborted, shrink_stats.sorted, shrink_stats.rotated, shrink_stats.trimmed,
+            shrink_stats.truncated, shrink_stats.truncate_busy);
+    if (shrink_stats.trunc_waiting)
+        logmsgf(LOGMSG_USER, out,
+                "btree_shrink: %u btree(s) waiting to truncate until log %u is deleted (oldest log %u)\n",
+                shrink_stats.trunc_waiting, shrink_stats.trunc_wait_file, shrink_stats.trunc_first_logfile);
     if (shrink_stats.desc[0] == '\0')
         logmsgf(LOGMSG_USER, out, "btree_shrink: idle\n");
     else
@@ -333,4 +388,66 @@ void bdb_shrink_dump(FILE *out)
                 shrink_stats.desc, shrink_stats.placed, shrink_stats.planned, shrink_stats.nfree,
                 shrink_stats.last_pgno);
     Pthread_mutex_unlock(&shrink_stats_lk);
+}
+
+/* Start a truncate pass under the bdb, recovery and log-delete locks; 0 if it may run. */
+int bdb_shrink_truncate_begin(bdb_state_type *bdb_state, uint32_t *first_logfile, uint32_t *cur_logfile)
+{
+    int bdberr, first, cur;
+
+    Pthread_mutex_lock(&shrink_stats_lk);
+    shrink_stats.trunc_waiting = 0;
+    shrink_stats.trunc_wait_file = 0;
+    Pthread_mutex_unlock(&shrink_stats_lk);
+
+    BDB_READLOCK("btree_shrink_truncate");
+    bdb_readlock_recovery(bdb_state);
+    logdelete_lock(__func__, __LINE__);
+    if (log_delete_is_stopped() || gbl_truncating_log ||
+        (first = bdb_get_first_logfile(bdb_state, &bdberr)) <= 0 ||
+        (cur = bdb_get_last_logfile(bdb_state, &bdberr)) <= 0) {
+        bdb_shrink_truncate_end(bdb_state);
+        return -1;
+    }
+    *first_logfile = first;
+    *cur_logfile = cur;
+    Pthread_mutex_lock(&shrink_stats_lk);
+    shrink_stats.trunc_first_logfile = first;
+    Pthread_mutex_unlock(&shrink_stats_lk);
+    return 0;
+}
+
+void bdb_shrink_truncate_end(bdb_state_type *bdb_state)
+{
+    logdelete_unlock(__func__, __LINE__);
+    bdb_unlock_recovery(bdb_state);
+    BDB_RELLOCK();
+}
+
+/* Cut trimmed pages from each of a table's btrees; see __db_physical_truncate */
+void bdb_shrink_truncate_table(bdb_state_type *tbl, uint32_t first_logfile, uint32_t cur_logfile)
+{
+    char desc[64];
+    uint32_t pages, wait;
+    DB *dbp;
+    int rc;
+
+    for (int n = 0; (dbp = shrink_btree(tbl, n, desc, sizeof(desc))) != NULL; n++) {
+        rc = __db_physical_truncate(dbp, first_logfile, cur_logfile, &pages, &wait);
+        Pthread_mutex_lock(&shrink_stats_lk);
+        if (rc != 0) {
+            shrink_stats.truncate_busy++;
+        } else if (wait) {
+            shrink_stats.trunc_waiting++;
+            if (wait > shrink_stats.trunc_wait_file)
+                shrink_stats.trunc_wait_file = wait;
+        } else {
+            shrink_stats.truncated += pages;
+        }
+        Pthread_mutex_unlock(&shrink_stats_lk);
+        if (gbl_btree_shrink_verbose && rc != 0)
+            logmsg(LOGMSG_USER, "btree_shrink: truncate %s busy rc %d\n", desc, rc);
+        else if (gbl_btree_shrink_verbose && pages > 0)
+            logmsg(LOGMSG_USER, "btree_shrink: truncated %u pages from %s\n", pages, desc);
+    }
 }

@@ -95,6 +95,9 @@ typedef struct _dbmeta33 {
 	u_int8_t  encrypt_alg;	/*    24: Encryption algorithm. */
 	u_int8_t  type;		/*    25: Page type. */
 #define	DBMETA_CHKSUM		0x01
+#define	DBMETA_TRIMMED		0x02	/* btree_shrink trimmed last_pgno below file size */
+/* pg_alloc ptype flag: reused a trimmed page; undo restores last_pgno */
+#define	DB_PG_ALLOC_TRIMMED	0x80000000
 	u_int8_t  metaflags;	/* 26: Meta-only flags */
 	u_int8_t  unused1;	/* 27: Unused. */
 	u_int32_t free;		/* 28-31: Free list page number. */

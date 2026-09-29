@@ -40,6 +40,7 @@
 extern int gbl_is_physical_replicant;
 
 int gbl_btree_shrink_debug_abort = 0;		/* test: abort each sort batch */
+int gbl_btree_shrink_trim_debug_abort = 0;	/* test: abort each trim */
 
 #define	FS_ISSET(bm, pg)	((bm)[(pg) >> 3] & (1 << ((pg) & 7)))
 #define	FS_SET(bm, pg)		((bm)[(pg) >> 3] |= (1 << ((pg) & 7)))
@@ -528,5 +529,240 @@ err:	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta,
 		(void)__txn_abort(txn);
 	if (ret == 0 || ret == DB_NOTFOUND)
 		*movedp = moved;
+	return (ret);
+}
+
+/* Log and drop free pages first..last_pgno, the list's tail after prev. */
+static int
+__db_pg_trunc(DBC *dbc, DBMETA *meta, db_pgno_t prev, db_pgno_t first)
+{
+	DB *dbp;
+	DB_LSN lsn;
+	DB_MPOOLFILE *mpf;
+	PAGE *h, *pp;
+	__db_pg_trunc_args args;
+	db_pgno_t pg, last;
+	int ret, t_ret;
+
+	dbp = dbc->dbp;
+	mpf = dbp->mpf;
+	pp = NULL;
+	last = meta->last_pgno;
+
+	if (!DBC_LOGGING(dbc))
+		return (EPERM);
+	if (first <= PGNO_BASE_MD + 1 || first > last ||
+	    (prev != PGNO_BASE_MD && prev >= first))
+		return (EINVAL);
+
+	if (prev == PGNO_BASE_MD) {
+		if (meta->free != first)
+			return (DB_NOTFOUND);
+	} else {
+		if ((ret = PAGEGET(dbc, mpf, &prev, 0, &pp)) != 0)
+			return (ret);
+		if (TYPE(pp) != P_INVALID || NEXT_PGNO(pp) != first) {
+			ret = DB_NOTFOUND;
+			goto err;
+		}
+	}
+
+	/* The run must be exactly first, first+1, ..., last, then the end. */
+	for (pg = first; pg <= last; pg++) {
+		if ((ret = PAGEGET(dbc, mpf, &pg, 0, &h)) != 0)
+			goto err;
+		if (TYPE(h) != P_INVALID ||
+		    NEXT_PGNO(h) != (pg == last ? PGNO_INVALID : pg + 1))
+			ret = DB_NOTFOUND;
+		if ((t_ret = PAGEPUT(dbc, mpf, h, 0)) != 0 && ret == 0)
+			ret = t_ret;
+		if (ret != 0)
+			goto err;
+	}
+
+	memset(&args, 0, sizeof(args));
+	args.meta_pgno = PGNO_BASE_MD;
+	args.meta_lsn = LSN(meta);
+	args.prev_pgno = prev;
+	args.prevpg_lsn = pp != NULL ? LSN(pp) : LSN(meta);
+	args.first_pgno = first;
+	args.old_last = last;
+	args.new_last = first - 1;
+	args.old_metaflags = meta->metaflags;
+
+	if ((ret = __db_pg_trunc_log(dbp, dbc->txn, &lsn, 0,
+	    args.meta_pgno, &args.meta_lsn, args.prev_pgno, &args.prevpg_lsn,
+	    args.first_pgno, args.old_last, args.new_last,
+	    args.old_metaflags)) != 0)
+		goto err;
+
+	/* Apply exactly what recovery would redo; the file is cut only once this log is gone. */
+	(void)__db_pg_trunc_apply((PAGE *)meta, PGNO_BASE_MD, &args, &lsn, 1);
+	if (pp != NULL)
+		(void)__db_pg_trunc_apply(pp, prev, &args, &lsn, 1);
+	__memp_set_trunc_wait(mpf, lsn.file);
+
+	if (pp != NULL) {
+		ret = PAGEPUT(dbc, mpf, pp, DB_MPOOL_DIRTY);
+		pp = NULL;
+	}
+err:	if (pp != NULL && (t_ret = PAGEPUT(dbc, mpf, pp, 0)) != 0 && ret == 0)
+		ret = t_ret;
+	return (ret);
+}
+
+/* Trim up to max_pages of a sorted list's free run at the end of the file, in one txn. */
+int
+__db_fltrim_step(DB *dbp, struct __db_flsort *fs, u_int32_t max_pages,
+    u_int32_t *trimmedp, int *donep, DB_LSN *meta_lsnp)
+{
+	DB_ENV *dbenv;
+	DB_LOCK metalock;
+	DB_MPOOLFILE *mpf;
+	DB_TXN *txn;
+	DBC *dbc;
+	DBMETA *meta;
+	db_pgno_t pgno, first, prev;
+	u_int32_t run, k, i0;
+	int ret, t_ret;
+
+	dbenv = dbp->dbenv;
+	mpf = dbp->mpf;
+	dbc = NULL;
+	meta = NULL;
+	txn = NULL;
+	LOCK_INIT(metalock);
+	*trimmedp = 0;
+	*donep = 0;
+
+	if (memcmp(fs->fileid, dbp->fileid, DB_FILE_ID_LEN) != 0)
+		return (EINVAL);
+	if (IS_REP_CLIENT(dbenv) || !LOGGING_ON(dbenv) ||
+	    gbl_is_physical_replicant)
+		return (EPERM);
+
+	/* Only a plan of the whole, sorted list knows the tail. */
+	for (run = 0; run < fs->n - fs->start &&
+	    fs->ents[fs->n - 1 - run].pgno == fs->last_pgno - run; run++)
+		;
+	if (fs->n - fs->start != fs->nfree || fs->next != fs->n || run == 0 ||
+	    max_pages == 0) {
+		*donep = 1;
+		return (__db_freelist_peek(dbp, meta_lsnp, &pgno));
+	}
+	k = run < max_pages ? run : max_pages;
+	i0 = fs->n - k;
+	first = fs->ents[i0].pgno;
+	prev = i0 == fs->start ? PGNO_BASE_MD : fs->ents[i0 - 1].pgno;
+
+	if ((ret = __txn_begin(dbenv, NULL, &txn, DB_TXN_NOWAIT)) != 0)
+		return (ret);
+	if ((ret = __lock_locker_set_lowpri(dbenv, txn->txnid)) != 0)
+		goto err;
+	if ((ret = __db_cursor(dbp, txn, &dbc, 0)) != 0)
+		goto err;
+	pgno = PGNO_BASE_MD;
+	if ((ret = __db_lget(dbc,
+	    LCK_ALWAYS, pgno, DB_LOCK_WRITE, 0, &metalock)) != 0)
+		goto err;
+	if ((ret = PAGEGET(dbc, mpf, &pgno, 0, &meta)) != 0)
+		goto err;
+	if (meta->last_pgno != fs->last_pgno)
+		ret = DB_NOTFOUND;
+	else
+		ret = __db_pg_trunc(dbc, meta, prev, first);
+	*meta_lsnp = LSN(meta);
+
+err:	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta,
+	    ret == 0 ? DB_MPOOL_DIRTY : 0)) != 0 && ret == 0)
+		ret = t_ret;
+	if (dbc != NULL && (t_ret = __db_c_close(dbc)) != 0 && ret == 0)
+		ret = t_ret;
+	if (ret == DB_LOCK_DEADLOCK)
+		ret = DB_LOCK_NOTGRANTED;
+	if (ret == 0 && gbl_btree_shrink_trim_debug_abort)
+		ret = DB_NOTFOUND;
+	if (ret != 0) {
+		(void)__txn_abort(txn);
+		return (ret);
+	}
+	/* A failed commit aborts the transaction itself. */
+	if ((ret = __txn_commit(txn, DB_TXN_NOSYNC)) != 0)
+		return (ret);
+	fs->n = i0;
+	fs->next = i0;
+	fs->nfree -= k;
+	fs->last_pgno = first - 1;
+	*trimmedp = k;
+	*donep = (k == run);
+	return (0);
+}
+
+/* Cut trimmed pages once first_logfile is past the trim's log; else set *waitp. */
+int
+__db_physical_truncate(DB *dbp, u_int32_t first_logfile,
+    u_int32_t cur_logfile, u_int32_t *pagesp, u_int32_t *waitp)
+{
+	DB_LOCK metalock;
+	DB_MPOOLFILE *mpf;
+	DBC *dbc;
+	DBMETA *meta;
+	db_pgno_t pgno, mlast;
+	u_int32_t wait;
+	int ret, t_ret;
+
+	mpf = dbp->mpf;
+	meta = NULL;
+	LOCK_INIT(metalock);
+	*pagesp = 0;
+	*waitp = 0;
+
+	/* Peek without the lock: most btrees have nothing to cut. */
+	pgno = PGNO_BASE_MD;
+	if ((ret = __memp_fget(mpf, &pgno, 0, &meta)) != 0)
+		return (ret);
+	__memp_last_pgno(mpf, &mlast);
+	t_ret = FLD_ISSET(meta->metaflags, DBMETA_TRIMMED) &&
+	    meta->last_pgno < mlast;
+	if ((ret = __memp_fput(mpf, meta, 0)) != 0)
+		return (ret);
+	meta = NULL;
+	if (!t_ret)
+		return (0);
+
+	if ((ret = __db_cursor(dbp, NULL, &dbc, 0)) != 0)
+		return (ret);
+	/* The meta lock keeps allocations (and rep apply) out while we cut. */
+	pgno = PGNO_BASE_MD;
+	if ((ret = __db_lget(dbc, LCK_ALWAYS, pgno, DB_LOCK_WRITE,
+	    DB_LOCK_NOWAIT, &metalock)) != 0) {
+		if (ret == DB_LOCK_DEADLOCK)
+			ret = DB_LOCK_NOTGRANTED;
+		goto err;
+	}
+	if ((ret = PAGEGET(dbc, mpf, &pgno, 0, &meta)) != 0)
+		goto err;
+
+	__memp_last_pgno(mpf, &mlast);
+	if (!FLD_ISSET(meta->metaflags, DBMETA_TRIMMED) ||
+	    meta->last_pgno >= mlast)
+		goto err;
+
+	/* Trimmed before a restart: the log tag is lost, so wait from now. */
+	if ((wait = __memp_get_trunc_wait(mpf)) == 0) {
+		__memp_set_trunc_wait(mpf, cur_logfile);
+		wait = cur_logfile;
+	}
+	if (first_logfile <= wait)
+		*waitp = wait;
+	else if ((ret = __memp_ftruncate(mpf, meta->last_pgno)) == 0)
+		*pagesp = mlast - meta->last_pgno;
+
+err:	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta, 0)) != 0 &&
+	    ret == 0)
+		ret = t_ret;
+	(void)__TLPUT(dbc, metalock);
+	if ((t_ret = __db_c_close(dbc)) != 0 && ret == 0)
+		ret = t_ret;
 	return (ret);
 }

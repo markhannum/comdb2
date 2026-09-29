@@ -646,6 +646,13 @@ alloc:		/*
 		MUTEX_LOCK(dbenv, &hp->hash_mutex);
 		break;
 	case SECOND_MISS:
+		/* __memp_ftruncate may have lowered last_pgno since we checked. */
+		if (!extending && flags != DB_MPOOL_CREATE &&
+		    flags != DB_MPOOL_RECP && *pgnoaddr > mfp->last_pgno) {
+			MUTEX_UNLOCK(dbenv, &hp->hash_mutex);
+			ret = DB_PAGE_NOTFOUND;
+			goto err;
+		}
 		/*
 		 * We allocated buffer space for the requested page, and found
 		 * the page still missing on our second pass through the buffer

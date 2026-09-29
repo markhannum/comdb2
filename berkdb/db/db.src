@@ -277,3 +277,18 @@ ARG	old_next	u_int32_t	lu
 /* dest_old_next: dest_pgno's next (or meta->free, for the head) before the move */
 ARG	dest_old_next	u_int32_t	lu
 END
+
+/* pg_trunc: drop free pages new_last+1..old_last, the list's tail after prev_pgno. */
+BEGIN pg_trunc		71
+DB	fileid		int32_t		ld
+ARG	meta_pgno	db_pgno_t	lu
+POINTER	meta_lsn	DB_LSN *	lu
+ARG	prev_pgno	db_pgno_t	lu
+POINTER	prevpg_lsn	DB_LSN *	lu
+/* first_pgno..old_last: the pages dropped; new_last = first_pgno - 1 */
+ARG	first_pgno	u_int32_t	lu
+ARG	old_last	u_int32_t	lu
+ARG	new_last	u_int32_t	lu
+/* old_metaflags: restored on undo (a trim sets DBMETA_TRIMMED) */
+ARG	old_metaflags	u_int32_t	lu
+END

@@ -218,6 +218,7 @@ struct __mpoolfile {
 	db_pgno_t orig_last_pgno;	/* Original last page in the file. */
 	db_pgno_t alloc_pgno;           /* Last page alloced on disk. */
 	db_pgno_t maxpgno;		/* Maximum page number. */
+	u_int32_t trunc_wait_file;	/* Log of the last pg_trunc; cut after it's gone. */
 
 	/*
 	 * None of the following fields are thread protected.

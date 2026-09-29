@@ -34,7 +34,7 @@ function unsorted_lines {
 }
 
 # The worker's progress counters; others tick on every idle pass
-function progress { shrink_status $1 | tr ' ' '\n' | awk 'k { print k, $0; k = "" } /^moves$/ { k = $0 }'; }
+function progress { shrink_status $1 | tr ' ' '\n' | awk 'k { print k, $0; k = "" } /^(moves|trimmed)$/ { k = $0 }'; }
 function quiesce
 {
     local m=$1 prev="" cur
@@ -147,5 +147,54 @@ done
 tun $master "btree_shrink 1"
 wait_sorted $master
 check_replicas $master
+
+echo "== trim, then every node truncates once its logs are gone"
+function attr_all { for n in $(nodes); do for a in "$@"; do sqlh $n "exec procedure sys.cmd.send('bdb setattr $a')" >/dev/null; done; done; }
+function tun_all { for n in $(nodes); do tun $n "$@"; done; }
+# 1 if every btree of t1/t2 on node $1 is exactly (last_pgno + 1) pages
+function truncated_on {
+    local n=$1
+    sqlh $n "exec procedure sys.cmd.send('freespace t1')" | grep "^t1 " > tr.$n
+    sqlh $n "exec procedure sys.cmd.send('freespace t2')" | grep "^t2 " >> tr.$n
+    awk '{ for (i = 1; i <= NF; i++) { if ($i == "pagesize") ps = $(i+1); if ($i == "last_pgno") lp = $(i+1);
+           if ($i == "file_bytes") { fb = $(i+1); gsub(/[^0-9]/, "", fb); if (fb != (lp + 1) * ps) bad = 1 } } }
+         END { exit bad }' tr.$n
+}
+function push_until_truncated {
+    local nodes_to_check="$1"
+    for ((try = 0; try < 30; try++)); do
+        local all=1
+        for n in $nodes_to_check; do truncated_on $n || all=0; done
+        [[ $all == 1 ]] && return 0
+        local last=$(sql "select max(commitlsnfile) from comdb2_transaction_commit" 2>/dev/null)
+        [[ "$last" =~ ^[0-9]+$ ]] || last=$((10 + try * 2))
+        sqlh $master "exec procedure sys.cmd.send('pushlogs $((last + 2)):0')" >/dev/null
+        sleep 10
+    done
+    for n in $nodes_to_check; do echo "$n:"; cat tr.$n; done
+    failexit "files not truncated on: $nodes_to_check"
+}
+tun_all "btree_shrink_truncate_interval_sec 2"
+attr_all "LOGDELETEAGE 0" "MIN_KEEP_LOGS 1" "LOGDELETE_RUN_INTERVAL 2" "CHECKPOINTTIME 2" "PRIVATE_BLKSEQ_MAXAGE 1"
+wait_sorted $master
+push_until_truncated "$(nodes)"
+check_replicas $master
+
+if [[ -n "$CLUSTER" ]]; then
+    echo "== a replica that keeps its logs must not truncate, and must survive the master reusing and extending"
+    lag=$(for n in $(nodes); do [[ $n != $master ]] && echo $n; done | head -1)
+    sqlh $lag "exec procedure sys.cmd.send('bdb setattr MIN_KEEP_LOGS 100000')" >/dev/null
+    for ((i = 60000; i < 90000; i += 5000)); do
+        sql "delete from t1 where a >= $i and a < $((i + 5000))" >/dev/null
+    done
+    sleep 20
+    load 900000 960000
+    sleep 10
+    truncated_on $lag && echo "note: $lag had nothing pending"
+    check_replicas $master
+    sqlh $lag "exec procedure sys.cmd.send('bdb setattr MIN_KEEP_LOGS 1')" >/dev/null
+    push_until_truncated "$(nodes)"
+    check_replicas $master
+fi
 
 echo "Success"

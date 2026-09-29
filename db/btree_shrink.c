@@ -29,13 +29,44 @@
 int gbl_btree_shrink = 0;
 int gbl_btree_shrink_sleep_ms = 10;
 int gbl_btree_shrink_pass_interval_sec = 60;
+int gbl_btree_shrink_truncate_interval_sec = 30;
 
 static pthread_t btree_shrink_tid;
+static time_t last_truncate;
+
+/* Cut trimmed pages from files, on any node, once no kept log needs them */
+static void shrink_truncate_pass(void)
+{
+    uint32_t first, cur;
+
+    rdlock_schema_lk();
+    if (!get_schema_change_in_progress(__func__, __LINE__) &&
+        bdb_shrink_truncate_begin(thedb->bdb_env, &first, &cur) == 0) {
+        for (int i = 0; i < thedb->num_dbs && !db_is_exiting(); i++) {
+            struct dbtable *db = thedb->dbs[i];
+            if (db->dbtype == DBTYPE_TAGGED_TABLE && db->handle)
+                bdb_shrink_truncate_table(db->handle, first, cur);
+        }
+        bdb_shrink_truncate_end(thedb->bdb_env);
+    }
+    unlock_schema_lk();
+}
+
+static void truncate_if_due(void)
+{
+    time_t now = time(NULL);
+    if (now - last_truncate >= gbl_btree_shrink_truncate_interval_sec) {
+        shrink_truncate_pass();
+        last_truncate = now;
+    }
+}
 
 static void shrink_sleep(int secs)
 {
-    for (int i = 0; i < secs && !db_is_exiting(); i++)
+    for (int i = 0; i < secs && !db_is_exiting(); i++) {
         sleep(1);
+        truncate_if_due();
+    }
 }
 
 static void *btree_shrink_thread(void *arg)
@@ -48,6 +79,7 @@ static void *btree_shrink_thread(void *arg)
     backend_thread_event(thedb, COMDB2_THR_EVENT_START);
 
     while (!db_is_exiting()) {
+        truncate_if_due();
         if (!gbl_btree_shrink || gbl_is_physical_replicant || thedb->master != gbl_myhostname) {
             bdb_shrink_ctx_reset(ctx);
             tbl = 0;

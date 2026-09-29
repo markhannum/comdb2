@@ -145,6 +145,9 @@ static int __mempv_read_log_record(void *ptr, recovery_func_t *apply, u_int64_t 
 		case DB___db_pg_flmove:
 		   *apply = __db_pg_flmove_snap_recover;
 		   break;
+		case DB___db_pg_trunc:
+		   *apply = __db_pg_trunc_snap_recover;
+		   break;
 		default:
 			__mempv_logmsg(LOGMSG_ERROR, caller_id,
 				"Op of log record is unrecognized %d\n", rectype);

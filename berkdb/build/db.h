@@ -3421,6 +3421,10 @@ void __db_flsort_info(struct __db_flsort *fs, u_int64_t *nfree,
 	db_pgno_t *last_pgno, u_int32_t *placed, u_int32_t *planned);
 int __db_flsort_step(DB *dbp, struct __db_flsort *fs, u_int32_t max_moves,
 	u_int32_t *movedp, int *donep, DB_LSN *meta_lsnp);
+int __db_fltrim_step(DB *dbp, struct __db_flsort *fs, u_int32_t max_pages,
+	u_int32_t *trimmedp, int *donep, DB_LSN *meta_lsnp);
+int __db_physical_truncate(DB *dbp, u_int32_t first_logfile,
+	u_int32_t cur_logfile, u_int32_t *pagesp, u_int32_t *waitp);
 
 int get_committed_lsns(DB_ENV *dbenv, DB_LSN **lsns, int *n_lsns,
 	int epoch, int file, int offset);

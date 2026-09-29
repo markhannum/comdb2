@@ -1038,6 +1038,9 @@ void bdb_shrink_ctx_reset(struct bdb_shrink_ctx *ctx);
 void bdb_shrink_ctx_destroy(struct bdb_shrink_ctx *ctx);
 int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx);
 void bdb_shrink_dump(FILE *out);
+int bdb_shrink_truncate_begin(bdb_state_type *bdb_state, uint32_t *first_logfile, uint32_t *cur_logfile);
+void bdb_shrink_truncate_end(bdb_state_type *bdb_state);
+void bdb_shrink_truncate_table(bdb_state_type *tbl, uint32_t first_logfile, uint32_t cur_logfile);
 
 /* returns nodeid of master, -1 if there is no master */
 char *bdb_whoismaster(bdb_state_type *bdb_handle);

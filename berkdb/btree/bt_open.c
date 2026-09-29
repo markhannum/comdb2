@@ -389,7 +389,9 @@ __bam_read_root(dbp, txn, base_pgno, flags)
 	 * locked.  This is ok since two threads in the code
 	 * must be setting it to the same value.  SR #7159.
 	 */
-	if (!LF_ISSET(DB_RDONLY) && dbp->meta_pgno == PGNO_BASE_MD) {
+	if (!LF_ISSET(DB_RDONLY) && dbp->meta_pgno == PGNO_BASE_MD &&
+	    !FLD_ISSET(meta->dbmeta.metaflags, DBMETA_TRIMMED)) {
+		/* A trimmed file keeps pages past last_pgno until truncated. */
 		__memp_last_pgno(mpf, &meta->dbmeta.last_pgno);
 		ret = PAGEPUT(dbc, mpf, meta, DB_MPOOL_DIRTY);
 	} else

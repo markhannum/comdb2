@@ -362,6 +362,18 @@ __db_new(dbc, type, pagepp)
 		goto err;
 
 	extend = (meta->free == PGNO_INVALID);
+
+	/* Reuse pages btree_shrink trimmed rather than extending past them. */
+	if (extend && FLD_ISSET(meta->metaflags, DBMETA_TRIMMED)) {
+		db_pgno_t mlast;
+
+		__memp_last_pgno(mpf, &mlast);
+		if (meta->last_pgno < mlast) {
+			PAGEPUT(dbc, mpf, (PAGE *)meta, 0);
+			(void)__TLPUT(dbc, metalock);
+			return (__db_new_original(dbc, type, pagepp));
+		}
+	}
 	meta_flags = DB_MPOOL_DIRTY;
 
 
@@ -583,9 +595,21 @@ __db_new_original(dbc, type, pagepp)
 		goto err;
 	last = meta->last_pgno;
 	if (meta->free == PGNO_INVALID) {
+		db_pgno_t mlast;
+
 		last = pgno = meta->last_pgno + 1;
 		ZERO_LSN(lsn);
 		extend = 1;
+
+		/* Reusing a trimmed page not yet cut: log its real LSN for snapshot readers. */
+		__memp_last_pgno(mpf, &mlast);
+		if (FLD_ISSET(meta->metaflags, DBMETA_TRIMMED) && pgno <= mlast) {
+			if ((ret = PAGEGET(dbc, mpf, &pgno, 0, &h)) != 0)
+				goto err;
+			lsn = h->lsn;
+			h->pgno = pgno;
+			extend = 2;
+		}
 	} else {
 		pgno = meta->free;
 		if ((ret = PAGEGET(dbc, mpf, &pgno, 0, &h)) != 0)
@@ -655,8 +679,12 @@ __db_new_original(dbc, type, pagepp)
 		CHECK_ALLOC_PAGE_LSN(lsn);
 		if ((ret = __db_pg_alloc_log(dbp, dbc->txn, &LSN(meta), 0,
 			    &LSN(meta), PGNO_BASE_MD, &lsn, pgno,
-			    (u_int32_t)type, newnext)) != 0)
+			    (u_int32_t)type |
+			    (extend == 2 ? DB_PG_ALLOC_TRIMMED : 0), newnext)) != 0)
 			goto err;
+		/* This log now references the trimmed page too, even if we abort. */
+		if (extend == 2)
+			__memp_set_trunc_wait(mpf, LSN(meta).file);
 	} else
 		LSN_NOT_LOGGED(LSN(meta));
 
@@ -672,12 +700,14 @@ __db_new_original(dbc, type, pagepp)
 		meta->last_pgno = pgno;
 		ZERO_LSN(h->lsn);
 		h->pgno = pgno;
-	}
+	} else if (extend == 2)
+		meta->last_pgno = pgno;
 	LSN(h) = LSN(meta);
 
-	DB_ASSERT(TYPE(h) == P_INVALID);
+	/* A reused trimmed page's contents don't matter: it's reinitialized. */
+	DB_ASSERT(extend == 2 || TYPE(h) == P_INVALID);
 
-	if (TYPE(h) != P_INVALID)
+	if (extend != 2 && TYPE(h) != P_INVALID)
 		return (__db_panic(dbp->dbenv, EINVAL));
 
 	PAGEPUT(dbc, mpf, (PAGE *)meta, DB_MPOOL_DIRTY);
