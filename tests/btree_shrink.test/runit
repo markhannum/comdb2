@@ -34,7 +34,7 @@ function unsorted_lines {
 }
 
 # The worker's progress counters; others tick on every idle pass
-function progress { shrink_status $1 | tr ' ' '\n' | awk 'k { print k, $0; k = "" } /^(moves|trimmed)$/ { k = $0 }'; }
+function progress { shrink_status $1 | tr ' ' '\n' | awk 'k { print k, $0; k = "" } /^(moves|trimmed|relocated)$/ { k = $0 }'; }
 function quiesce
 {
     local m=$1 prev="" cur
@@ -196,5 +196,38 @@ if [[ -n "$CLUSTER" ]]; then
     push_until_truncated "$(nodes)"
     check_replicas $master
 fi
+
+echo "== relocate live pages into holes, then truncate everywhere"
+function relocated { shrink_status $1 | sed -n 2p | sed 's/.*relocated \([0-9]*\).*/\1/'; }
+function rowid_lookups {
+    local n=$1
+    for id in $(sqlh $n "select rowid from t1 where a % 997 = 0 limit 30" | sed 's/.*rowid=\([0-9]*\).*/\1/; s/^\([0-9]*\)$/\1/'); do
+        [[ -n "$(sqlh $n "select a from t1 where rowid=$id")" ]] || failexit "rowid $id not found on $n"
+    done
+}
+master=$(getmaster)
+# Empty runs of pages in the middle so the tail stays live
+for ((i = 20000; i < 90000; i += 10000)); do
+    sql "delete from t1 where a > $i and a <= $((i + 7000))" >/dev/null
+done
+(
+    for ((r = 1; r <= 30; r++)); do
+        base=$((2000000 + r * 100))
+        sql "insert into t1 select value, printf('%0190d', value) from generate_series($base, $((base + 99)))" >/dev/null
+        sql "update t1 set b = 'u' || b where a between $((r * 100)) and $((r * 100 + 20))" >/dev/null
+    done
+) &
+traffic=$!
+tun $master "btree_shrink_move 1" "btree_shrink 1"
+# Not a bare wait: the node restarted in phase 3 is also our child
+wait $traffic
+quiesce $master
+shrink_status $master
+[[ "$(relocated $master)" -gt 0 ]] || failexit "nothing relocated"
+check_replicas $master
+for n in $(nodes); do rowid_lookups $n; done
+push_until_truncated "$(nodes)"
+check_replicas $master
+for n in $(nodes); do rowid_lookups $n; done
 
 echo "Success"

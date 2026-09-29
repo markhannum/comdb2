@@ -294,3 +294,36 @@ out:
 done:
 	REC_CLOSE;
 }
+
+/*
+ * PUBLIC: int __bam_pgmove_snap_recover
+ * PUBLIC:   __P((DB_ENV *, DBT *, DB_LSN *, db_recops, PAGE *));
+ */
+int
+__bam_pgmove_snap_recover(dbenv, dbtp, lsnp, op, pagep)
+	DB_ENV *dbenv;
+	DBT *dbtp;
+	DB_LSN *lsnp;
+	db_recops op;
+	PAGE *pagep;
+{
+	__bam_pgmove_args *argp;
+	DB *file_dbp;
+	DBC *dbc;
+	DB_MPOOLFILE *mpf;
+	int ret;
+	db_pgno_t pgno_in;
+
+	ret = 0;
+	REC_INTRO(__bam_pgmove_read, 1);
+	pgno_in = PGNO(pagep);
+
+	if (__bam_pgmove_apply(file_dbp, pagep, pgno_in, argp, lsnp, 0) != 0) {
+		logmsg(LOGMSG_ERROR, "%s:[%u:%u] Page %u is not a valid recovery target\n", __func__, lsnp->file, lsnp->offset, pgno_in);
+		ret = 1;
+	}
+
+out:
+done:
+	REC_CLOSE;
+}

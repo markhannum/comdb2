@@ -1966,6 +1966,9 @@ extern int gbl_btree_shrink_trim;
 extern int gbl_btree_shrink_trim_pages_per_txn;
 extern int gbl_btree_shrink_truncate_interval_sec;
 extern int gbl_btree_shrink_trim_debug_abort;
+extern int gbl_btree_shrink_move;
+extern int gbl_btree_shrink_move_stop_pct;
+extern int gbl_btree_shrink_move_debug_abort;
 extern char *gbl_dbdir;
 
 extern double gbl_cpupercent;

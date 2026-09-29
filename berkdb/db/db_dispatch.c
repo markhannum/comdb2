@@ -107,6 +107,7 @@ dump_log_event_counts(void)
 		DB___bam_split, DB___bam_rsplit, DB___bam_adj, DB___bam_cadjust,
 			DB___bam_cdel,
 		DB___bam_repl, DB___bam_root, DB___bam_curadj, DB___bam_rcuradj,
+			DB___bam_pgmove,
 			DB___crdel_metasub,
 		DB___db_addrem, DB___db_big, DB___db_ovref, DB___db_relink,
 			DB___db_debug,
@@ -134,7 +135,7 @@ dump_log_event_counts(void)
 		"DB___bam_split", "DB___bam_rsplit", "DB___bam_adj",
 			"DB___bam_cadjust", "DB___bam_cdel",
 		"DB___bam_repl", "DB___bam_root", "DB___bam_curadj",
-			"DB___bam_rcuradj", "DB___crdel_metasub",
+			"DB___bam_rcuradj", "DB___bam_pgmove", "DB___crdel_metasub",
 		"DB___db_addrem", "DB___db_big", "DB___db_ovref",
 			"DB___db_relink", "DB___db_debug",
 		"DB___db_noop", "DB___db_pg_alloc", "DB___db_pg_free",
@@ -189,6 +190,8 @@ optostr(int op)
 		return "DB___bam_curadj";
 	case DB___bam_rcuradj:
 		return "DB___bam_rcuradj";
+	case DB___bam_pgmove:
+		return "DB___bam_pgmove";
 	case DB___crdel_metasub:
 		return "DB___crdel_metasub";
 	case DB___db_addrem:
@@ -328,6 +331,7 @@ ufid_for_recovery_record(DB_ENV *env, DB_LSN *lsn, int rectype,
 	case DB___bam_curadj:
 	case DB___bam_rcuradj:
 	case DB___bam_pgcompact:
+	case DB___bam_pgmove:
 	case DB___crdel_metasub:
 	case DB___db_ovref:
 	case DB___db_pg_free:

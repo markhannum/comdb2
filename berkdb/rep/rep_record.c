@@ -2752,7 +2752,8 @@ __rep_classify_type(u_int32_t type, int *had_serializable_records)
 		(!gbl_allow_parallel_rep_on_pagesplit &&
 			(type == DB___db_pg_alloc ||
 			type == DB___db_pg_free || type == DB___db_pg_freedata ||
-			type == DB___db_pg_flmove || type == DB___db_pg_trunc)
+			type == DB___db_pg_flmove || type == DB___db_pg_trunc ||
+			type == DB___bam_pgmove)
 		) ||
 		type == DB___qam_incfirst ||
 		type == DB___qam_mvptr ||
@@ -2875,6 +2876,12 @@ __rep_check_applied_lsns(dbenv, lc, in_recovery_verify)
 						PARM_LSN(lsn), t.array[i].fid, pgno,
 						t.array[i].comment);
 
+				continue;
+			}
+			/* A moved leaf may have no prev or next sibling */
+			else if (type == DB___bam_pgmove && pgno == 0 &&
+				(strcmp(t.array[i].comment, "prev") == 0 ||
+				strcmp(t.array[i].comment, "next") == 0)) {
 				continue;
 			}
 			/* Next and previous pages on a big put may be 0 (first and last pages) */

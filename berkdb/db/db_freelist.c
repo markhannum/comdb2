@@ -41,6 +41,7 @@ extern int gbl_is_physical_replicant;
 
 int gbl_btree_shrink_debug_abort = 0;		/* test: abort each sort batch */
 int gbl_btree_shrink_trim_debug_abort = 0;	/* test: abort each trim */
+int gbl_btree_shrink_move_debug_abort = 0;	/* test: abort each page move */
 
 #define	FS_ISSET(bm, pg)	((bm)[(pg) >> 3] & (1 << ((pg) & 7)))
 #define	FS_SET(bm, pg)		((bm)[(pg) >> 3] |= (1 << ((pg) & 7)))
@@ -765,4 +766,116 @@ err:	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta, 0)) != 0 &&
 	if ((t_ret = __db_c_close(dbc)) != 0 && ret == 0)
 		ret = t_ret;
 	return (ret);
+}
+
+/* Move the live page at the end of the file into the lowest free page, then trim it. */
+int
+__db_btmove_step(DB *dbp, struct __db_flsort *fs, u_int32_t *movedp,
+    int *stopp)
+{
+	DB_ENV *dbenv;
+	DB_LOCK metalock;
+	DB_MPOOLFILE *mpf;
+	DB_TXN *txn;
+	DBC *dbc;
+	DBMETA *meta;
+	PAGE *tp;
+	db_pgno_t pgno, H, L, T, old_next, dest_old_next;
+	int have_tail, ret, t_ret;
+
+	dbenv = dbp->dbenv;
+	mpf = dbp->mpf;
+	dbc = NULL;
+	meta = NULL;
+	txn = NULL;
+	LOCK_INIT(metalock);
+	*movedp = 0;
+	*stopp = 0;
+
+	if (memcmp(fs->fileid, dbp->fileid, DB_FILE_ID_LEN) != 0)
+		return (EINVAL);
+	if (IS_REP_CLIENT(dbenv) || !LOGGING_ON(dbenv) ||
+	    gbl_is_physical_replicant)
+		return (EPERM);
+	/* The plan must know the whole, sorted list, with its tail trimmed. */
+	if (fs->next != fs->n)
+		return (DB_NOTFOUND);
+	if (fs->n - fs->start != fs->nfree || fs->n == fs->start ||
+	    fs->ents[fs->start].pgno >= fs->last_pgno) {
+		*stopp = DB_BTMOVE_STOP_NOFREE;
+		return (0);
+	}
+	if (fs->ents[fs->n - 1].pgno == fs->last_pgno)
+		return (0);	/* a free tail: trim first */
+
+	L = fs->ents[fs->start].pgno;
+	have_tail = fs->start + 1 < fs->n;
+	T = have_tail ? fs->ents[fs->n - 1].pgno : PGNO_INVALID;
+
+	if ((ret = __txn_begin(dbenv, NULL, &txn, DB_TXN_NOWAIT)) != 0)
+		return (ret);
+	if ((ret = __lock_locker_set_lowpri(dbenv, txn->txnid)) != 0)
+		goto err;
+	if ((ret = __db_cursor(dbp, txn, &dbc, 0)) != 0)
+		goto err;
+	pgno = PGNO_BASE_MD;
+	if ((ret = __db_lget(dbc,
+	    LCK_ALWAYS, pgno, DB_LOCK_WRITE, 0, &metalock)) != 0)
+		goto err;
+	if ((ret = PAGEGET(dbc, mpf, &pgno, 0, &meta)) != 0)
+		goto err;
+	H = meta->last_pgno;
+	if (H != fs->last_pgno) {
+		ret = DB_NOTFOUND;
+		goto err;
+	}
+	/* T must still be the last free page. */
+	if (have_tail) {
+		pgno = T;
+		if ((ret = PAGEGET(dbc, mpf, &pgno, 0, &tp)) != 0)
+			goto err;
+		if (TYPE(tp) != P_INVALID || NEXT_PGNO(tp) != PGNO_INVALID)
+			ret = DB_NOTFOUND;
+		if ((t_ret = PAGEPUT(dbc, mpf, tp, 0)) != 0 && ret == 0)
+			ret = t_ret;
+		if (ret != 0)
+			goto err;
+	}
+
+	if ((ret = __bam_pgmove(dbc, meta, H, L)) != 0)
+		goto err;
+	/* H is now the free-list head: send it to the end and trim it off. */
+	if (have_tail) {
+		if ((ret = __db_pg_flmove(dbc, meta, H, PGNO_BASE_MD, T,
+		    &old_next, &dest_old_next)) != 0 ||
+		    (ret = __db_pg_trunc(dbc, meta, T, H)) != 0)
+			goto err;
+	} else if ((ret = __db_pg_trunc(dbc, meta, PGNO_BASE_MD, H)) != 0)
+		goto err;
+
+err:	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta,
+	    ret == 0 ? DB_MPOOL_DIRTY : 0)) != 0 && ret == 0)
+		ret = t_ret;
+	if (dbc != NULL && (t_ret = __db_c_close(dbc)) != 0 && ret == 0)
+		ret = t_ret;
+	if (ret == 0 && gbl_btree_shrink_move_debug_abort)
+		ret = DB_NOTFOUND;
+	if (ret == DB_BTMOVE_STOP) {
+		*stopp = DB_BTMOVE_STOP_PAGE;
+		(void)__txn_abort(txn);
+		return (0);
+	}
+	if (ret != 0) {
+		if (txn != NULL)
+			(void)__txn_abort(txn);
+		return (ret == DB_LOCK_DEADLOCK ? DB_LOCK_NOTGRANTED : ret);
+	}
+	/* A failed commit aborts the transaction itself. */
+	if ((ret = __txn_commit(txn, DB_TXN_NOSYNC)) != 0)
+		return (ret);
+	fs->start++;
+	fs->nfree--;
+	fs->last_pgno = H - 1;
+	*movedp = 1;
+	return (0);
 }

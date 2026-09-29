@@ -1744,3 +1744,176 @@ out:
 			ret = t_ret;
 	REC_CLOSE;
 }
+
+unsigned int hash_fixedwidth(const unsigned char *genid);
+int genidcmp(const void *hash_genid, const void *genid);
+void genidsetzero(void *g);
+
+/*
+ * __bam_pgmove_hash_clear -- drop genid hash entries for pg's keys that point at stale.
+ * PUBLIC: void __bam_pgmove_hash_clear __P((DB *, PAGE *, db_pgno_t));
+ */
+void
+__bam_pgmove_hash_clear(DB *dbp, PAGE *pg, db_pgno_t stale)
+{
+	genid_hash *hash;
+	BKEYDATA *bk;
+	u_int8_t buf[KEYBUF];
+	db_indx_t i, len;
+	unsigned int hh;
+
+	if (dbp == NULL || !F_ISSET(dbp, DB_AM_HASH) ||
+	    (hash = dbp->pg_hash) == NULL || TYPE(pg) != P_LBTREE)
+		return;
+	for (i = 0; i < NUM_ENT(pg); i += P_INDX) {
+		bk = GET_BKEYDATA(dbp, pg, i);
+		if (B_TYPE(bk) != B_KEYDATA ||
+		    bk_decompress(dbp, pg, &bk, buf, sizeof(buf)) != 0)
+			continue;
+		ASSIGN_ALIGN(db_indx_t, len, bk->len);
+		if (len != GENID_SIZE)
+			continue;
+		hh = hash_fixedwidth(bk->data) % hash->ntbl;
+		Pthread_mutex_lock(&hash->mutex);
+		if (genidcmp(hash->tbl[hh].genid, bk->data) == 0 &&
+		    hash->tbl[hh].pgno == stale) {
+			genidsetzero(hash->tbl[hh].genid);
+			hash->tbl[hh].pgno = 0;
+		}
+		Pthread_mutex_unlock(&hash->mutex);
+	}
+}
+
+/*
+ * __bam_pgmove_apply -- redo or undo a pgmove on dst, the parent or a sibling.
+ * PUBLIC: int __bam_pgmove_apply
+ * PUBLIC:    __P((DB *, PAGE *, db_pgno_t, __bam_pgmove_args *, DB_LSN *, int));
+ */
+int
+__bam_pgmove_apply(DB *dbp, PAGE *pg, db_pgno_t pgno, __bam_pgmove_args *argp,
+    DB_LSN *lsnp, int redo)
+{
+	db_pgno_t to;
+
+	to = redo ? argp->dst : argp->src;
+	if (pgno == argp->dst) {
+		if (redo) {
+			memset(pg, 0, dbp->pgsize);
+			memcpy(pg, argp->hdr.data, argp->hdr.size);
+			memcpy((u_int8_t *)pg + dbp->pgsize - argp->data.size,
+			    argp->data.data, argp->data.size);
+			PGNO(pg) = argp->dst;
+			LSN(pg) = *lsnp;
+		} else {
+			/* Back to what __db_new left (it's typed like src). */
+			P_INIT(pg, dbp->pgsize, argp->dst,
+			    PGNO_INVALID, PGNO_INVALID, 0,
+			    TYPE((PAGE *)argp->hdr.data));
+			LSN(pg) = argp->dstlsn;
+		}
+	} else if (pgno == argp->ppgno) {
+		GET_BINTERNAL(dbp, pg, argp->pindx)->pgno = to;
+		LSN(pg) = redo ? *lsnp : argp->plsn;
+	} else if (argp->prev != PGNO_INVALID && pgno == argp->prev) {
+		NEXT_PGNO(pg) = to;
+		LSN(pg) = redo ? *lsnp : argp->prevlsn;
+	} else if (argp->next != PGNO_INVALID && pgno == argp->next) {
+		PREV_PGNO(pg) = to;
+		LSN(pg) = redo ? *lsnp : argp->nextlsn;
+	} else
+		return (ENOENT);
+	return (0);
+}
+
+/*
+ * __bam_pgmove_recover -- recovery function for pgmove.
+ * PUBLIC: int __bam_pgmove_recover
+ * PUBLIC:   __P((DB_ENV *, DBT *, DB_LSN *, db_recops, void *));
+ */
+int
+__bam_pgmove_recover(dbenv, dbtp, lsnp, op, info)
+	DB_ENV *dbenv;
+	DBT *dbtp;
+	DB_LSN *lsnp;
+	db_recops op;
+	void *info;
+{
+	__bam_pgmove_args *argp;
+	DB *file_dbp, *dbp;
+	DBC *dbc;
+	DB_MPOOLFILE *mpf;
+	DB_LSN *prior;
+	PAGE *pagep;
+	db_pgno_t pgnos[4];
+	int cmp_n, cmp_p, i, modified, npgnos, ret;
+
+	pagep = NULL;
+	COMPQUIET(info, NULL);
+	REC_PRINT(__bam_pgmove_print);
+	REC_INTRO(__bam_pgmove_read, 1);
+	/* The live handle's genid hash; not while recovering at startup */
+	dbp = file_dbp->peer;
+	if (dbp != NULL && F_ISSET(dbp, DB_AM_RECOVER))
+		dbp = NULL;
+
+	npgnos = 0;
+	pgnos[npgnos++] = argp->dst;
+	pgnos[npgnos++] = argp->ppgno;
+	if (argp->prev != PGNO_INVALID)
+		pgnos[npgnos++] = argp->prev;
+	if (argp->next != PGNO_INVALID)
+		pgnos[npgnos++] = argp->next;
+
+	for (i = 0; i < npgnos; i++) {
+		/* dst may be past a node's (differently) truncated end. */
+		if ((ret = __memp_fget(mpf, &pgnos[i],
+		    i == 0 && DB_REDO(op) ? DB_MPOOL_CREATE : 0, &pagep)) != 0) {
+			if (DB_UNDO(op)) {
+				ret = 0;
+				continue;
+			}
+			ret = __db_pgerr(file_dbp, pgnos[i], ret);
+			goto out;
+		}
+		if (i == 0)
+			prior = &argp->dstlsn;
+		else if (pgnos[i] == argp->ppgno)
+			prior = &argp->plsn;
+		else if (pgnos[i] == argp->prev)
+			prior = &argp->prevlsn;
+		else
+			prior = &argp->nextlsn;
+		modified = 0;
+		cmp_n = log_compare(lsnp, &LSN(pagep));
+		cmp_p = log_compare(&LSN(pagep), prior);
+		/* A new or stale dst image is fully rewritten by redo. */
+		if (i == 0 && DB_REDO(op) && cmp_n > 0)
+			cmp_p = 0;
+		CHECK_LSN(op, cmp_p, &LSN(pagep), prior, lsnp, argp->fileid,
+		    pgnos[i]);
+		if (cmp_p == 0 && DB_REDO(op)) {
+			(void)__bam_pgmove_apply(file_dbp,
+			    pagep, pgnos[i], argp, lsnp, 1);
+			if (i == 0)
+				__bam_pgmove_hash_clear(dbp, pagep, argp->src);
+			modified = 1;
+		} else if (cmp_n == 0 && DB_UNDO(op)) {
+			if (i == 0)
+				__bam_pgmove_hash_clear(dbp, pagep, argp->dst);
+			(void)__bam_pgmove_apply(file_dbp,
+			    pagep, pgnos[i], argp, lsnp, 0);
+			modified = 1;
+		}
+		if ((ret = __memp_fput(mpf,
+		    pagep, modified ? DB_MPOOL_DIRTY : 0)) != 0)
+			goto out;
+		pagep = NULL;
+	}
+
+done:	*lsnp = argp->prev_lsn;
+	ret = 0;
+
+out:	if (pagep != NULL)
+		(void)__memp_fput(mpf, pagep, 0);
+	REC_CLOSE;
+}

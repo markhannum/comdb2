@@ -36,6 +36,9 @@ int gbl_btree_shrink_verbose = 0;
 int gbl_btree_shrink_btree_budget_sec = 30; /* then give other btrees a turn (0: never) */
 int gbl_btree_shrink_trim = 1;
 int gbl_btree_shrink_trim_pages_per_txn = 256;
+int gbl_btree_shrink_move = 1;
+int gbl_btree_shrink_move_stop_pct = 2;
+int gbl_btree_shrink_move_blocked = 0; /* set while schema changes scan in page order */
 
 extern int gbl_btree_shrink_debug_abort;
 extern int gbl_btree_shrink_trim_debug_abort;
@@ -45,6 +48,8 @@ int bdb_get_first_logfile(bdb_state_type *bdb_state, int *bdberr);
 int bdb_get_last_logfile(bdb_state_type *bdb_state, int *bdberr);
 void logdelete_lock(const char *func, int line);
 void logdelete_unlock(const char *func, int line);
+extern int gbl_btree_shrink_move_debug_abort;
+extern int gbl_rowlocks;
 
 /* Meta LSN of btrees already sorted or found ineligible, to skip re-walks */
 #define SHRINK_SEEN_SIZE 4096
@@ -62,6 +67,9 @@ struct bdb_shrink_ctx {
     int busy;                 /* consecutive busy steps on this btree */
     int visit_start;          /* epoch ms when work on this btree began, or 0 */
     int trimming;             /* plan is sorted; trimming the free tail */
+    int moving;               /* tail trimmed; moving live pages down from the end */
+    int gated;                /* moving was gated at the last step */
+    int relocating;           /* this plan has entered the move phase */
     struct shrink_seen seen[SHRINK_SEEN_SIZE];
 };
 
@@ -110,6 +118,10 @@ static struct {
     uint32_t trunc_waiting;       /* last truncate pass: btrees waiting on logs */
     uint32_t trunc_wait_file;     /* ... for this log to be deleted */
     uint32_t trunc_first_logfile; /* ... while this was the oldest log */
+    uint64_t moved;
+    uint64_t move_busy;
+    uint64_t move_skipped;
+    uint64_t move_stop;
     char desc[64];
     uint64_t nfree;
     db_pgno_t last_pgno;
@@ -147,6 +159,8 @@ static void shrink_ctx_drop_plan(struct bdb_shrink_ctx *ctx)
     __db_flsort_destroy(ctx->plan);
     ctx->plan = NULL;
     ctx->trimming = 0;
+    ctx->moving = 0;
+    ctx->relocating = 0;
     ctx->busy = 0;
 }
 
@@ -207,6 +221,53 @@ static int shrink_eligible(DB *dbp, struct __db_flsort *plan)
     return nfree * 100 >= (uint64_t)gbl_btree_shrink_min_free_pct * last_pgno;
 }
 
+/* Moving pages is switched off for now (the btree may still be worth it) */
+static int shrink_move_gated(bdb_state_type *bdb_state)
+{
+    /* Page-order scans walk pgno+1 unlocked and could skip moved rows */
+    return !gbl_btree_shrink_move || gbl_rowlocks || gbl_btree_shrink_move_blocked ||
+           bdb_state->attr->page_order_tablescan;
+}
+
+/* Enough of this btree is free for moving pages down to be worthwhile */
+static int shrink_move_worthwhile(struct __db_flsort *plan)
+{
+    uint64_t nfree;
+    db_pgno_t last_pgno;
+    uint32_t placed, planned;
+
+    __db_flsort_info(plan, &nfree, &last_pgno, &placed, &planned);
+    return nfree > 0 && nfree * 100 >= (uint64_t)gbl_btree_shrink_move_stop_pct * last_pgno;
+}
+
+/* Count and log why a btree stopped moving */
+static void shrink_move_stopped(struct bdb_shrink_ctx *ctx, const char *why)
+{
+    shrink_stats.move_stop++;
+    if (gbl_btree_shrink_verbose)
+        logmsg(LOGMSG_USER, "btree_shrink: %s done moving: %s\n", ctx->desc, why);
+}
+
+static const char *shrink_low_free_reason(struct __db_flsort *plan)
+{
+    uint64_t nfree;
+    db_pgno_t last_pgno;
+    uint32_t placed, planned;
+
+    __db_flsort_info(plan, &nfree, &last_pgno, &placed, &planned);
+    return nfree == 0 ? "no free page below the last page" : "below btree_shrink_move_stop_pct";
+}
+
+static const char *shrink_stop_reason(int stop)
+{
+    switch (stop) {
+    case DB_BTMOVE_STOP_NOFREE:
+        return "no free page below the last page";
+    default:
+        return "last page can't move (a root, an empty leaf, or overflow not allowed)";
+    }
+}
+
 /* Too many consecutive busy steps on one btree: let the others have a turn */
 #define SHRINK_MAX_BUSY 10
 
@@ -248,6 +309,11 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         bdb_shrink_ctx_reset(ctx);
         strncpy(ctx->table, tbl->name, MAXTABLELEN);
     }
+
+    /* Btrees skipped while moving was gated are "unchanged": revisit them */
+    if (ctx->gated && !shrink_move_gated(bdb_state))
+        memset(ctx->seen, 0, sizeof(ctx->seen));
+    ctx->gated = shrink_move_gated(bdb_state);
 
     if (!bdb_amimaster(bdb_state) ||
         (dbp = shrink_btree(tbl, ctx->file, ctx->desc, sizeof(ctx->desc))) == NULL) {
@@ -306,6 +372,51 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         done = 1;
         goto out;
     }
+    if (ctx->moving) {
+        uint32_t mv = 0;
+        int stop = 0;
+
+        if (shrink_move_gated(bdb_state)) {
+            shrink_finish_btree(ctx, dbp, NULL);
+            goto out;
+        }
+        if (!shrink_move_worthwhile(ctx->plan)) {
+            shrink_move_stopped(ctx, "below btree_shrink_move_stop_pct");
+            shrink_finish_btree(ctx, dbp, NULL);
+            goto out;
+        }
+        rc = __db_btmove_step(dbp, ctx->plan, &mv, &stop);
+        if (rc == DB_LOCK_NOTGRANTED) {
+            shrink_stats.move_busy++;
+            if (++ctx->busy > SHRINK_MAX_BUSY) {
+                if (gbl_btree_shrink_verbose)
+                    logmsg(LOGMSG_USER, "btree_shrink: %s busy, revisit next pass\n", ctx->desc);
+                shrink_skip_btree(ctx);
+            }
+        } else if (rc == DB_NOTFOUND && gbl_btree_shrink_move_debug_abort) {
+            shrink_stats.aborted++;
+            shrink_ctx_drop_plan(ctx);
+            shrink_next_btree(ctx);
+        } else if (rc != 0) {
+            /* Tree or free list changed under us; revisit next pass */
+            shrink_stats.move_skipped++;
+            if (gbl_btree_shrink_verbose)
+                logmsg(LOGMSG_USER, "btree_shrink: %s move skipped rc %d\n", ctx->desc, rc);
+            shrink_ctx_drop_plan(ctx);
+            shrink_next_btree(ctx);
+        } else if (stop) {
+            shrink_move_stopped(ctx, shrink_stop_reason(stop));
+            shrink_finish_btree(ctx, dbp, NULL);
+        } else {
+            shrink_stats.moved += mv;
+            ctx->busy = 0;
+            /* Pages below the moved one may now be a free tail */
+            ctx->moving = 0;
+            ctx->trimming = 1;
+        }
+        goto out;
+    }
+
     if (ctx->trimming) {
         uint32_t trimmed = 0;
         rc = __db_fltrim_step(dbp, ctx->plan, gbl_btree_shrink_trim_pages_per_txn, &trimmed, &plan_done, &lsn);
@@ -327,7 +438,13 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
                 logmsg(LOGMSG_USER, "btree_shrink: %s trim failed rc %d, revisit next pass\n", ctx->desc, rc);
             shrink_ctx_drop_plan(ctx);
             shrink_next_btree(ctx);
+        } else if (plan_done && !shrink_move_gated(bdb_state) && shrink_move_worthwhile(ctx->plan)) {
+            ctx->trimming = 0;
+            ctx->moving = 1;
+            ctx->relocating = 1;
         } else if (plan_done) {
+            if (ctx->relocating && !shrink_move_gated(bdb_state))
+                shrink_move_stopped(ctx, shrink_low_free_reason(ctx->plan));
             if (gbl_btree_shrink_verbose)
                 logmsg(LOGMSG_USER, "btree_shrink: trimmed %s\n", ctx->desc);
             shrink_finish_btree(ctx, dbp, &lsn);
@@ -377,6 +494,10 @@ void bdb_shrink_dump(FILE *out)
             shrink_stats.plans, shrink_stats.ineligible, shrink_stats.unchanged, shrink_stats.moves, shrink_stats.busy,
             shrink_stats.stale, shrink_stats.aborted, shrink_stats.sorted, shrink_stats.rotated, shrink_stats.trimmed,
             shrink_stats.truncated, shrink_stats.truncate_busy);
+    logmsgf(LOGMSG_USER, out,
+            "btree_shrink: relocated %" PRIu64 " move_busy %" PRIu64 " move_skipped %" PRIu64 " move_stop %" PRIu64
+            "\n",
+            shrink_stats.moved, shrink_stats.move_busy, shrink_stats.move_skipped, shrink_stats.move_stop);
     if (shrink_stats.trunc_waiting)
         logmsgf(LOGMSG_USER, out,
                 "btree_shrink: %u btree(s) waiting to truncate until log %u is deleted (oldest log %u)\n",

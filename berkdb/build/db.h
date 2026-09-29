@@ -3426,6 +3426,13 @@ int __db_fltrim_step(DB *dbp, struct __db_flsort *fs, u_int32_t max_pages,
 int __db_physical_truncate(DB *dbp, u_int32_t first_logfile,
 	u_int32_t cur_logfile, u_int32_t *pagesp, u_int32_t *waitp);
 
+/* __db_btmove_step: DB_BTMOVE_STOP means the last page can't move; *stopp says why */
+#define	DB_BTMOVE_STOP	(-30870)
+#define	DB_BTMOVE_STOP_NOFREE	1	/* no free page below the last page */
+#define	DB_BTMOVE_STOP_PAGE	2	/* the last page is a root, empty, ... */
+int __db_btmove_step(DB *dbp, struct __db_flsort *fs, u_int32_t *movedp,
+	int *stopp);
+
 int get_committed_lsns(DB_ENV *dbenv, DB_LSN **lsns, int *n_lsns,
 	int epoch, int file, int offset);
 

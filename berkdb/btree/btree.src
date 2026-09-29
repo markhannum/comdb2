@@ -263,3 +263,25 @@ ARG     rtl         int32_t     lu
 ARG     ppgno       db_pgno_t   lu
 ARG     indx        u_int32_t   lu
 END
+
+/* pgmove: copy page src (hdr+data) into free page dst; repoint parent and siblings. */
+BEGIN pgmove		68
+DB	fileid		int32_t		ld
+/* src: the page moved; not changed here (a pg_freedata in the same txn frees it) */
+ARG	src		u_int32_t	lu
+/* dst, dstlsn: the free page src is copied into, and its lsn before the copy */
+ARG	dst		db_pgno_t	lu
+POINTER	dstlsn		DB_LSN *	lu
+/* hdr, data: src's image, [0, LOFFSET) and [HOFFSET, pagesize), in native byte order */
+DBT	hdr		DBT		s
+DBT	data		DBT		s
+/* ppgno, plsn, pindx: the parent entry repointed from src to dst */
+ARG	ppgno		db_pgno_t	lu
+POINTER	plsn		DB_LSN *	lu
+ARG	pindx		u_int32_t	lu
+/* prev, next (and lsns): the leaf siblings relinked to dst; 0 if none */
+ARG	prev		db_pgno_t	lu
+POINTER	prevlsn		DB_LSN *	lu
+ARG	next		db_pgno_t	lu
+POINTER	nextlsn		DB_LSN *	lu
+END

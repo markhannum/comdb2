@@ -30,6 +30,8 @@ int gbl_btree_shrink = 0;
 int gbl_btree_shrink_sleep_ms = 10;
 int gbl_btree_shrink_pass_interval_sec = 60;
 int gbl_btree_shrink_truncate_interval_sec = 30;
+extern int gbl_btree_shrink_move_blocked;
+extern int gbl_default_sc_scanmode;
 
 static pthread_t btree_shrink_tid;
 static time_t last_truncate;
@@ -88,6 +90,7 @@ static void *btree_shrink_thread(void *arg)
         }
 
         rdlock_schema_lk();
+        gbl_btree_shrink_move_blocked = (gbl_default_sc_scanmode == SCAN_PAGEORDER);
         /* Schema changes can't start mid-step: they take the schema write lock first */
         if (get_schema_change_in_progress(__func__, __LINE__)) {
             unlock_schema_lk();

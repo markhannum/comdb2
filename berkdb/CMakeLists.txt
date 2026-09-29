@@ -7,6 +7,7 @@ set(BERK_C
   btree/bt_delete.c
   btree/bt_method.c
   btree/bt_open.c
+  btree/bt_pgmove.c
   btree/bt_pf.c
   btree/bt_pgcompact.c
   btree/bt_prefix.c

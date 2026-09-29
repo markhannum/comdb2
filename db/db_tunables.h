@@ -152,6 +152,15 @@ REGISTER_TUNABLE("btree_shrink_truncate_interval_sec",
                  TUNABLE_INTEGER, &gbl_btree_shrink_truncate_interval_sec, EXPERIMENTAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("btree_shrink_trim_debug_abort", "Abort each btree_shrink trim after logging it (test only).",
                  TUNABLE_BOOLEAN, &gbl_btree_shrink_trim_debug_abort, INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_move",
+                 "Once btree_shrink has trimmed a free list, move live pages from the end of the file into the "
+                 "lowest free pages. (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink_move, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_move_stop_pct",
+                 "Stop moving pages once a btree's free pages fall below this percentage. (Default: 2)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_move_stop_pct, EXPERIMENTAL, NULL, percent_verify, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_move_debug_abort", "Abort each btree_shrink page move after making it (test only).",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink_move_debug_abort, INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("btree_shrink_verbose", "Log btree_shrink progress. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_btree_shrink_verbose, EXPERIMENTAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("buffers_per_context", NULL, TUNABLE_INTEGER,

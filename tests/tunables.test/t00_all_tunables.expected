@@ -100,6 +100,8 @@
 (name='btree_shrink_btree_budget_sec', description='Seconds btree_shrink works on one btree before moving on to the others; it resumes on a later pass. 0 means no limit. (Default: 30)', type='INTEGER', value='30', read_only='N')
 (name='btree_shrink_min_file_mb', description='Only work on btrees at least this large. (Default: 100)', type='INTEGER', value='100', read_only='N')
 (name='btree_shrink_min_free_pct', description='Only work on btrees with at least this percentage of their pages free. (Default: 10)', type='INTEGER', value='10', read_only='N')
+(name='btree_shrink_move', description='Once btree_shrink has trimmed a free list, move live pages from the end of the file into the lowest free pages. (Default: on)', type='BOOLEAN', value='ON', read_only='N')
+(name='btree_shrink_move_stop_pct', description='Stop moving pages once a btree's free pages fall below this percentage. (Default: 2)', type='INTEGER', value='2', read_only='N')
 (name='btree_shrink_moves_per_txn', description='Free-list moves per btree_shrink transaction. (Default: 16)', type='INTEGER', value='16', read_only='N')
 (name='btree_shrink_pass_interval_sec', description='Pause between btree_shrink passes over all tables. (Default: 60)', type='INTEGER', value='60', read_only='N')
 (name='btree_shrink_plan_max_pages', description='Max free pages btree_shrink sorts to the front of a free list per plan. (Default: 1000000)', type='INTEGER', value='1000000', read_only='N')
