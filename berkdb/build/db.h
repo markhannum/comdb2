@@ -3430,8 +3430,25 @@ int __db_physical_truncate(DB *dbp, u_int32_t first_logfile,
 #define	DB_BTMOVE_STOP	(-30870)
 #define	DB_BTMOVE_STOP_NOFREE	1	/* no free page below the last page */
 #define	DB_BTMOVE_STOP_PAGE	2	/* the last page is a root, empty, ... */
-int __db_btmove_step(DB *dbp, struct __db_flsort *fs, u_int32_t *movedp,
-	int *stopp);
+#define	DB_BTMOVE_STOP_OVKEY	3	/* last page is in an overflow key chain */
+#define	DB_BTMOVE_STOP_OVLONG	4	/* overflow chain longer than the cap */
+#define	DB_BTMOVE_STOP_NOROOM	5	/* too few free pages for the chain */
+#define	DB_BTMOVE_PLAN	(-30871)	/* the free list no longer matches the plan */
+/* allow_overflow: move overflow chains? */
+#define	DB_BTMOVE_OV_NO		0
+#define	DB_BTMOVE_OV_YES	1
+#define	DB_BTMOVE_OV_LATER	2	/* not now: snapshot readers are open */
+#define	DB_BTMOVE_OV_NOSNAP	3	/* yes, unless a snapshot reader appears */
+/* *replanp after a chain rewrite */
+#define	DB_BTMOVE_REPLAN	1	/* re-walk the free list */
+#define	DB_BTMOVE_PATCHED	2	/* the plan was updated in place */
+/* Overflow chain owner hints, kept per btree by the caller; see bt_pgmove.c */
+struct __db_ovmap;
+void __db_ovmap_destroy(struct __db_ovmap *m);
+int __db_ovmap_matches(struct __db_ovmap *m, DB *dbp);
+int __db_btmove_step(DB *dbp, struct __db_flsort *fs, int allow_overflow,
+	struct __db_ovmap **ovmapp, u_int32_t *movedp, u_int32_t *trimmedp,
+	int *stopp, int *replanp);
 
 int get_committed_lsns(DB_ENV *dbenv, DB_LSN **lsns, int *n_lsns,
 	int epoch, int file, int offset);

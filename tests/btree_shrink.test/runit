@@ -34,7 +34,7 @@ function unsorted_lines {
 }
 
 # The worker's progress counters; others tick on every idle pass
-function progress { shrink_status $1 | tr ' ' '\n' | awk 'k { print k, $0; k = "" } /^(moves|trimmed|relocated)$/ { k = $0 }'; }
+function progress { shrink_status $1 | tr ' ' '\n' | awk 'k { print k, $0; k = "" } /^(moves|trimmed|relocated|ovrewritten)$/ { k = $0 }'; }
 function quiesce
 {
     local m=$1 prev="" cur
@@ -199,6 +199,13 @@ fi
 
 echo "== relocate live pages into holes, then truncate everywhere"
 function relocated { shrink_status $1 | sed -n 2p | sed 's/.*relocated \([0-9]*\).*/\1/'; }
+function ovrewritten { shrink_status $1 | sed -n 2p | sed 's/.*ovrewritten \([0-9]*\).*/\1/'; }
+function blobsum { sqlh $1 "select a, length(b), hex(b) from t2 order by a" | md5sum | cut -d' ' -f1; }
+function check_blobs {
+    for n in $(nodes); do
+        [[ "$(blobsum $n)" == "$blobs" ]] || failexit "t2 blob contents differ on $n"
+    done
+}
 function rowid_lookups {
     local n=$1
     for id in $(sqlh $n "select rowid from t1 where a % 997 = 0 limit 30" | sed 's/.*rowid=\([0-9]*\).*/\1/; s/^\([0-9]*\)$/\1/'); do
@@ -210,6 +217,8 @@ master=$(getmaster)
 for ((i = 20000; i < 90000; i += 10000)); do
     sql "delete from t1 where a > $i and a <= $((i + 7000))" >/dev/null
 done
+sql "delete from t2 where a > 100 and a <= 300" >/dev/null
+blobs=$(blobsum $master)
 (
     for ((r = 1; r <= 30; r++)); do
         base=$((2000000 + r * 100))
@@ -224,10 +233,54 @@ wait $traffic
 quiesce $master
 shrink_status $master
 [[ "$(relocated $master)" -gt 0 ]] || failexit "nothing relocated"
+[[ "$(ovrewritten $master)" -gt 0 ]] || failexit "no blob chains relocated"
 check_replicas $master
+check_blobs
 for n in $(nodes); do rowid_lookups $n; done
 push_until_truncated "$(nodes)"
 check_replicas $master
+check_blobs
 for n in $(nodes); do rowid_lookups $n; done
+
+echo "== overflow chains straddling holes and the end of the file"
+# Sorted holes make each 1 MB chain take low holes then extend the file (ovplaced).
+function ovplaced { shrink_status $1 | sed -n 2p | sed 's/.*ovplaced \([0-9]*\).*/\1/'; }
+function t4sum { sqlh $1 "select a, length(b), hex(b) from t4 order by a" | md5sum | cut -d' ' -f1; }
+master=$(getmaster)
+sql "create table t4 (a int, b blob)" >/dev/null || failexit "create t4"
+for ((i = 0; i < 32; i++)); do
+    sql "insert into t4 select value, randomblob(20000) from generate_series($((i * 25 + 1)), $((i * 25 + 25)))" >/dev/null
+done
+sql "delete from t4 where a % 2 = 0" >/dev/null
+tun $master "btree_shrink_move 0" "btree_shrink_trim 0"
+for ((w = 0; w < 120; w++)); do
+    [[ -z "$(unsorted_lines $master t4)" ]] && break
+    sleep 1
+done
+for ((i = 1; i <= 48; i++)); do
+    sql "insert into t4 values ($((1000 + i)), randomblob(1000000))" >/dev/null || failexit "insert t4"
+done
+sql "delete from t4 where a <= 800" >/dev/null
+t4base=$(t4sum $master)
+placed=$(ovplaced $master)
+tun $master "btree_shrink_move 1" "btree_shrink_trim 1"
+prev=""
+for ((w = 0; w < 60; w++)); do
+    sleep 5
+    cur="$(progress $master) $(freespace $master t4 | md5sum)"
+    [[ "$cur" == "$prev" ]] && break
+    prev=$cur
+done
+[[ "$cur" == "$prev" ]] || failexit "t4 relocation never settled"
+shrink_status $master
+[[ "$(ovplaced $master)" -gt "$placed" ]] || failexit "no leftover chain pages sorted into place"
+sql "insert into t1 values (-2, 'sync')" >/dev/null
+sleep 5
+freespace $master t4 > fs.master.t4
+for n in $(nodes); do
+    freespace $n t4 | diff fs.master.t4 - || failexit "t4 free lists differ on $n"
+    [[ "$(t4sum $n)" == "$t4base" ]] || failexit "t4 blob contents differ on $n"
+done
+do_verify t4
 
 echo "Success"

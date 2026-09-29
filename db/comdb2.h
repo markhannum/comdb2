@@ -1969,6 +1969,11 @@ extern int gbl_btree_shrink_trim_debug_abort;
 extern int gbl_btree_shrink_move;
 extern int gbl_btree_shrink_move_stop_pct;
 extern int gbl_btree_shrink_move_debug_abort;
+extern int gbl_btree_shrink_move_overflow;
+extern int gbl_btree_shrink_ovmove_skip_modsnap;
+extern int gbl_btree_shrink_ovmove_max_pages;
+extern int gbl_btree_shrink_ovrewrite_debug_abort;
+extern int gbl_btree_shrink_ovmap_max_mb;
 extern char *gbl_dbdir;
 
 extern double gbl_cpupercent;

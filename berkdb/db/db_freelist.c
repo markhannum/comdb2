@@ -42,6 +42,11 @@ extern int gbl_is_physical_replicant;
 int gbl_btree_shrink_debug_abort = 0;		/* test: abort each sort batch */
 int gbl_btree_shrink_trim_debug_abort = 0;	/* test: abort each trim */
 int gbl_btree_shrink_move_debug_abort = 0;	/* test: abort each page move */
+int gbl_btree_shrink_ovrewrite_debug_abort = 0;	/* test: abort each chain rewrite */
+int gbl_btree_shrink_ovmove_max_pages = 256;	/* longest chain moved, in pages */
+extern int gbl_btree_shrink_ovmap_max_mb;
+u_int64_t gbl_btree_shrink_ovstale;	/* owner hints that were wrong */
+u_int64_t gbl_btree_shrink_ovplaced;	/* freed chain pages sorted into place */
 
 #define	FS_ISSET(bm, pg)	((bm)[(pg) >> 3] & (1 << ((pg) & 7)))
 #define	FS_SET(bm, pg)		((bm)[(pg) >> 3] |= (1 << ((pg) & 7)))
@@ -768,10 +773,15 @@ err:	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta, 0)) != 0 &&
 	return (ret);
 }
 
+static int __db_ovmove_step __P((DB *, struct __db_flsort *,
+    struct __db_ovmap *, db_pgno_t, int, u_int32_t *, u_int32_t *, int *,
+    int *));
+
 /* Move the live page at the end of the file into the lowest free page, then trim it. */
 int
-__db_btmove_step(DB *dbp, struct __db_flsort *fs, u_int32_t *movedp,
-    int *stopp)
+__db_btmove_step(DB *dbp, struct __db_flsort *fs, int allow_overflow,
+    struct __db_ovmap **ovmapp, u_int32_t *movedp, u_int32_t *trimmedp,
+    int *stopp, int *replanp)
 {
 	DB_ENV *dbenv;
 	DB_LOCK metalock;
@@ -790,7 +800,9 @@ __db_btmove_step(DB *dbp, struct __db_flsort *fs, u_int32_t *movedp,
 	txn = NULL;
 	LOCK_INIT(metalock);
 	*movedp = 0;
+	*trimmedp = 0;
 	*stopp = 0;
+	*replanp = 0;
 
 	if (memcmp(fs->fileid, dbp->fileid, DB_FILE_ID_LEN) != 0)
 		return (EINVAL);
@@ -807,6 +819,32 @@ __db_btmove_step(DB *dbp, struct __db_flsort *fs, u_int32_t *movedp,
 	}
 	if (fs->ents[fs->n - 1].pgno == fs->last_pgno)
 		return (0);	/* a free tail: trim first */
+
+	/* An overflow page moves by rewriting its chain's owner. */
+	pgno = fs->last_pgno;
+	if ((ret = __memp_fget(mpf, &pgno, 0, &tp)) != 0)
+		return (ret);
+	have_tail = TYPE(tp) == P_OVERFLOW;
+	(void)__memp_fput(mpf, tp, 0);
+	if (have_tail) {
+		if (allow_overflow == DB_BTMOVE_OV_NO) {
+			*stopp = DB_BTMOVE_STOP_PAGE;
+			return (0);
+		}
+		if (allow_overflow == DB_BTMOVE_OV_LATER)
+			return (EAGAIN);
+		if (*ovmapp != NULL && (gbl_btree_shrink_ovmap_max_mb <= 0 ||
+		    !__db_ovmap_matches(*ovmapp, dbp))) {
+			__db_ovmap_destroy(*ovmapp);
+			*ovmapp = NULL;
+		}
+		if (*ovmapp == NULL && gbl_btree_shrink_ovmap_max_mb > 0 &&
+		    (ret = __db_ovmap_create(dbp, ovmapp)) != 0)
+			return (ret);
+		return (__db_ovmove_step(dbp, fs, *ovmapp, fs->last_pgno,
+		    allow_overflow == DB_BTMOVE_OV_NOSNAP,
+		    movedp, trimmedp, stopp, replanp));
+	}
 
 	L = fs->ents[fs->start].pgno;
 	have_tail = fs->start + 1 < fs->n;
@@ -878,4 +916,313 @@ err:	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta,
 	fs->last_pgno = H - 1;
 	*movedp = 1;
 	return (0);
+}
+
+static int
+pgno_cmp(const void *a, const void *b)
+{
+	db_pgno_t x = *(const db_pgno_t *)a, y = *(const db_pgno_t *)b;
+
+	return (x < y ? -1 : x > y);
+}
+
+/* In the rewrite's txn: trim the freed chain's pages ending at H; sort in the rest. */
+static int
+__db_ovtrim(DBC *dbc, struct __db_flsort *fs, db_pgno_t *old, u_int32_t n,
+    db_pgno_t H, u_int32_t *trimmedp, db_pgno_t **listp, u_int32_t *nlistp,
+    u_int32_t *placedp)
+{
+	DB *dbp;
+	DB_LOCK metalock;
+	DB_MPOOLFILE *mpf;
+	DBMETA *meta;
+	PAGE *tp;
+	db_pgno_t *mdl, *lst, *lv, first, p, pgno, prev, dest, placed, on, don;
+	u_int32_t cnt, i, j, k, len, nlv, nrs, lo, hi, mid;
+	int rest, ret, t_ret;
+
+	dbp = dbc->dbp;
+	mpf = dbp->mpf;
+	meta = NULL;
+	mdl = lst = NULL;
+	LOCK_INIT(metalock);
+	*trimmedp = 0;
+	*listp = NULL;
+	*nlistp = 0;
+	*placedp = 0;
+
+	/* The list is now old[n-1], ..., old[0], then the plan's unused pages. */
+	for (k = 0;; k++) {
+		for (i = 0; i < n && old[i] != H - k; i++)
+			;
+		if (i == n)
+			break;
+	}
+	if (k == 0)
+		return (0);
+	rest = fs->start + n < fs->n;
+	if ((ret = __os_malloc(dbp->dbenv,
+	    (n + 1) * sizeof(*mdl), &mdl)) != 0)
+		return (ret);
+	for (cnt = 0; cnt < n; cnt++)
+		mdl[cnt] = old[n - 1 - cnt];
+	if (rest)
+		mdl[cnt++] = fs->ents[fs->n - 1].pgno;
+
+	pgno = PGNO_BASE_MD;
+	if ((ret = __db_lget(dbc,
+	    LCK_ALWAYS, pgno, DB_LOCK_WRITE, 0, &metalock)) != 0 ||
+	    (ret = PAGEGET(dbc, mpf, &pgno, 0, &meta)) != 0)
+		goto err;
+	/* Any mismatch below leaves the list to a re-plan. */
+	if (meta->last_pgno != H || meta->free != mdl[0])
+		goto err;
+	if (rest) {
+		pgno = mdl[cnt - 1];
+		if ((ret = PAGEGET(dbc, mpf, &pgno, 0, &tp)) != 0)
+			goto err;
+		rest = TYPE(tp) == P_INVALID && NEXT_PGNO(tp) == PGNO_INVALID;
+		if ((ret = PAGEPUT(dbc, mpf, tp, 0)) != 0 || !rest)
+			goto err;
+	}
+
+	/* Pages H-k+1..H, ascending, each to the end of the list; then trim them. */
+	first = H - k + 1;
+	for (p = first; p <= H; p++) {
+		for (i = 0; mdl[i] != p; i++)
+			;
+		if (i == cnt - 1)
+			continue;
+		prev = i == 0 ? PGNO_BASE_MD : mdl[i - 1];
+		if ((ret = __db_pg_flmove(dbc, meta, p, prev, mdl[cnt - 1],
+		    &on, &don)) != 0)
+			goto err;
+		for (j = i; j < cnt - 1; j++)
+			mdl[j] = mdl[j + 1];
+		mdl[cnt - 1] = p;
+	}
+	for (i = 0; mdl[i] != first; i++)
+		;
+	if ((ret = __db_pg_trunc(dbc, meta,
+	    i == 0 ? PGNO_BASE_MD : mdl[i - 1], first)) != 0)
+		goto err;
+	*trimmedp = k;
+
+	/* Now: the chain's other pages (lv) then the unused plan pages; insert lv ascending. */
+	nrs = fs->n - (fs->start + n);
+	if ((ret = __os_malloc(dbp->dbenv,
+	    (2 * n + nrs) * sizeof(*lst), &lst)) != 0)
+		goto err;
+	lv = lst + n + nrs;
+	for (i = 0, len = 0, nlv = 0; i < n; i++) {
+		if ((p = old[n - 1 - i]) >= first)
+			continue;
+		lst[len++] = p;
+		lv[nlv++] = p;
+	}
+	for (i = 0; i < nrs; i++)
+		lst[len++] = fs->ents[fs->start + n + i].pgno;
+	qsort(lv, nlv, sizeof(*lv), pgno_cmp);
+	for (j = 0, placed = PGNO_INVALID; j < nlv; j++) {
+		p = lv[j];
+		/* Its sorted predecessor: the highest lower unused plan page or placed page. */
+		for (lo = 0, hi = nrs; lo < hi;) {
+			mid = (lo + hi) / 2;
+			if (fs->ents[fs->start + n + mid].pgno < p)
+				lo = mid + 1;
+			else
+				hi = mid;
+		}
+		dest = lo > 0 ? fs->ents[fs->start + n + lo - 1].pgno : PGNO_BASE_MD;
+		if (placed != PGNO_INVALID && placed > dest)
+			dest = placed;
+		for (i = 0; lst[i] != p; i++)
+			;
+		prev = i == 0 ? PGNO_BASE_MD : lst[i - 1];
+		placed = p;
+		if (prev == dest)
+			continue;
+		if ((ret = __db_pg_flmove(dbc, meta, p, prev, dest,
+		    &on, &don)) != 0)
+			goto err;
+		++*placedp;
+		memmove(&lst[i], &lst[i + 1], (len - i - 1) * sizeof(*lst));
+		if (dest == PGNO_BASE_MD)
+			i = 0;
+		else {
+			for (i = 0; lst[i] != dest; i++)
+				;
+			i++;
+		}
+		memmove(&lst[i + 1], &lst[i], (len - 1 - i) * sizeof(*lst));
+		lst[i] = p;
+	}
+	/* Checks our model only; a stale plan is caught later by page checks. */
+	for (i = 1; i < len; i++)
+		if (lst[i - 1] >= lst[i])
+			goto err;
+	*listp = lst;
+	*nlistp = len;
+	lst = NULL;
+
+	/* A mismatch keeps the rewrite: each move made so far is self-consistent. */
+err:	if (ret == DB_NOTFOUND)
+		ret = 0;
+	if (meta != NULL && (t_ret = PAGEPUT(dbc, mpf, meta,
+	    DB_MPOOL_DIRTY)) != 0 && ret == 0)
+		ret = t_ret;
+	(void)__TLPUT(dbc, metalock);
+	__os_free(dbp->dbenv, mdl);
+	if (lst != NULL)
+		__os_free(dbp->dbenv, lst);
+	return (ret);
+}
+
+/* After a committed rewrite, the plan's whole list is lst, sorted. */
+static void
+__db_flsort_patch(struct __db_flsort *fs, db_pgno_t *lst, u_int32_t len,
+    db_pgno_t last_pgno)
+{
+	u_int32_t i;
+
+	for (i = 0; i < len; i++) {
+		fs->ents[i].pgno = lst[i];
+		fs->ents[i].prev = i == 0 ? PGNO_BASE_MD : lst[i - 1];
+		fs->ents[i].pos = i;
+		fs->ents[i].keep = 1;
+	}
+	fs->start = 0;
+	fs->n = fs->next = len;
+	fs->nfree = len;
+	fs->last_pgno = last_pgno;
+}
+
+/* Last page H is in an overflow chain: rewrite its owner into the lowest free pages. */
+static int
+__db_ovmove_step(DB *dbp, struct __db_flsort *fs, struct __db_ovmap *map,
+    db_pgno_t H, int nosnap, u_int32_t *movedp, u_int32_t *trimmedp,
+    int *stopp, int *replanp)
+{
+	DB_ENV *dbenv;
+	DB_MPOOLFILE *mpf;
+	DB_TXN *txn;
+	DBC *dbc;
+	DBT key;
+	PAGE *p;
+	db_pgno_t pg, prev, newhead, *want, *old, *lst;
+	u_int32_t i, n, nwant, npages, ntrim, nlst, nplaced, cap;
+	int attempt, isovfl, keychain, scanned, ret, t_ret;
+
+	dbenv = dbp->dbenv;
+	mpf = dbp->mpf;
+	dbc = NULL;
+	txn = NULL;
+	want = old = lst = NULL;
+	npages = ntrim = nlst = nplaced = 0;
+	newhead = PGNO_INVALID;
+	memset(&key, 0, sizeof(key));
+	cap = (u_int32_t)gbl_btree_shrink_ovmove_max_pages;
+
+	/* Unlocked walk back to the chain's head; a race just means skip. */
+	for (pg = H, n = 0;; n++) {
+		if (n >= cap) {
+			*stopp = DB_BTMOVE_STOP_OVLONG;
+			return (0);
+		}
+		if ((ret = __memp_fget(mpf, &pg, 0, &p)) != 0)
+			return (ret);
+		isovfl = TYPE(p) == P_OVERFLOW;
+		prev = PREV_PGNO(p);
+		(void)__memp_fput(mpf, p, 0);
+		if (!isovfl)
+			return (DB_NOTFOUND);
+		if (prev == PGNO_INVALID)
+			break;
+		pg = prev;
+	}
+
+	nwant = fs->n - fs->start;
+	if (nwant > cap)
+		nwant = cap;
+	if ((ret = __os_malloc(dbenv, nwant * sizeof(*want), &want)) != 0 ||
+	    (ret = __os_malloc(dbenv, cap * sizeof(*old), &old)) != 0)
+		goto err;
+	for (i = 0; i < nwant; i++)
+		want[i] = fs->ents[fs->start + i].pgno;
+
+	/* A wrong owner hint gets one retry, through a fresh scan. */
+	for (attempt = 0;; attempt++) {
+		/* No leaf owner: a key chain kept by an internal page, or leaked. */
+		if ((ret = __bam_ovowner(dbp, map, pg, &key,
+		    &keychain, &scanned)) == DB_NOTFOUND)
+			keychain = 1;
+		else if (ret != 0)
+			goto err;
+		if (keychain) {
+			*stopp = DB_BTMOVE_STOP_OVKEY;
+			goto err;
+		}
+
+		if ((ret = __txn_begin(dbenv, NULL, &txn, DB_TXN_NOWAIT)) != 0)
+			goto err;
+		if ((ret = __lock_locker_set_lowpri(dbenv, txn->txnid)) != 0 ||
+		    (ret = __db_cursor(dbp, txn, &dbc, 0)) != 0)
+			goto err;
+		ret = __bam_ovrewrite(dbc, &key, H, want, nwant, cap,
+		    old, &npages, &newhead, stopp);
+		/* A hinted owner may be wrong, so its not-found or stop gets one rescan. */
+		if ((ret != DB_NOTFOUND && ret != DB_BTMOVE_STOP) || scanned ||
+		    attempt > 0)
+			break;
+		++gbl_btree_shrink_ovstale;
+		__bam_ovmap_moved(map, pg, PGNO_INVALID);
+		(void)__db_c_close(dbc);
+		dbc = NULL;
+		(void)__txn_abort(txn);
+		txn = NULL;
+	}
+	if (ret == DB_BTMOVE_PLAN)
+		ret = DB_NOTFOUND;
+	if (ret == 0)
+		ret = __db_ovtrim(dbc, fs, old, npages, H, &ntrim, &lst, &nlst,
+		    &nplaced);
+
+err:	if (dbc != NULL && (t_ret = __db_c_close(dbc)) != 0 && ret == 0)
+		ret = t_ret;
+	if (ret == 0 && txn != NULL && gbl_btree_shrink_ovrewrite_debug_abort)
+		ret = DB_NOTFOUND;
+	/* Re-check just before commit: a new snapshot reader could read the old chain. */
+	if (ret == 0 && txn != NULL && nosnap) {
+		Pthread_mutex_lock(&dbenv->outstanding_modsnap_lock);
+		if (listc_size(&dbenv->outstanding_modsnaps) != 0)
+			ret = EAGAIN;
+		Pthread_mutex_unlock(&dbenv->outstanding_modsnap_lock);
+	}
+	if (ret == DB_BTMOVE_STOP)
+		ret = 0;	/* *stopp says why; nothing was changed */
+	else if (ret == 0 && txn != NULL) {
+		if ((ret = __txn_commit(txn, DB_TXN_NOSYNC)) == 0) {
+			__bam_ovmap_moved(map, pg, newhead);
+			gbl_btree_shrink_ovplaced += nplaced;
+			*movedp = npages;
+			*trimmedp = ntrim;
+			if (lst != NULL) {
+				__db_flsort_patch(fs, lst, nlst, H - ntrim);
+				*replanp = DB_BTMOVE_PATCHED;
+			} else
+				*replanp = DB_BTMOVE_REPLAN;
+		}
+		txn = NULL;
+	}
+	if (txn != NULL)
+		(void)__txn_abort(txn);
+	if (key.data != NULL)
+		__os_free(dbenv, key.data);
+	if (want != NULL)
+		__os_free(dbenv, want);
+	if (old != NULL)
+		__os_free(dbenv, old);
+	if (lst != NULL)
+		__os_free(dbenv, lst);
+	return (ret == DB_LOCK_DEADLOCK ? DB_LOCK_NOTGRANTED : ret);
 }

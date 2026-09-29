@@ -161,6 +161,23 @@ REGISTER_TUNABLE("btree_shrink_move_stop_pct",
                  TUNABLE_INTEGER, &gbl_btree_shrink_move_stop_pct, EXPERIMENTAL, NULL, percent_verify, NULL, NULL);
 REGISTER_TUNABLE("btree_shrink_move_debug_abort", "Abort each btree_shrink page move after making it (test only).",
                  TUNABLE_BOOLEAN, &gbl_btree_shrink_move_debug_abort, INTERNAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_move_overflow",
+                 "Relocate overflow chains (e.g. blobs) at the end of a file by rewriting their owning item into the "
+                 "lowest free pages. (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink_move_overflow, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_ovmove_skip_modsnap",
+                 "Don't rewrite overflow chains while snapshot transactions are open. (Default: on)",
+                 TUNABLE_BOOLEAN, &gbl_btree_shrink_ovmove_skip_modsnap, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_ovmove_max_pages",
+                 "Longest overflow chain btree_shrink relocates, in pages. (Default: 256)", TUNABLE_INTEGER,
+                 &gbl_btree_shrink_ovmove_max_pages, EXPERIMENTAL, NULL, positive_int_verify, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_ovmap_max_mb",
+                 "Memory for btree_shrink's map of overflow chains to their owning keys, per btree; beyond it, "
+                 "owners are found by scanning the leaf level; 0 disables the map. (Default: 64)",
+                 TUNABLE_INTEGER, &gbl_btree_shrink_ovmap_max_mb, EXPERIMENTAL, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("btree_shrink_ovrewrite_debug_abort",
+                 "Abort each btree_shrink overflow chain rewrite after making it (test only).", TUNABLE_BOOLEAN,
+                 &gbl_btree_shrink_ovrewrite_debug_abort, INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("btree_shrink_verbose", "Log btree_shrink progress. (Default: off)", TUNABLE_BOOLEAN,
                  &gbl_btree_shrink_verbose, EXPERIMENTAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("buffers_per_context", NULL, TUNABLE_INTEGER,

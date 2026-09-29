@@ -39,6 +39,8 @@ int gbl_btree_shrink_trim_pages_per_txn = 256;
 int gbl_btree_shrink_move = 1;
 int gbl_btree_shrink_move_stop_pct = 2;
 int gbl_btree_shrink_move_blocked = 0; /* set while schema changes scan in page order */
+int gbl_btree_shrink_move_overflow = 1;
+int gbl_btree_shrink_ovmove_skip_modsnap = 1; /* snapshots read overflow pages unversioned */
 
 extern int gbl_btree_shrink_debug_abort;
 extern int gbl_btree_shrink_trim_debug_abort;
@@ -50,6 +52,12 @@ void logdelete_lock(const char *func, int line);
 void logdelete_unlock(const char *func, int line);
 extern int gbl_btree_shrink_move_debug_abort;
 extern int gbl_rowlocks;
+extern int gbl_btree_shrink_ovrewrite_debug_abort;
+extern int gbl_btree_shrink_ovmove_max_pages;
+extern u_int64_t gbl_btree_shrink_ovscans;
+extern u_int64_t gbl_btree_shrink_ovhits;
+extern u_int64_t gbl_btree_shrink_ovstale;
+extern u_int64_t gbl_btree_shrink_ovplaced;
 
 /* Meta LSN of btrees already sorted or found ineligible, to skip re-walks */
 #define SHRINK_SEEN_SIZE 4096
@@ -70,6 +78,10 @@ struct bdb_shrink_ctx {
     int moving;               /* tail trimmed; moving live pages down from the end */
     int gated;                /* moving was gated at the last step */
     int relocating;           /* this plan has entered the move phase */
+    int ov_on;                /* btree_shrink_move_overflow at the last step */
+    int ov_max;               /* btree_shrink_ovmove_max_pages at the last step */
+    int ov_replan;            /* the plan was dropped after an overflow rewrite */
+    struct __db_ovmap *ovmap; /* overflow chain owners of the current btree */
     struct shrink_seen seen[SHRINK_SEEN_SIZE];
 };
 
@@ -122,6 +134,9 @@ static struct {
     uint64_t move_busy;
     uint64_t move_skipped;
     uint64_t move_stop;
+    uint64_t ovrewritten;
+    uint64_t ovpages;
+    uint64_t ovgated;
     char desc[64];
     uint64_t nfree;
     db_pgno_t last_pgno;
@@ -168,6 +183,8 @@ static void shrink_ctx_drop_plan(struct bdb_shrink_ctx *ctx)
 void bdb_shrink_ctx_reset(struct bdb_shrink_ctx *ctx)
 {
     shrink_ctx_drop_plan(ctx);
+    __db_ovmap_destroy(ctx->ovmap);
+    ctx->ovmap = NULL;
     ctx->table[0] = '\0';
     ctx->file = 0;
     ctx->visit_start = 0;
@@ -179,6 +196,7 @@ void bdb_shrink_ctx_destroy(struct bdb_shrink_ctx *ctx)
     if (ctx == NULL)
         return;
     shrink_ctx_drop_plan(ctx);
+    __db_ovmap_destroy(ctx->ovmap);
     free(ctx);
 }
 
@@ -263,6 +281,12 @@ static const char *shrink_stop_reason(int stop)
     switch (stop) {
     case DB_BTMOVE_STOP_NOFREE:
         return "no free page below the last page";
+    case DB_BTMOVE_STOP_OVKEY:
+        return "last page is in an overflow key chain (no leaf owner)";
+    case DB_BTMOVE_STOP_OVLONG:
+        return "overflow chain longer than btree_shrink_ovmove_max_pages";
+    case DB_BTMOVE_STOP_NOROOM:
+        return "too few free pages for the overflow chain";
     default:
         return "last page can't move (a root, an empty leaf, or overflow not allowed)";
     }
@@ -314,6 +338,11 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
     if (ctx->gated && !shrink_move_gated(bdb_state))
         memset(ctx->seen, 0, sizeof(ctx->seen));
     ctx->gated = shrink_move_gated(bdb_state);
+    /* Revisit btrees which stopped at a chain these settings now allow */
+    if ((gbl_btree_shrink_move_overflow && !ctx->ov_on) || gbl_btree_shrink_ovmove_max_pages > ctx->ov_max)
+        memset(ctx->seen, 0, sizeof(ctx->seen));
+    ctx->ov_on = gbl_btree_shrink_move_overflow;
+    ctx->ov_max = gbl_btree_shrink_ovmove_max_pages;
 
     if (!bdb_amimaster(bdb_state) ||
         (dbp = shrink_btree(tbl, ctx->file, ctx->desc, sizeof(ctx->desc))) == NULL) {
@@ -321,9 +350,16 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         done = 1;
         goto publish;
     }
+    /* The owner map only serves the btree it was built for */
+    if (ctx->ovmap && !__db_ovmap_matches(ctx->ovmap, dbp)) {
+        __db_ovmap_destroy(ctx->ovmap);
+        ctx->ovmap = NULL;
+    }
 
     /* Planning only reads, so no bdb lock; the caller's schema lock keeps dbp open */
     if (ctx->plan == NULL) {
+        int ov_replan = ctx->ov_replan;
+        ctx->ov_replan = 0;
         /* Avoid walking free lists which are too small or haven't changed */
         if (__db_freelist_peek(dbp, &lsn, &last_pgno) != 0 || !shrink_big_enough(dbp, last_pgno)) {
             shrink_stats.ineligible++;
@@ -339,10 +375,14 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         rc = __db_flsort_create(dbp, gbl_btree_shrink_plan_max_pages, &ctx->plan);
         if (rc == 0 && !shrink_eligible(dbp, ctx->plan)) {
             shrink_stats.ineligible++;
+            if (ov_replan)
+                shrink_move_stopped(ctx, shrink_low_free_reason(ctx->plan));
             shrink_seen_set(ctx, dbp, &lsn);
             shrink_ctx_drop_plan(ctx);
             shrink_next_btree(ctx);
         } else if (rc == 0) {
+            /* Still relocating: finishing through the trim step logs why */
+            ctx->relocating = ov_replan;
             if (ctx->visit_start == 0)
                 ctx->visit_start = comdb2_time_epochms();
             shrink_stats.plans++;
@@ -373,8 +413,8 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         goto out;
     }
     if (ctx->moving) {
-        uint32_t mv = 0;
-        int stop = 0;
+        uint32_t mv = 0, trimmed = 0;
+        int stop = 0, replan = 0, allow_ov;
 
         if (shrink_move_gated(bdb_state)) {
             shrink_finish_btree(ctx, dbp, NULL);
@@ -385,15 +425,24 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
             shrink_finish_btree(ctx, dbp, NULL);
             goto out;
         }
-        rc = __db_btmove_step(dbp, ctx->plan, &mv, &stop);
-        if (rc == DB_LOCK_NOTGRANTED) {
+        allow_ov = !gbl_btree_shrink_move_overflow ? DB_BTMOVE_OV_NO
+                   : !gbl_btree_shrink_ovmove_skip_modsnap         ? DB_BTMOVE_OV_YES
+                   : bdb_get_lowest_modsnap_file(bdb_state) != -1 ? DB_BTMOVE_OV_LATER
+                                                                  : DB_BTMOVE_OV_NOSNAP;
+        rc = __db_btmove_step(dbp, ctx->plan, allow_ov, &ctx->ovmap, &mv, &trimmed, &stop, &replan);
+        if (rc == EAGAIN) {
+            /* Snapshot readers hold off overflow rewrites: revisit next pass */
+            shrink_stats.ovgated++;
+            shrink_skip_btree(ctx);
+        } else if (rc == DB_LOCK_NOTGRANTED) {
             shrink_stats.move_busy++;
             if (++ctx->busy > SHRINK_MAX_BUSY) {
                 if (gbl_btree_shrink_verbose)
                     logmsg(LOGMSG_USER, "btree_shrink: %s busy, revisit next pass\n", ctx->desc);
                 shrink_skip_btree(ctx);
             }
-        } else if (rc == DB_NOTFOUND && gbl_btree_shrink_move_debug_abort) {
+        } else if (rc == DB_NOTFOUND &&
+                   (gbl_btree_shrink_move_debug_abort || gbl_btree_shrink_ovrewrite_debug_abort)) {
             shrink_stats.aborted++;
             shrink_ctx_drop_plan(ctx);
             shrink_next_btree(ctx);
@@ -407,6 +456,23 @@ int bdb_shrink_table_step(bdb_state_type *tbl, struct bdb_shrink_ctx *ctx)
         } else if (stop) {
             shrink_move_stopped(ctx, shrink_stop_reason(stop));
             shrink_finish_btree(ctx, dbp, NULL);
+        } else if (replan) {
+            /* A chain was rewritten: the free list changed beyond the plan */
+            shrink_stats.ovrewritten++;
+            shrink_stats.ovpages += mv;
+            shrink_stats.trimmed += trimmed;
+            ctx->busy = 0;
+            if (gbl_btree_shrink_verbose)
+                logmsg(LOGMSG_USER, "btree_shrink: %s rewrote an overflow chain (%u pages, trimmed %u%s)\n", ctx->desc,
+                       mv, trimmed, replan == DB_BTMOVE_PATCHED ? "" : ", re-plan");
+            if (replan == DB_BTMOVE_PATCHED) {
+                /* The plan was patched in place: trim any new free tail */
+                ctx->moving = 0;
+                ctx->trimming = 1;
+            } else {
+                shrink_ctx_drop_plan(ctx);
+                ctx->ov_replan = 1;
+            }
         } else {
             shrink_stats.moved += mv;
             ctx->busy = 0;
@@ -496,8 +562,11 @@ void bdb_shrink_dump(FILE *out)
             shrink_stats.truncated, shrink_stats.truncate_busy);
     logmsgf(LOGMSG_USER, out,
             "btree_shrink: relocated %" PRIu64 " move_busy %" PRIu64 " move_skipped %" PRIu64 " move_stop %" PRIu64
-            "\n",
-            shrink_stats.moved, shrink_stats.move_busy, shrink_stats.move_skipped, shrink_stats.move_stop);
+            " ovrewritten %" PRIu64 " ovpages %" PRIu64 " ovgated %" PRIu64 " ovscans %" PRIu64 " ovhits %" PRIu64
+            " ovstale %" PRIu64 " ovplaced %" PRIu64 "\n",
+            shrink_stats.moved, shrink_stats.move_busy, shrink_stats.move_skipped, shrink_stats.move_stop,
+            shrink_stats.ovrewritten, shrink_stats.ovpages, shrink_stats.ovgated, gbl_btree_shrink_ovscans,
+            gbl_btree_shrink_ovhits, gbl_btree_shrink_ovstale, gbl_btree_shrink_ovplaced);
     if (shrink_stats.trunc_waiting)
         logmsgf(LOGMSG_USER, out,
                 "btree_shrink: %u btree(s) waiting to truncate until log %u is deleted (oldest log %u)\n",
