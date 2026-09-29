@@ -1,4 +1,5 @@
 #include "db_config.h"
+#include <poll.h>
 #include "db_int.h"
 #include "dbinc/btree.h"
 #include "dbinc/mp.h"
@@ -32,6 +33,7 @@ extern int __mempv_cache_put(DB *dbp, MEMPV_CACHE *cache, u_int8_t file_id[DB_FI
 typedef int (*recovery_func_t)(DB_ENV*, DBT*, DB_LSN*, db_recops, PAGE *);
 
 static long long unsigned int gbl_caller_id = 0;
+int gbl_mempv_ovfl_copy_sleep_ms = 0;
 pthread_mutex_t caller_id_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*
@@ -216,6 +218,8 @@ int __mempv_fget(mpf, dbp, pgno, target_lsn, highest_checkpoint_lsn, ret_page, f
 	}
 
 	const DB_LSN initial_lsn = LSN(page);
+	if (gbl_mempv_ovfl_copy_sleep_ms > 0 && TYPE(page) == P_OVERFLOW)
+		poll(NULL, 0, gbl_mempv_ovfl_copy_sleep_ms);
 	if (mempv_debug) {
 		__mempv_logmsg(LOGMSG_USER, caller_id,
 		"Page #%"PRIu32": initial LSN {%"PRIu32":%"PRIu32"} target LSN {%"PRIu32":%"PRIu32"} checkpoint LSN {%"PRIu32":%"PRIu32"}\n",

@@ -49,5 +49,47 @@ if ! diff <(head -n $nrows rows.out) <(tail -n $nrows rows.out) > /dev/null; the
     exit 1
 fi
 
+# Overflow pages are protected only by the lock on the leaf page that
+# currently references them.  A snapshot reader locks the current leaf, but
+# follows the chains referenced by the rolled-back leaf.  Collapse the blob
+# btree so that the reader's leaf no longer holds the row, then rewrite the
+# row's blob between the reader reading the overflow page's LSN and copying
+# the page.
+nrows=400
+$sql "create table t2(id int primary key, b blob)" || exit 1
+for i in $(seq 1 $nrows); do
+    echo "insert into t2 values($i, randomblob(2000))"
+done | $sql - > /dev/null || exit 1
+expected=$($sql "select hex(b) from t2 where id = 1")
 
+$sql - > snap2.out 2>&1 <<SQL &
+set transaction snapshot isolation
+begin
+select count(*) from t2
+select sleep(5)
+select hex(b) from t2 where id = 1
+commit
+SQL
+pid=$!
+
+sleep 2
+# Empty every leaf but the first: the blob btree collapses into its root
+$sql "delete from t2 where id > 50" > /dev/null || exit 1
+$sql "put tunable mempv_ovfl_copy_sleep_ms 10000" > /dev/null || exit 1
+sleep 5
+# The reader has read the overflow page's LSN; free the page and reuse it
+$sql "update t2 set b = randomblob(2000) where id = 1" > /dev/null || exit 1
+for i in $(seq 1001 1020); do
+    echo "insert into t2 values($i, randomblob(2000))"
+done | $sql - > /dev/null || exit 1
+wait $pid || { echo "FAIL: snapshot session failed"; cat snap2.out; exit 1; }
+$sql "put tunable mempv_ovfl_copy_sleep_ms 0" > /dev/null
+
+got=$(grep -P '^[0-9A-F]{100}' snap2.out)
+if [[ "$got" != "$expected" ]]; then
+    echo "FAIL: snapshot read of overflow page raced with a writer"
+    echo "expected ${expected:0:40}"
+    echo "got      ${got:0:40}"
+    exit 1
+fi
 echo "Success"
