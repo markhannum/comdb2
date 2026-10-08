@@ -152,10 +152,10 @@ sched_if_t *cron_impl(cron_sched_t *sched);
 void cron_signal_all(void);
 
 /**
- * Clear all the queues events
+ * Clear the queues of all schedulers of a given type
  *
  */
-void cron_clear_queue_all(void);
+void cron_clear_queue_type(enum cron_type type);
 
 /**
  * Returns a scheduler with name "name", if any

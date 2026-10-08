@@ -332,6 +332,8 @@ int timepart_foreach_shard_lockless(timepart_view_t *view,
  */
 int views_cron_restart(timepart_views_t *views);
 
+/* clear all queued rollout events, time and logical */
+void views_cron_clear_queues(void);
 
 /**
  * Update the retention of the existing partition
