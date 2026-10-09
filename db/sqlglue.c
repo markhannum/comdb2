@@ -14372,14 +14372,14 @@ long long run_sql_return_ll(const char *sql, struct errstat *err)
     int rc;
 
     thd = start_sql_thread();
-    rc = run_sql_thd_return_ll(sql, thd, err);
+    rc = run_sql_thd_return_ll(sql, thd, NULL, err);
     done_sql_thread();
 
     return rc;
 }
 
-long long run_sql_thd_return_ll(const char *query, struct sql_thread *thd,
-                                struct errstat *err)
+/* if locktbl is set, read it under the schema lock with fresh rootpages */
+long long run_sql_thd_return_ll(const char *query, struct sql_thread *thd, const char *locktbl, struct errstat *err)
 {
     sqlite3 *sqldb;
     int rc;
@@ -14397,10 +14397,29 @@ long long run_sql_thd_return_ll(const char *query, struct sql_thread *thd,
     sql_get_query_id(thd);
     thd->clnt = &clnt;
 
+    /* try-lock like other sql: the deadlock detector can't see the schema lock */
+    for (int tries = 0; locktbl && tryrdlock_schema_lk() != 0; tries++) {
+        if (tries >= 100 || db_is_exiting()) {
+            errstat_set_rcstrf(err, -1, "%s: schema lock busy", __func__);
+            goto done;
+        }
+        poll(NULL, 0, 10);
+    }
+
     if ((rc = get_curtran(thedb->bdb_env, &clnt)) != 0) {
         errstat_set_rcstrf(err, -1, "%s: failed to open a new curtran, rc=%d",
                            __func__, rc);
-        goto done;
+        goto unlock;
+    }
+
+    if (locktbl) {
+        clnt.in_sqlite_init = 1;
+        rc = get_copy_rootpages_selectfire(thd, 1, &locktbl, NULL, NULL, 0);
+        clnt.in_sqlite_init = 0;
+        if (rc != 0) {
+            errstat_set_rcstrf(err, -1, "%s: failed to get rootpages rc %d", __func__, rc);
+            goto cleanup;
+        }
     }
 
     if ((rc = sqlite3_open_serial("db", &sqldb, NULL)) != 0) {
@@ -14422,6 +14441,9 @@ cleanup:
     crc = put_curtran(thedb->bdb_env, &clnt);
     if (crc && !rc)
         errstat_set_rcstrf(err, -1, "%s: failed to close curtran", __func__);
+unlock:
+    if (locktbl)
+        unlock_schema_lk();
 done:
     end_internal_sql_clnt(&clnt);
     thd->clnt = NULL;
