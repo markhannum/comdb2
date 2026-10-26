@@ -866,7 +866,7 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int
      * once it is done with it (thd_req()).
      * The waiter always waits for every node, so this only applies to plain
      * commits under REP_SYNC_FULL.  We fall back to the inline wait for 2pc,
-     * durable-lsn mode, other sync modes, rowlocks and no blkseq (toblock
+     * other sync modes, rowlocks and no blkseq (toblock
      * replies with the ack wait's rc there), the empty 0:0 commit, and a
      * second commit in a request that already handed one off.  Also for any
      * request with DDL: its schema changes run on their own threads, which
@@ -880,9 +880,8 @@ static int trans_commit_int(struct ireq *iq, void *trans, char *source_host, int
      * Likewise the post-commit callbacks (analyze, genid48,
      * bpfunc success) run once the local commit is done, not after the acks. */
     if (nowait == 0 && gbl_async_dist_commit && !gbl_rowlocks && iq->have_blkseq && !iq->handoff && iq->sorese &&
-        !iq->sorese->is_participant && !iq->sorese->is_coordinator && !gbl_2pc && !gbl_replicant_retry_on_not_durable &&
-        thedb->rep_sync == REP_SYNC_FULL && !iq->sc_pending && !iq->tranddl &&
-        !bdb_attr_get(thedb->bdb_attr, BDB_ATTR_DURABLE_LSNS) && !(s->file == 0 && s->offset == 0)) {
+        !iq->sorese->is_participant && !iq->sorese->is_coordinator && !gbl_2pc && thedb->rep_sync == REP_SYNC_FULL &&
+        !iq->sc_pending && !iq->tranddl && !(s->file == 0 && s->offset == 0)) {
         iq->handoff = seqnum_wait_prepare(bdb_handle, &ss, iq);
         if (iq->handoff) {
             ATOMIC_ADD64(gbl_async_dist_commit_enqueued, 1);
