@@ -3580,8 +3580,8 @@ extern int gbl_max_sql_hint_cache;
 
 /* Remote cursor support */
 /* use portmux to open an COMDB2BUF to local db or proxied db */
-COMDB2BUF *connect_remote_db_flags(const char *protocol, const char *dbname, const char *service, char *host, int use_cache,
-                         int force_rte, int sbflags);
+COMDB2BUF *connect_remote_db_flags(const char *protocol, const char *dbname, const char *service, char *host,
+                                   int use_cache, int force_rte, int sbflags, int connect_timeout_ms);
 
 COMDB2BUF *connect_remote_db(const char *protocol, const char *dbname, const char *service, char *host, int use_cache,
                          int force_rte);

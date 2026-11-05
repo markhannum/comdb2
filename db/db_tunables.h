@@ -2176,6 +2176,9 @@ REGISTER_TUNABLE("revsql_host_refresh_freq_sec",
                  TUNABLE_INTEGER, &gbl_revsql_host_refresh_freq_sec, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("admin_revsql", "Run revsql sessions as admin.  (Default: Off)", TUNABLE_BOOLEAN, &gbl_admin_revsql, 0,
                  NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("revconn_connect_timeout_ms",
+                 "Timeout connecting to a revconn target, which clean exit waits out.  (Default: 5000)",
+                 TUNABLE_INTEGER, &gbl_revconn_connect_timeout_ms, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("revconn_rdtimeout", "Initial ms timeout for revconn connections.  (Default: 100)", TUNABLE_INTEGER,
                  &gbl_revconn_rdtimeout, 0, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("reverse_hosts_v2", "Use reverse_hosts_v2, which includes class and cluster.  (Default: Off)",

@@ -93,6 +93,7 @@ enum {
 
 int gbl_revsql_force_rte = 1;
 int gbl_revconn_rdtimeout = 100;
+int gbl_revconn_connect_timeout_ms = 5000;
 
 /* Returns 1 if 'host' is up per rtcpu, 0 if it is rtcpu'd-down or
  * unknown/decommissioned. Used to gate whether *this* node should source reverse
@@ -112,7 +113,8 @@ int send_reversesql_request(const char *dbname, const char *host, const char *co
         revconn_logmsg(LOGMSG_USER, "%s:%d Sending reversesql request to %s@%s\n", __func__, __LINE__, dbname, host);
     }
 
-    COMDB2BUF *sb = connect_remote_db_flags(NULL, dbname, NULL, (char *)host, 0, gbl_revsql_force_rte, CDB2BUF_NO_SSL_CLOSE|CDB2BUF_NO_CLOSE_FD);
+    COMDB2BUF *sb = connect_remote_db_flags(NULL, dbname, NULL, (char *)host, 0, gbl_revsql_force_rte,
+                                            CDB2BUF_NO_SSL_CLOSE | CDB2BUF_NO_CLOSE_FD, gbl_revconn_connect_timeout_ms);
     if (!sb) {
         revconn_logmsg(LOGMSG_ERROR, "%s:%d Failed to connect to %s:%s\n", __func__, __LINE__, dbname, host);
         return 1;
@@ -185,6 +187,8 @@ int replace_tier_by_hostname(reverse_conn_host_list_tp *new_reverse_conn_hosts) 
 static void *reverse_connection_worker(void *args) {
     reverse_conn_host_tp *host = args;
     time_t last_conn_attempt = 0;
+    /* Clean exit waits for generic threads, so thedb outlives this one */
+    thrman_register(THRTYPE_GENERIC);
     backend_thread_event(thedb, COMDB2_THR_EVENT_START);
 
     if (gbl_revsql_debug == 1) {
@@ -251,6 +255,7 @@ static void *reverse_connection_worker(void *args) {
         sleep(1);
     }
     backend_thread_event(thedb, COMDB2_THR_EVENT_DONE);
+    thrman_unregister();
     return 0;
 }
 

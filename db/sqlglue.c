@@ -12406,8 +12406,8 @@ int gbl_fdb_socket_timeout_ms;
 
 int gbl_debug_fake_rte_failure = 0;
 
-COMDB2BUF *connect_remote_db_flags(const char *protocol, const char *dbname, const char *service, char *host, int use_cache,
-                         int force_rte, int sbflags)
+COMDB2BUF *connect_remote_db_flags(const char *protocol, const char *dbname, const char *service, char *host,
+                                   int use_cache, int force_rte, int sbflags, int connect_timeout_ms)
 {
     COMDB2BUF *sb;
     int port;
@@ -12434,9 +12434,9 @@ COMDB2BUF *connect_remote_db_flags(const char *protocol, const char *dbname, con
 retry:
 
     if (use_rte) {
-        sockfd = tcpconnecth_to(host, get_portmux_port(), 0, 0);
-        if (sockfd == -1) {
-            if (retry++ < 10) {
+        sockfd = tcpconnecth_to(host, get_portmux_port(), 0, connect_timeout_ms);
+        if (sockfd < 0) {
+            if (retry++ < 10 && !db_is_exiting()) {
                 goto retry;
             }
             logmsg(LOGMSG_ERROR, "%s: cannot connect to pmux on machine %s port 5105\n", __func__, host);
@@ -12446,15 +12446,15 @@ retry:
         /* this could fail due to load */
         port = portmux_get(host, "comdb2", "replication", dbname);
         if (port == -1) {
-            if (retry++ < 10) {
+            if (retry++ < 10 && !db_is_exiting()) {
                 goto retry;
             }
 
             logmsg(LOGMSG_ERROR, "%s: cannot get port number from portmux on node %s\n", __func__, host);
             return NULL;
         }
-        sockfd = tcpconnecth_to(host, port, 0, 0);
-        if (sockfd == -1) {
+        sockfd = tcpconnecth_to(host, port, 0, connect_timeout_ms);
+        if (sockfd < 0) {
             logmsg(LOGMSG_ERROR, "%s: cannot connect to %s on machine %s port %d\n", __func__, dbname, host, port);
             return NULL;
         }
@@ -12502,7 +12502,7 @@ sbuf:
 COMDB2BUF *connect_remote_db(const char *protocol, const char *dbname, const char *service, char *host, int use_cache,
                          int force_rte)
 {
-    return connect_remote_db_flags(protocol, dbname, service, host, use_cache, force_rte, 0);
+    return connect_remote_db_flags(protocol, dbname, service, host, use_cache, force_rte, 0, 0);
 }
 
 
