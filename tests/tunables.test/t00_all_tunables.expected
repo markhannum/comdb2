@@ -917,6 +917,7 @@
 (name='retrieve_gen_from_ckp', description='Retrieve generation from ckp records.  (Default: on)', type='BOOLEAN', value='ON', read_only='N')
 (name='retry', description='', type='INTEGER', value='10', read_only='Y')
 (name='return_long_column_names', description='Enables returning of long column names. (Default: ON)', type='BOOLEAN', value='ON', read_only='N')
+(name='revconn_connect_timeout_ms', description='Timeout connecting to a revconn target, which clean exit waits out.  (Default: 5000)', type='INTEGER', value='5000', read_only='N')
 (name='revconn_rdtimeout', description='Initial ms timeout for revconn connections.  (Default: 100)', type='INTEGER', value='100', read_only='N')
 (name='revsql_force_rte', description='Force reverse sql connections to use rte. (Default: on)', type='BOOLEAN', value='ON', read_only='N')
 (name='rl_retry_on_deadlock', description='retry micro commit on deadlock', type='BOOLEAN', value='ON', read_only='N')

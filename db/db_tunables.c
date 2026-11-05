@@ -631,6 +631,7 @@ extern int gbl_connect_remote_rte;
 extern int gbl_reverse_hosts_v2;
 extern int gbl_admin_revsql;
 extern int gbl_revconn_rdtimeout;
+extern int gbl_revconn_connect_timeout_ms;
 
 int gbl_debug_tmptbl_corrupt_mem;
 int gbl_group_concat_mem_limit; /* 0 implies allow upto SQLITE_MAX_LENGTH,
