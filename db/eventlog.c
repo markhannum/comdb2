@@ -120,7 +120,7 @@ static void eventlog_roll_cleanup()
     }
 
     while (bb_readdir(d, buf, &de) == 0 && de) {
-        if (strstr(de->d_name, eventflstok) == NULL) {
+        if (strncmp(de->d_name, eventflstok, ret) != 0) {
             continue;
         }
 
