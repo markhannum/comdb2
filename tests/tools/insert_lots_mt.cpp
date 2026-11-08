@@ -116,8 +116,11 @@ void *thr(void *arg)
     ss << "insert into " << table << "(i, j) values (@i, @j)" ;
     std::string s = ss.str();
 
-    if (gbl_transize > 1)
-        runsql(db, begin);
+    // Inserts must not autocommit if begin failed
+    if (gbl_transize > 1 && runsql(db, begin)) {
+        cdb2_close(db);
+        return NULL;
+    }
 
     // insert records with bind params
     int count = 0;
@@ -140,7 +143,8 @@ void *thr(void *arg)
             switch (atcommit) {
             case G_COMMIT: runsql(db, commit); break;
             case G_ROLLBACK: runsql(db, rollback); break;
-            case G_DISCONNECT: 
+            case G_DISCONNECT:
+                cdb2_close(db);
                 return NULL;
             case G_CLOSEOPEN: 
                 cdb2_close(db);
@@ -155,7 +159,10 @@ void *thr(void *arg)
             default: abort();
             }
 
-            runsql(db, begin);
+            if (runsql(db, begin)) {
+                cdb2_close(db);
+                return NULL;
+            }
         }
     }
     if (gbl_transize > 1)
