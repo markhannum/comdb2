@@ -15,8 +15,14 @@ sleep 5
 # Turn on partial SSL write mid-query to simulate network failure:
 # blocking IO would hang;
 # non-blocking IO will fail.
+stall_start=$(date +%s)
 SSL_MODE=ALLOW cdb2sql ${CDB2_OPTIONS} $dbnm --host $host "EXEC PROCEDURE sys.cmd.send('stall_ssl_write 1')"
 
 wait
 
 diff expected actual
+rc=$?
+
+# The server stalls the write for 60s; let it finish so the db can exit cleanly
+while (( $(date +%s) - stall_start < 65 )); do sleep 1; done
+exit $rc
