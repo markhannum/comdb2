@@ -8,6 +8,9 @@ if [[ -n "$CLUSTER" ]]; then
     node=$(echo "$CLUSTER" | awk '{print $1}')
     cfg=${DBDIR}/local_pooled.cfg
     scp -o StrictHostKeyChecking=no ${CDB2_CONFIG} $node:$cfg || failexit "Couldn't copy config to $node"
+    ssh -o StrictHostKeyChecking=no $node "mkdir -p ${TESTSBUILDDIR}"
+    scp -o StrictHostKeyChecking=no ${TESTSBUILDDIR}/cdb2api_local_pooled $node:${TESTSBUILDDIR}/ ||
+        failexit "Couldn't copy cdb2api_local_pooled to $node"
     ssh -o StrictHostKeyChecking=no $node "${TESTSBUILDDIR}/cdb2api_local_pooled ${DBNAME} $cfg" ||
         failexit "cdb2api_local_pooled failed on $node"
 else
