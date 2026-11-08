@@ -164,6 +164,10 @@ mv $TESTDIR/logs/${DBNAME}.db $TESTDIR/logs/${DBNAME}.db.2
 NKEEP=5
 IFS=$SAVIFS
 
+# Another db's event file whose name ends in this db's name must be left alone
+decoy=$TESTDIR/var/log/cdb2/x${DBNAME}.events.9999999999999999
+touch $decoy
+
 echo "start db again, make sure that we keep only $NKEEP event log files of size 1 MB"
 $DEBUGGER ${COMDB2_EXE} $DBNAME --no-global-lrl --lrl $DBDIR/${DBNAME}.lrl --pidfile ${TMPDIR}/${DBNAME}.pid &> $TESTDIR/logs/${DBNAME}.db &
 
@@ -203,6 +207,8 @@ logflcnt=$(wc -l logfls.txt | cut -f1 -d' ')
 
 echo make sure we have $NKEEP as per the lrl option
 assertres $logflcnt $NKEEP
+[[ -f $decoy ]] || failexit "roll cleanup deleted $decoy"
+rm -f $decoy
 
 echo "make sure string 'insert into t1 values(10001, 'abc')' is in the last 2 eventlog files:"
 res=$(for f in $(ls -1t $TESTDIR/var/log/cdb2/$DBNAME.events.* | head -2); do
