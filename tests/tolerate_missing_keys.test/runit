@@ -94,4 +94,7 @@ if ! grep -qi "key not found on index" del_strict2.out ; then
     failexit "strict behaviour did not return, see ${PWD}/del_strict2.out"
 fi
 
+# Drop the table with the missing keys so the final verify passes
+cdb2sql ${CDB2_OPTIONS} $dbnm default "drop table t1"
+
 echo "Success"
