@@ -240,11 +240,12 @@ static struct timeval reconnect_time(int retry)
 {
     time_t sec;
     suseconds_t usec = (random() % 900000) + 100000;
+    /* Retry every 1-2s for about 90s, so a short partition heals promptly */
     if (retry <= 8) {
         sec = 0;
-    } else if (retry <= 16) {
+    } else if (retry <= 64) {
         sec = 1;
-    } else if (retry <= 32) {
+    } else if (retry <= 80) {
         sec = 10 + (usec % 51); /* (10, 60) */
     } else {
         sec = 60 + (usec % 241); /* (60, 300) */
