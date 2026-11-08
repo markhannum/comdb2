@@ -7,6 +7,8 @@ CDB2_HOST_NAME=localhost
 
 if [[ -n "$CLUSTER" ]]; then
     node=$(echo "$CLUSTER" | awk '{print $1}')
+    ssh -o StrictHostKeyChecking=no $node "mkdir -p ${TESTSBUILDDIR}"
+    scp -o StrictHostKeyChecking=no ${TESTSBUILDDIR}/cdb2api_admin $node:${TESTSBUILDDIR}/
     ssh -o StrictHostKeyChecking=no $node "${TESTSBUILDDIR}/cdb2api_admin ${db} ${CDB2_HOST_NAME} ${tier}"
     [[ $? -ne 0 ]] && echo "admin connection to local host test failed" &&  echo "cdb2api_admin - fail" && exit 1
 else
