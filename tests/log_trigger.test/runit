@@ -100,10 +100,7 @@ function makebl
 {
     typeset sz=$1
     typeset val=$2
-    for i in $(seq 1 $sz); do
-        echo -n $(echo "obase=16; $(($val % 16))" | bc);
-    done
-    echo
+    printf "%${sz}s\n" "" | tr ' ' "$(printf %X $(($val % 16)))"
     return 0
 }
 
