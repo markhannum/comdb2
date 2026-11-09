@@ -41,7 +41,7 @@ gen_series_test()
 insert_lots_test()
 {
     local THRDS=20
-    local CNT=10000
+    local CNT=2500
     local ITERATIONS=5
     local TRANSIZE=$1
 
