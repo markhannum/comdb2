@@ -1398,6 +1398,14 @@ elect_again:
         /* We won on our own vote2, so no NEWMASTER reaches process_berkdb: upgrade here as it would */
         logmsg(LOGMSG_WARN, "elect_thread: won the election on our own vote, upgrading to gen %d\n", newgen);
         BDB_WRITELOCK_REP("upgrade");
+        uint32_t gen;
+        bdb_state->dbenv->get_rep_gen(bdb_state->dbenv, &gen);
+        if (gen > newgen) {
+            /* We accepted a newer master while waiting: upgrading would take the gen backwards */
+            logmsg(LOGMSG_WARN, "elect_thread: not upgrading to stale gen %d, current gen is %u\n", newgen, gen);
+            BDB_RELLOCK();
+            goto give_up;
+        }
         rc = bdb_upgrade(bdb_state, newgen, &done);
         BDB_RELLOCK();
         if (rc != 0) {
