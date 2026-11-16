@@ -3143,9 +3143,9 @@ again:
         return lock_desired ? WAIT_SEQNUM_LOCK_DESIRED : 1;
     }
 
+    /* A node on a later generation can't ack this commit: a newer master exists */
     uint32_t gen = h->seqnum.generation;
-    if (bdb_state->attr->enable_seqnum_generations &&
-        gen > seqnum->generation) {
+    if (gen > seqnum->generation) {
         static unsigned long long higher_generation_reject = 0;
         static time_t pr = 0;
         time_t now;
@@ -3178,7 +3178,8 @@ again:
     got_gen = gen;
     got_lsn = h->seqnum.lsn;
 
-    if (bdb_seqnum_compare(bdb_state, &h->seqnum, seqnum) >= 0) {
+    /* Only a seqnum from the commit's generation acks it, whatever its lsn */
+    if (gen == seqnum->generation && bdb_seqnum_compare(bdb_state, &h->seqnum, seqnum) >= 0) {
         /* Count each acked commit once, however many times it waited on this
          * node, and whether a udp ack covered it; one ack can cover several */
         if (gbl_udp) {
@@ -6188,7 +6189,7 @@ int bdb_wait_for_seqnum_from_n(bdb_state_type *bdb_state, seqnum_type *seqnum,
         Pthread_mutex_lock(&bdb_state->seqnum_info->lock);
         for (i = 0; i < numnodes; i++) {
             struct hostinfo *h = retrieve_hostinfo(connlist[i]);
-            if (bdb_seqnum_compare(bdb_state, &h->seqnum, seqnum) >= 0) {
+            if (h->seqnum.generation == seqnum->generation && bdb_seqnum_compare(bdb_state, &h->seqnum, seqnum) >= 0) {
                 num_acks++;
             }
         }
