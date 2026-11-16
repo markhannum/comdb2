@@ -1571,6 +1571,9 @@ restart:
 		 * with incoming votes.
 		 */
 		if (rep->winner == rep->eid) {
+			/* Our vote2 for ourselves is a promise too (see __rep_send_vote) */
+			if (egen > rep->vote2_egen)
+				rep->vote2_egen = egen;
 			(void)__rep_tally(dbenv, rep, rep->eid, &rep->votes,
 				egen, rep->v2tally_off, __func__, __LINE__);
 #ifdef DIAGNOSTIC

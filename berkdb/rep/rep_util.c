@@ -809,6 +809,13 @@ __rep_send_vote(dbenv, lsnp, nsites, pri, tiebreaker, egen, eid, vtype)
 
 	memset(&vi, 0, sizeof(vi));
 
+	/* Our vote2 promises this election: from now on, refuse masters elected in an older one */
+	if (vtype == REP_VOTE2 || vtype == REP_GEN_VOTE2) {
+		REP *rep = ((DB_REP *)dbenv->rep_handle)->region;
+		if (egen > rep->vote2_egen)
+			rep->vote2_egen = egen;
+	}
+
 	vi.egen = egen;
 	vi.priority = pri;
 	vi.nsites = nsites;
@@ -846,6 +853,13 @@ __rep_send_gen_vote(dbenv, lsnp, nsites, pri, tiebreaker, egen, committed_gen,
 	REP_GEN_VOTE_INFO vi;
 
 	memset(&vi, 0, sizeof(vi));
+
+	/* Our vote2 promises this election: from now on, refuse masters elected in an older one */
+	if (vtype == REP_VOTE2 || vtype == REP_GEN_VOTE2) {
+		REP *rep = ((DB_REP *)dbenv->rep_handle)->region;
+		if (egen > rep->vote2_egen)
+			rep->vote2_egen = egen;
+	}
 
 	vi.egen = egen;
 	vi.priority = pri;

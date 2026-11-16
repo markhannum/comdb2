@@ -1346,6 +1346,24 @@ __rep_process_message(dbenv, control, rec, eidp, ret_lsnp, commit_gen, newgen, n
 		goto errlock;
 	}
 
+	/* A master elected before an election we've since cast a vote2 in may be superseded by
+	 * that election's winner, which won't have its commits: don't follow or ack it */
+	if (!gbl_is_physical_replicant && rp->gen < rep->vote2_egen &&
+		rp->rectype != REP_VOTE1 && rp->rectype != REP_VOTE2 &&
+		rp->rectype != REP_GEN_VOTE1 && rp->rectype != REP_GEN_VOTE2 &&
+		rp->rectype != REP_ALIVE_REQ && rp->rectype != REP_NEWCLIENT &&
+		rp->rectype != REP_MASTER_REQ) {
+		static u_int32_t lastpr_v2 = 0;
+		u_int32_t now = time(NULL);
+		if (now - lastpr_v2) {
+			logmsg(LOGMSG_USER, "Ignoring rp->gen %u from %s: older than our vote2 egen %u, "
+				"rectype=%u\n", rp->gen, *eidp, rep->vote2_egen, rp->rectype);
+			lastpr_v2 = now;
+		}
+		fromline = __LINE__;
+		goto errlock;
+	}
+
 	if (rp->gen > gen) {
 		/*
 		 * If I am a master and am out of date with a lower generation
