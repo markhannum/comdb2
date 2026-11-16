@@ -460,6 +460,13 @@ int srs_tran_replay(struct sqlclntstate *clnt)
         return 0;
     }
 
+    /* After a master swing this node may still roll back what the replay would read */
+    if (!bdb_am_i_coherent(thedb->bdb_env)) {
+        logmsg(LOGMSG_ERROR, "%s: not replaying a verify-failed txn on an incoherent node\n", __func__);
+        srs_tran_replay_end(clnt, -1, 0);
+        return -1;
+    }
+
     // replay all the stmts
     rc = srs_tran_replay_once(clnt, run_sql_query);
 
