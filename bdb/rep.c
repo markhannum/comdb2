@@ -2804,8 +2804,12 @@ static int bdb_wait_for_seqnum_from_node_nowait_int(bdb_state_type *bdb_state,
     Pthread_mutex_lock(&(bdb_state->seqnum_info->lock));
     host_seqnum = &h->seqnum;
 
+    /* A node on an older generation may still hold a stale master's commits */
+    uint32_t mygen;
+    bdb_state->dbenv->get_rep_gen(bdb_state->dbenv, &mygen);
+
     /*fprintf(stderr, "calling bdb_seqnum_compare\n");*/
-    if (bdb_seqnum_compare(bdb_state, host_seqnum, master_seqnum) >= 0) {
+    if (host_seqnum->generation == mygen && bdb_seqnum_compare(bdb_state, host_seqnum, master_seqnum) >= 0) {
         /*fprintf(stderr, "compared >=, returning\n");*/
         if (gbl_set_coherent_state_trace) {
             logmsg(LOGMSG_USER,
