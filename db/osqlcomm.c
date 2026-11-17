@@ -7945,14 +7945,22 @@ int osql_set_usedb(struct ireq *iq, const char *tablename, int tableversion, int
         iq->usedb = get_dbtable_by_name(tablename);
     }
 
+    int forbidden = 0;
     if (iq->sorese && (iq->sorese->is_coordinator || iq->sorese->is_participant) &&
         !strcmp(tablename, DISTRIBUTED_TRANSACTIONS_TABLE)) {
         logmsg(LOGMSG_INFO, "%s: forbiding access to %s in distributed transaction\n", __func__, tablename);
         iq->usedb = NULL;
+        forbidden = 1;
     }
 
     if (iq->usedb == NULL) {
         iq->usedb = iq->origdb;
+        /* The sql node resolved this table before we dropped it (e.g. a timepart rollout): retry there */
+        if (iq->sorese && !forbidden) {
+            logmsg(LOGMSG_INFO, "%s: table %s is gone, returning verify error\n", __func__, tablename);
+            err->errcode = OP_FAILED_VERIFY;
+            return ERR_VERIFY;
+        }
         logmsg(LOGMSG_INFO, "%s: unable to get usedb for table %.*s\n",
                __func__, (int)strlen(tablename) + 1, tablename);
         return conv_rc_sql2blkop(iq, step, -1, ERR_NO_SUCH_TABLE, err,
