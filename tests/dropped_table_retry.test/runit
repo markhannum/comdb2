@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+bash -n "$0" || exit 1
+set -x
+
+# A replicant's insert resolves t2, then the master drops t2 before the insert commits (a time
+# partition rollout drops shards the same way). The master must make the replicant retry rather
+# than fail the write with its own "no such table": on retry the replicant sees t2 is gone.
+
+dbnm=$1
+. ${TESTSROOTDIR}/tools/runit_common.sh
+. ${TESTSROOTDIR}/tools/cluster_utils.sh
+
+sql() { cdb2sql ${CDB2_OPTIONS} --tabs $dbnm --host $1 "$2"; }
+
+[[ -z "$CLUSTER" ]] && { echo "needs a cluster"; exit 0; }
+master=$(get_master)
+replicant=$(for n in $CLUSTER; do [[ $n != $master ]] && echo $n && break; done)
+
+for round in 1 2 3; do
+    sql $master "create table t2 (a int)" || failexit "create t2"
+    cdb2sql ${CDB2_OPTIONS} $dbnm --host $replicant "insert into t2 select 1 from (select sleep(5))" > ins.out 2>&1 &
+    pid=$!
+    sleep 1
+    # The replicant can't apply the drop while the insert runs, so the drop waits for it: background.
+    sql $master "drop table t2" &
+    dpid=$!
+    for i in $(seq 1 16); do
+        [[ "$(sql $master "select count(*) from comdb2_tables where tablename='t2'")" == "0" ]] && break
+        sleep 0.25
+    done
+    kill -0 $pid 2>/dev/null || failexit "insert finished before the drop"
+    wait $pid && failexit "insert into a dropped table succeeded"
+    wait $dpid || failexit "drop t2"
+    cat ins.out
+    grep -q 'rc 304 no such table' ins.out && failexit "master failed the write instead of retrying"
+    grep -q 'no such table' ins.out || failexit "unexpected error"
+done
+echo "Success"

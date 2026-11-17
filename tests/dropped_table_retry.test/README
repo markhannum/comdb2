@@ -1,0 +1,3 @@
+A replicant's insert resolves a table, then the master drops it before the insert commits, as a
+time partition rollout does with its oldest shard. The master must return a verify error so the
+replicant retries against its current schema, instead of failing the write with "no such table".
