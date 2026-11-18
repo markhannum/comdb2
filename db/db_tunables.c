@@ -555,6 +555,7 @@ extern int gbl_debug_sleep_in_summarize;
 extern int gbl_debug_sleep_in_trigger_info;
 extern int gbl_replicant_retry_on_not_durable;
 extern int gbl_debug_force_non_durable;
+extern int gbl_debug_commit_wait_lock_desired;
 extern int gbl_debug_fail_commit_restart;
 extern int gbl_ignore_final_non_durable_retry;
 extern int gbl_enable_internal_sql_stmt_caching;
