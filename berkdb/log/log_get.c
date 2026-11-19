@@ -27,6 +27,10 @@ static const char revid[] = "$Id: log_get.c,v 11.98 2003/09/13 19:20:38 bostic E
 #include <epochlib.h>
 #include <sys_wrap.h>
 
+void comdb2_cheapstack_sym(FILE *f, char *fmt, ...);
+/* Abort (keeping a core) instead of panicking on a bad log record */
+int gbl_abort_on_log_checksum_panic = 0;
+
 typedef enum { L_ALREADY, L_ACQUIRED, L_NONE } RLOCK;
 
 /* Need to acquire this for log_get. */
@@ -763,6 +767,11 @@ cksum:	/*
 			if (!F_ISSET(logc, DB_LOG_NO_PANIC)) {
 				__db_err(dbenv,
 		    "DB_LOGC->get: catastrophic recovery may be required");
+				/* Name the reader that hit a bad record before we panic */
+				comdb2_cheapstack_sym(stderr, "%s: checksum mismatch reading %u:%u",
+					__func__, nlsn.file, nlsn.offset);
+				if (gbl_abort_on_log_checksum_panic)
+					abort();
 				ret = __db_panic(dbenv, DB_RUNRECOVERY);
 			} else
 				ret = DB_NOTFOUND;

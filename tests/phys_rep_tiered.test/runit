@@ -22,6 +22,8 @@ do_gcore=0
 NRUNS=100
 #SLEEPAMOUNT=300
 SLEEPAMOUNT=3000
+# How long wait_for_catchup tolerates a replica that doesn't answer at all
+UNREACHABLE_SECS=120
 KILL_WAIT_TIME=10
 SLEEP_BETWEEN_CHECKS=.5
 PIDs=""
@@ -83,6 +85,7 @@ function wait_for_catchup()
     local mnode=""
     local c_lsn=""
     local r_lsn=""
+    local down_since=""
 
     echo "== Comparing source against $_repl_dbname@$_repl_host"
 
@@ -99,6 +102,13 @@ function wait_for_catchup()
         fi
         c_lsn=`$CDB2SQL_EXE -admin --tabs $CDB2_OPTIONS $DBNAME --host $mnode 'select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1' | tr -d {}`
         r_lsn=`$CDB2SQL_EXE -admin --tabs $CDB2_OPTIONS ${_repl_dbname} --host ${_repl_host} 'select lsn from comdb2_transaction_logs(NULL, NULL, 4) limit 1' | tr -d {}`
+        # A replica that stops answering won't catch up: fail now rather than at the test timeout
+        if [[ -z "$r_lsn" ]]; then
+            [[ -z "$down_since" ]] && down_since=$SECONDS
+            (( SECONDS - down_since > UNREACHABLE_SECS )) && cleanFailExit "physrep ${_repl_dbname} on ${_repl_host} not answering for ${UNREACHABLE_SECS}s"
+        else
+            down_since=""
+        fi
     done
 
     if [[ "$c_lsn" != "$r_lsn" ]] ; then
@@ -673,6 +683,7 @@ ctrace_dbdir 1
 allow_lua_print 1
 physrep_update_registry_interval 1
 physrep_keepalive_v2 1
+abort_on_log_checksum_panic 1
 make_slow_replicants_incoherent off
 END
 
@@ -720,6 +731,7 @@ ctrace_dbdir 1
 allow_lua_print 1
 physrep_update_registry_interval 1
 physrep_keepalive_v2 1
+abort_on_log_checksum_panic 1
 make_slow_replicants_incoherent off
 END
                 scp ${tmpdir}/${_dbname}.lrl ${node}:${_dbdir}/${_dbname}.lrl
@@ -1111,6 +1123,7 @@ function verify_blkseq_dbname_node()
     local _repl_host=$2
 
     x=$($CDB2SQL_EXE --tabs ${CDB2_OPTIONS} $_repl_dbname --host $_repl_host  "select * from comdb2_blkseq")
+    [[ $? -eq 0 ]] || cleanFailExit "can't query physrep $_repl_dbname on $_repl_host"
     if [[ -n "$x" ]]; then
         echo "physrep $_repl_dbname node $_repl_host had blkseqs"
         echo "$x"

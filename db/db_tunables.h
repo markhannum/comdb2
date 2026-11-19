@@ -1009,6 +1009,9 @@ REGISTER_TUNABLE("osql_verify_ext_chk",
                  "errors, check if transaction is non-commitable (see default "
                  "isolation level). (Default: on)",
                  TUNABLE_INTEGER, &gbl_osql_verify_ext_chk, READONLY, NULL, NULL, NULL, NULL);
+REGISTER_TUNABLE("abort_on_log_checksum_panic",
+                 "Abort, keeping a core, instead of panicking when a log record fails its checksum.  (Default: off)",
+                 TUNABLE_BOOLEAN, &gbl_abort_on_log_checksum_panic, EXPERIMENTAL | INTERNAL, NULL, NULL, NULL, NULL);
 REGISTER_TUNABLE("osql_verify_retry_max",
                  "Retry a transaction on a verify error this many times (see "
                  "optimistic concurrency control). (Default: 499)",

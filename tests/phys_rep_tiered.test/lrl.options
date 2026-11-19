@@ -30,3 +30,6 @@ foreign_db_resolve_local 1
 
 # alt-metadb physrep connects intermittently: don't roll logs past it during write bursts
 min_keep_logs 50
+
+# Keep a core (and the reader's stack) if a log record fails its checksum
+abort_on_log_checksum_panic 1
